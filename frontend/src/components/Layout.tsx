@@ -1,24 +1,28 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Users, CalendarDays, LogOut, Mail,
+  LayoutDashboard, Users, CalendarDays, LogOut, Mail, Send,
   ChevronLeft, ChevronRight, Plane,
 } from 'lucide-react'
 import { clearSession, getUserInfo } from '../api/client'
 
 const adminNav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/bookings', label: 'Bookings', icon: CalendarDays },
   { to: '/leads', label: 'Leads', icon: Mail },
+  { to: '/send-email', label: 'Send Email', icon: Send },
   { to: '/organizers', label: 'Organizer Mgmt', icon: Users },
 ]
 
 const organizerNav = [
   { to: '/', label: 'My Bookings', icon: CalendarDays },
-  { to: '/leads', label: 'My Leads', icon: Mail },
+  { to: '/bookings', label: 'All Bookings', icon: LayoutDashboard },
+  { to: '/send-email', label: 'Send Email', icon: Send },
 ]
 
 const viewerNav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/bookings', label: 'Bookings', icon: CalendarDays },
 ]
 
 const roleLabel: Record<string, string> = {

@@ -317,7 +317,10 @@ async def list_bookings(
 ) -> list[Booking]:
     q = (
         select(Booking)
-        .options(selectinload(Booking.lead), selectinload(Booking.organizer))
+        .options(
+            selectinload(Booking.lead),
+            selectinload(Booking.organizer).selectinload(Organizer.user),
+        )
         .order_by(Booking.created_at.desc())
         .offset(skip)
         .limit(limit)

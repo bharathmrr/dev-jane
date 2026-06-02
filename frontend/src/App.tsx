@@ -3,6 +3,8 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Leads from './pages/Leads'
+import Bookings from './pages/Bookings'
+import CreateLead from './pages/CreateLead'
 import OrganizerManagement from './pages/OrganizerManagement'
 import { getUserInfo } from './api/client'
 
@@ -42,6 +44,12 @@ export default function App() {
           }
         >
           <Route index element={<Dashboard />} />
+
+          {/* All authenticated users */}
+          <Route path="bookings" element={<PrivateRoute><Bookings /></PrivateRoute>} />
+
+          {/* Admin + Organizer only (agents blocked) */}
+          <Route path="send-email" element={<ViewerBlock><CreateLead /></ViewerBlock>} />
 
           {/* Admin only */}
           <Route path="leads" element={<AdminRoute><Leads /></AdminRoute>} />

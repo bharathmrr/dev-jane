@@ -25,11 +25,13 @@ export default function Dashboard() {
     queryKey: ['analytics'],
     queryFn: () => getAnalytics().then((r) => r.data),
     enabled: isAdmin,
+    refetchInterval: 30_000,
   })
 
   const { data: bookings, isLoading: loadingBookings } = useQuery<BookingListItem[]>({
     queryKey: ['bookings', 0, 100],
     queryFn: () => listBookings(0, 100).then((r) => r.data),
+    refetchInterval: 30_000,
   })
 
   if (isAdmin) {
