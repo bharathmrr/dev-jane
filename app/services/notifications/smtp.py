@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import smtplib
 import ssl
-import uuid
 from email.message import EmailMessage
 from email.utils import format_datetime, make_msgid
 from datetime import datetime, timezone
@@ -20,8 +19,10 @@ log = get_logger(__name__)
 
 
 def reply_to_address(reply_token: str) -> str:
-    """e.g. reply+<token>@reply.example.com"""
-    return f"reply+{reply_token}@{settings.INBOUND_DOMAIN}"
+    """Gmail plus-addressing: bharathreddyget+<token>@gmail.com
+    Replies land in the real inbox; IMAP poller extracts the token from the To: header."""
+    local = settings.SMTP_FROM_EMAIL.split("@")[0]
+    return f"{local}+{reply_token}@{settings.INBOUND_DOMAIN}"
 
 
 def send_email(

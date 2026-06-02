@@ -1,59 +1,50 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import {
+  LayoutDashboard, Users, CalendarDays, Mail, LogOut,
+  ChevronLeft, ChevronRight, Plane,
+} from 'lucide-react'
 import { clearSession, getUserInfo } from '../api/client'
 
-const DashboardIcon = (
-  <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path>
-  </svg>
-)
-
-const OrganizersIcon = (
-  <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
-  </svg>
-)
-
-const BookingsIcon = (
-  <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-  </svg>
-)
-
-const EmailIcon = (
-  <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-  </svg>
-)
-
 const adminNav = [
-  { to: '/', label: 'Dashboard', icon: DashboardIcon },
-  { to: '/organizers', label: 'Organizer Mgmt', icon: OrganizersIcon },
-  { to: '/bookings', label: 'All Bookings', icon: BookingsIcon },
-  { to: '/leads/new', label: 'Send Email', icon: EmailIcon },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/organizers', label: 'Organizer Mgmt', icon: Users },
+  { to: '/bookings', label: 'All Bookings', icon: CalendarDays },
+  { to: '/leads/new', label: 'Send Email', icon: Mail },
 ]
 
 const organizerNav = [
-  { to: '/', label: 'Dashboard', icon: DashboardIcon },
-  { to: '/bookings', label: 'My Bookings', icon: BookingsIcon },
-  { to: '/leads/new', label: 'Send Email', icon: EmailIcon },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/bookings', label: 'All Bookings', icon: CalendarDays },
+  { to: '/leads/new', label: 'Send Email', icon: Mail },
 ]
 
 const viewerNav = [
-  { to: '/', label: 'Dashboard', icon: DashboardIcon },
-  { to: '/bookings', label: 'My Bookings', icon: BookingsIcon },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/bookings', label: 'Bookings', icon: CalendarDays },
 ]
+
+const roleLabel: Record<string, string> = {
+  admin: 'Super Admin',
+  organizer: 'Organizer',
+  agent: 'Viewer',
+}
+
+const roleColor: Record<string, string> = {
+  admin: 'bg-violet-100 text-violet-700',
+  organizer: 'bg-blue-100 text-blue-700',
+  agent: 'bg-gray-100 text-gray-500',
+}
 
 export default function Layout() {
   const navigate = useNavigate()
   const user = getUserInfo()
   const role = user?.role ?? 'agent'
-
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === 'true')
 
   const nav = role === 'admin' ? adminNav : role === 'organizer' ? organizerNav : viewerNav
 
-  const toggleSidebar = () => {
+  function toggle() {
     setCollapsed(prev => {
       const next = !prev
       localStorage.setItem('sidebar_collapsed', String(next))
@@ -67,94 +58,79 @@ export default function Layout() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-slate-50">
       {/* Sidebar */}
-      <aside className={`bg-white border-r border-gray-200 flex flex-col transition-all duration-300 relative ${collapsed ? 'w-16' : 'w-56'}`}>
-        {/* Toggle Collapse Button */}
+      <aside className={`bg-white border-r border-gray-100 flex flex-col relative transition-all duration-200 ${collapsed ? 'w-14' : 'w-52'}`}>
+
+        {/* Collapse toggle */}
         <button
-          onClick={toggleSidebar}
-          className="absolute -right-3 top-6 bg-white border border-gray-200 text-gray-500 hover:text-gray-700 w-6 h-6 rounded-full flex items-center justify-center shadow-sm cursor-pointer z-10 hover:shadow transition-all"
+          onClick={toggle}
+          className="absolute -right-3 top-5 z-10 w-6 h-6 rounded-full bg-white border border-gray-200 shadow-sm flex items-center justify-center text-gray-400 hover:text-gray-700 transition-colors"
+          title={collapsed ? 'Expand' : 'Collapse'}
         >
-          {collapsed ? (
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"></path>
-            </svg>
-          ) : (
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7"></path>
-            </svg>
-          )}
+          {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
         </button>
 
-        {/* Header */}
-        <div className={`py-4 border-b border-gray-100 flex flex-col items-center justify-center ${collapsed ? 'px-2' : 'px-5'}`}>
-          {collapsed ? (
-            <div className="w-10 h-10 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-sm">
-              MS
-            </div>
-          ) : (
-            <div className="w-full">
-              <p className="text-sm font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">Meeting Scheduler</p>
-              <div className="flex items-center gap-1.5 mt-1">
-                <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded font-bold ${
-                  role === 'admin' ? 'bg-purple-50 text-purple-700 border border-purple-100' :
-                  role === 'organizer' ? 'bg-blue-50 text-blue-700 border border-blue-100' :
-                  'bg-gray-50 text-gray-500 border border-gray-100'
-                }`}>
-                  {role === 'admin' ? 'Admin' : role === 'organizer' ? 'Organizer' : 'Viewer'}
-                </span>
-              </div>
-              {user && (
-                <p className="text-xs text-gray-400 mt-1.5 truncate font-medium">{user.full_name}</p>
-              )}
+        {/* Brand */}
+        <div className={`flex items-center gap-2.5 border-b border-gray-100 ${collapsed ? 'justify-center px-0 py-3.5' : 'px-4 py-3.5'}`}>
+          <div className="w-7 h-7 rounded-md bg-blue-600 flex items-center justify-center shrink-0">
+            <Plane className="w-4 h-4 text-white" />
+          </div>
+          {!collapsed && (
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-gray-900 leading-tight truncate">Jane Aerospace</p>
+              <p className="text-[10px] text-gray-400 leading-tight">Meeting Scheduler</p>
             </div>
           )}
         </div>
 
-        {/* Nav Links */}
-        <nav className={`flex-1 py-4 space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
-          {nav.map(({ to, label, icon }) => (
+        {/* Nav */}
+        <nav className={`flex-1 py-2 space-y-0.5 ${collapsed ? 'px-1.5' : 'px-2'}`}>
+          {nav.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
               end={to === '/'}
+              title={collapsed ? label : undefined}
               className={({ isActive }) =>
-                `flex items-center ${collapsed ? 'justify-center py-2.5' : 'gap-3 px-3 py-2'} rounded-md text-sm font-medium transition-all ${
+                `flex items-center gap-2.5 rounded-md text-sm font-medium transition-colors ${collapsed ? 'justify-center px-0 py-2' : 'px-2.5 py-2'} ${
                   isActive
                     ? 'bg-blue-50 text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
                 }`
               }
-              title={collapsed ? label : undefined}
             >
-              <span className={`shrink-0 ${collapsed ? 'w-10 flex items-center justify-center' : ''}`}>
-                {icon}
-              </span>
+              <Icon className="w-4 h-4 shrink-0" />
               {!collapsed && <span className="truncate">{label}</span>}
             </NavLink>
           ))}
         </nav>
 
-        {/* Footer / Logout */}
-        <div className={`py-4 border-t border-gray-100 ${collapsed ? 'px-2' : 'px-3'}`}>
+        {/* User + Logout */}
+        <div className={`border-t border-gray-100 py-3 ${collapsed ? 'px-1.5' : 'px-2'}`}>
+          {!collapsed && user && (
+            <div className="px-2.5 pb-2.5">
+              <p className="text-xs font-semibold text-gray-800 truncate">{user.full_name}</p>
+              <p className="text-[10px] text-gray-400 truncate">{user.email}</p>
+              <span className={`inline-block mt-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${roleColor[role]}`}>
+                {roleLabel[role]}
+              </span>
+            </div>
+          )}
           <button
             onClick={logout}
-            className={`w-full flex items-center ${collapsed ? 'justify-center py-2.5' : 'gap-3 px-3 py-2'} rounded-md text-sm font-medium text-gray-600 hover:bg-red-50 hover:text-red-600 transition-colors`}
-            title={collapsed ? "Logout" : undefined}
+            title={collapsed ? 'Logout' : undefined}
+            className={`w-full flex items-center gap-2.5 rounded-md text-sm font-medium text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors ${collapsed ? 'justify-center px-0 py-2' : 'px-2.5 py-2'}`}
           >
-            <span className={`shrink-0 ${collapsed ? 'w-10 flex items-center justify-center' : ''}`}>
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
-              </svg>
-            </span>
-            {!collapsed && <span>Logout</span>}
+            <LogOut className="w-4 h-4 shrink-0" />
+            {!collapsed && <span>Sign out</span>}
           </button>
         </div>
       </aside>
 
-      {/* Main */}
+      {/* Main content */}
       <main className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-6 py-8">
+        <div className="max-w-5xl mx-auto px-8 py-6">
           <Outlet />
         </div>
       </main>

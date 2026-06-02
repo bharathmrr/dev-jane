@@ -21,7 +21,8 @@ from app.core.security import verify_thread_token
 
 log = get_logger(__name__)
 
-_TOKEN_RE = re.compile(r"reply\+([^@]+)@")
+# Matches Gmail plus-address: localpart+<uuid>.<sig>@domain
+_TOKEN_RE = re.compile(r"\+([0-9a-f\-]{36}\.[A-Za-z0-9_\-]+)@")
 # Common reply separators used to trim quoted history.
 _QUOTE_MARKERS = (
     re.compile(r"^On .+ wrote:$", re.MULTILINE),
