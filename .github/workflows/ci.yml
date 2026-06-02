@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: scheduler
+          POSTGRES_PASSWORD: scheduler
+          POSTGRES_DB: scheduler
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U scheduler"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      JWT_SECRET_KEY: testtesttesttesttesttesttesttest
+      EMAIL_HMAC_SECRET: testtesttesttest
+      DATABASE_URL: postgresql+asyncpg://scheduler:scheduler@localhost:5432/scheduler
+      REDIS_URL: redis://localhost:6379/0
+      LLM_PROVIDER: stub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt ruff mypy
+      - name: Lint
+        run: ruff check app tests
+      - name: Type check
+        run: mypy app || true   # advisory until fully annotated
+      - name: Migrate
+        run: alembic upgrade head
+      - name: Test
+        run: pytest -q
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t email-scheduler:ci .

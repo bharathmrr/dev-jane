@@ -1,0 +1,103 @@
+x-app-env: &app-env
+  ENV: ${ENV:-dev}
+  DATABASE_URL: postgresql+asyncpg://scheduler:scheduler@postgres:5432/scheduler
+  REDIS_URL: redis://redis:6379/0
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set in .env}
+  EMAIL_HMAC_SECRET: ${EMAIL_HMAC_SECRET:?set in .env}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+  SMTP_HOST: ${SMTP_HOST:-mailpit}
+  SMTP_PORT: ${SMTP_PORT:-1025}
+  SMTP_USE_TLS: ${SMTP_USE_TLS:-false}
+  IMAP_HOST: ${IMAP_HOST:-mailpit}
+  INBOUND_DOMAIN: ${INBOUND_DOMAIN:-reply.example.com}
+
+services:
+  api:
+    build: .
+    env_file: [.env]
+    environment: *app-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    expose: ["8000"]
+    command: >
+      sh -c "alembic upgrade head &&
+             gunicorn app.main:app -k uvicorn.workers.UvicornWorker
+             -w 4 -b 0.0.0.0:8000 --access-logfile - --error-logfile -"
+
+  worker:
+    build: .
+    env_file: [.env]
+    environment: *app-env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    command: celery -A app.workers.celery_app:celery_app worker
+             -Q email,reminders,maintenance --concurrency=4 -l info
+
+  beat:
+    build: .
+    env_file: [.env]
+    environment: *app-env
+    depends_on:
+      redis: {condition: service_healthy}
+    command: celery -A app.workers.celery_app:celery_app beat -l info
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: scheduler
+      POSTGRES_PASSWORD: scheduler
+      POSTGRES_DB: scheduler
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scheduler"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on: [api]
+    ports: ["80:80"]
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # Dev-only fake SMTP/IMAP server with a web UI at :8025
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["8025:8025", "1025:1025", "1143:1143"]
+    profiles: ["dev"]
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+    profiles: ["monitoring"]
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - ./monitoring/grafana:/etc/grafana/provisioning/datasources:ro
+      - grafanadata:/var/lib/grafana
+    ports: ["3000:3000"]
+    profiles: ["monitoring"]
+
+volumes:
+  pgdata:
+  redisdata:
+  grafanadata:

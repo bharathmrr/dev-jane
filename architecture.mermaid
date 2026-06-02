@@ -1,0 +1,52 @@
+%% System architecture — email-driven scheduling platform
+flowchart TB
+    subgraph Edge
+        NGINX[Nginx<br/>reverse proxy + rate limit]
+    end
+
+    subgraph API["FastAPI (gunicorn/uvicorn)"]
+        AUTH[Auth + RBAC]
+        LEADS[Leads / Bookings API]
+        WEBHOOK[Inbound email webhook]
+        HEALTH[Health + /metrics]
+    end
+
+    subgraph Workers["Celery workers"]
+        WEMAIL[email queue<br/>send_offer / process_inbound]
+        WREM[reminders queue]
+        WMAINT[maintenance queue<br/>imap poll / sweep holds]
+    end
+    BEAT[Celery Beat<br/>scheduler]
+
+    subgraph Services["Domain services (shared lib)"]
+        AVAIL[Availability + Slot Generator]
+        RES[Reservation Service<br/>Redis lock + DB hold]
+        CONF[Conflict Resolver]
+        INTENT[Email Intent / LLM]
+        SM[State Machine]
+    end
+
+    subgraph Data
+        PG[(PostgreSQL<br/>source of truth)]
+        REDIS[(Redis<br/>locks + holds + cache + broker)]
+    end
+
+    subgraph External
+        SMTP[[SMTP outbound]]
+        IMAP[[IMAP inbound]]
+        LLM[[LLM API]]
+    end
+
+    LEAD((Lead)) -->|email reply| IMAP
+    SMTP -->|offer / confirm / reminder| LEAD
+
+    NGINX --> API
+    API --> Services
+    Workers --> Services
+    BEAT --> Workers
+    Services --> PG
+    Services --> REDIS
+    WEMAIL --> SMTP
+    WMAINT --> IMAP
+    INTENT --> LLM
+    WEBHOOK -.alt to IMAP.-> WEMAIL

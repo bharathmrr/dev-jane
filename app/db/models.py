@@ -1,0 +1,292 @@
+"""SQLAlchemy 2.0 ORM models.
+
+Tables: users, organizers, availability_rules, holidays, meetings (templates),
+leads, bookings, reservations, email_threads, email_messages, reminders,
+audit_logs, system_settings.
+
+Concurrency-safety notes:
+  * `bookings` has a partial unique index ensuring at most one *active* booking
+    per (organizer, slot_start) — the database is the final arbiter against
+    double booking even if the Redis lock layer is bypassed.
+  * `reservations` carries an idempotency_key so retried email replies don't
+    create duplicate holds.
+"""
+from __future__ import annotations
+
+import uuid
+from datetime import date, datetime, time
+
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    Time,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import (
+    Base,
+    BookingState,
+    EmailDirection,
+    EmailIntent,
+    ReservationStatus,
+    TimestampMixin,
+    UserRole,
+    UUIDMixin,
+)
+
+_val = lambda x: [e.value for e in x]  # noqa: E731  store enum values not names
+
+
+class User(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "users"
+
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    full_name: Mapped[str] = mapped_column(String(255))
+    hashed_password: Mapped[str] = mapped_column(String(255))
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole, name="user_role", values_callable=_val), default=UserRole.AGENT
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    organizer: Mapped["Organizer | None"] = relationship(
+        back_populates="user", uselist=False
+    )
+
+
+class Organizer(UUIDMixin, TimestampMixin, Base):
+    """A person whose calendar gets booked (the sales rep / interviewer)."""
+
+    __tablename__ = "organizers"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True
+    )
+    display_name: Mapped[str] = mapped_column(String(255))
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+    default_meeting_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    buffer_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    # How many days ahead slots may be offered.
+    booking_horizon_days: Mapped[int] = mapped_column(Integer, default=14)
+    meeting_link: Mapped[str | None] = mapped_column(String(512))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    user: Mapped[User] = relationship(back_populates="organizer")
+    availability_rules: Mapped[list["AvailabilityRule"]] = relationship(
+        back_populates="organizer", cascade="all, delete-orphan"
+    )
+    holidays: Mapped[list["Holiday"]] = relationship(
+        back_populates="organizer", cascade="all, delete-orphan"
+    )
+    bookings: Mapped[list["Booking"]] = relationship(back_populates="organizer")
+
+
+class AvailabilityRule(UUIDMixin, TimestampMixin, Base):
+    """Recurring weekly working window for an organizer, stored in their tz."""
+
+    __tablename__ = "availability_rules"
+
+    organizer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizers.id", ondelete="CASCADE"), index=True
+    )
+    weekday: Mapped[int] = mapped_column(Integer)  # 0=Mon .. 6=Sun
+    start_time: Mapped[time] = mapped_column(Time)
+    end_time: Mapped[time] = mapped_column(Time)
+
+    organizer: Mapped[Organizer] = relationship(back_populates="availability_rules")
+
+    __table_args__ = (
+        Index("ix_avail_org_weekday", "organizer_id", "weekday"),
+    )
+
+
+class Holiday(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "holidays"
+
+    organizer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizers.id", ondelete="CASCADE"), index=True
+    )
+    day: Mapped[date] = mapped_column(Date)
+    label: Mapped[str | None] = mapped_column(String(255))
+
+    organizer: Mapped[Organizer] = relationship(back_populates="holidays")
+
+    __table_args__ = (
+        UniqueConstraint("organizer_id", "day", name="uq_holiday_org_day"),
+    )
+
+
+class Meeting(UUIDMixin, TimestampMixin, Base):
+    """A meeting *template / type* (e.g. '30-min discovery call')."""
+
+    __tablename__ = "meetings"
+
+    organizer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizers.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(255))
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    location: Mapped[str | None] = mapped_column(String(512))  # video link / address
+    description: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Lead(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "leads"
+
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    timezone: Mapped[str | None] = mapped_column(String(64))  # detected later
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+
+
+class Booking(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "bookings"
+
+    lead_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("leads.id", ondelete="CASCADE"), index=True
+    )
+    organizer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizers.id", ondelete="CASCADE"), index=True
+    )
+    meeting_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("meetings.id", ondelete="SET NULL")
+    )
+    state: Mapped[BookingState] = mapped_column(
+        Enum(BookingState, name="booking_state", values_callable=_val),
+        default=BookingState.LEAD_CREATED,
+        index=True,
+    )
+    # Stored in UTC; rendered to the lead's tz in emails.
+    slot_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    slot_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Snapshot of slots offered in the most recent email, for reply mapping.
+    offered_slots: Mapped[list] = mapped_column(JSONB, default=list)
+    cancel_reason: Mapped[str | None] = mapped_column(Text)
+
+    lead: Mapped[Lead] = relationship()
+    organizer: Mapped[Organizer] = relationship(back_populates="bookings")
+    thread: Mapped["EmailThread | None"] = relationship(
+        back_populates="booking", uselist=False
+    )
+
+    __table_args__ = (
+        # At most one ACTIVE booking per organizer + start time. This is the
+        # hard guarantee against double booking (defense in depth vs Redis).
+        Index(
+            "uq_active_booking_per_slot",
+            "organizer_id",
+            "slot_start",
+            unique=True,
+            postgresql_where=text(
+                "state in ('slot_reserved','booking_confirmed',"
+                "'reminder_sent','meeting_completed')"
+            ),
+        ),
+    )
+
+
+class Reservation(UUIDMixin, TimestampMixin, Base):
+    """A temporary hold on a slot (persistent mirror of the Redis lock)."""
+
+    __tablename__ = "reservations"
+
+    booking_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"), index=True
+    )
+    organizer_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizers.id", ondelete="CASCADE"), index=True
+    )
+    slot_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    slot_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[ReservationStatus] = mapped_column(
+        Enum(ReservationStatus, name="reservation_status", values_callable=_val),
+        default=ReservationStatus.HELD,
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True)
+
+
+class EmailThread(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "email_threads"
+
+    booking_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"), unique=True
+    )
+    # RFC 5322 message id of the first outbound message; used for References.
+    root_message_id: Mapped[str | None] = mapped_column(String(512), index=True)
+    subject: Mapped[str | None] = mapped_column(String(998))
+    # Signed token embedded in reply-to addr to authenticate inbound replies.
+    reply_token: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+
+    booking: Mapped[Booking] = relationship(back_populates="thread")
+    messages: Mapped[list["EmailMessage"]] = relationship(
+        back_populates="thread", cascade="all, delete-orphan"
+    )
+
+
+class EmailMessage(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "email_messages"
+
+    thread_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("email_threads.id", ondelete="CASCADE"), index=True
+    )
+    direction: Mapped[EmailDirection] = mapped_column(
+        Enum(EmailDirection, name="email_direction", values_callable=_val)
+    )
+    message_id: Mapped[str | None] = mapped_column(String(512), index=True)
+    in_reply_to: Mapped[str | None] = mapped_column(String(512))
+    from_addr: Mapped[str] = mapped_column(String(320))
+    to_addr: Mapped[str] = mapped_column(String(320))
+    subject: Mapped[str | None] = mapped_column(String(998))
+    body_text: Mapped[str | None] = mapped_column(Text)
+    # LLM classification result attached to inbound messages.
+    intent: Mapped[EmailIntent | None] = mapped_column(
+        Enum(EmailIntent, name="email_intent", values_callable=_val)
+    )
+    intent_payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    processed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    thread: Mapped[EmailThread] = relationship(back_populates="messages")
+
+    __table_args__ = (
+        # De-dupe IMAP polling: a provider message id is unique per thread.
+        UniqueConstraint("thread_id", "message_id", name="uq_thread_message"),
+    )
+
+
+class Reminder(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "reminders"
+
+    booking_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("bookings.id", ondelete="CASCADE"), index=True
+    )
+    send_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    kind: Mapped[str] = mapped_column(String(64), default="reminder")
+
+
+class AuditLog(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "audit_logs"
+
+    actor: Mapped[str] = mapped_column(String(320))  # user email / "system"
+    action: Mapped[str] = mapped_column(String(128), index=True)
+    entity_type: Mapped[str] = mapped_column(String(64))
+    entity_id: Mapped[str | None] = mapped_column(String(64))
+    data: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class SystemSetting(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    value: Mapped[dict] = mapped_column(JSONB, default=dict)
