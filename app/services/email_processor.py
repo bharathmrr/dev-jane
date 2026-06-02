@@ -105,6 +105,7 @@ async def _handle_confirm(db, booking, lead, org, tz, result, thread):
     await confirm_reservation(db, booking)
     # Use organizer's pre-set link or auto-generate a Jitsi room
     meeting_link = org.meeting_link or f"https://meet.jit.si/meeting-{uuid.uuid4().hex[:10]}"
+    booking.booking_link = meeting_link  # persist so dashboard can display it
     body = templates.render_confirmation(
         lead.name, org.display_name, chosen["label"], meeting_link
     )

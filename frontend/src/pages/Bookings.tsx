@@ -18,11 +18,16 @@ export default function Bookings() {
   const { data: bookings, isLoading } = useQuery<BookingListItem[]>({
     queryKey: ['bookings-list', page],
     queryFn: () => listBookings(page * limit, limit).then((r) => r.data),
+    refetchInterval: 30_000,
   })
 
   const cancelMutation = useMutation({
     mutationFn: (id: string) => cancelBooking(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['bookings-list'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bookings-list'] })
+      queryClient.invalidateQueries({ queryKey: ['bookings'] })  // dashboard
+      queryClient.invalidateQueries({ queryKey: ['analytics'] }) // analytics cards
+    },
   })
 
   return (

@@ -1,6 +1,7 @@
 """Email-related Celery tasks."""
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from sqlalchemy import select
@@ -34,7 +35,8 @@ async def _send_offer(db: AsyncSession, booking_id: str) -> None:
     payloads = await booking_svc.prepare_offer(db, booking, limit=5)
     body = templates.render_offer(lead.name, org.display_name, payloads)
 
-    message_id = smtp.send_email(
+    message_id = await asyncio.to_thread(
+        smtp.send_email,
         to_addr=lead.email,
         subject=thread.subject or "Available meeting times",
         body=body,
@@ -71,7 +73,8 @@ def send_offer_email(self, booking_id: str) -> None:
 # --- Send an OutboundAction returned by the processor ---
 async def _send_action(db: AsyncSession, action_dict: dict, thread_id: str) -> None:
     thread = await db.get(EmailThread, uuid.UUID(thread_id))
-    message_id = smtp.send_email(
+    message_id = await asyncio.to_thread(
+        smtp.send_email,
         to_addr=action_dict["to_addr"],
         subject=action_dict["subject"],
         body=action_dict["body"],

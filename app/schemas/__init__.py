@@ -5,7 +5,7 @@ import uuid
 from datetime import date, datetime, time
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from app.db.base import BookingState, UserRole
 
@@ -137,6 +137,19 @@ class OrganizerInBooking(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     display_name: str
+    email: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _extract_email(cls, v: object) -> object:
+        """Pull email from the nested User relation when given an ORM object."""
+        if not isinstance(v, dict) and hasattr(v, "user") and v.user is not None:
+            return {
+                "id": v.id,
+                "display_name": v.display_name,
+                "email": v.user.email,
+            }
+        return v
 
 
 class BookingListItem(BaseModel):
