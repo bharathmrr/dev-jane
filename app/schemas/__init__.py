@@ -130,6 +130,7 @@ class LeadInBooking(BaseModel):
     id: uuid.UUID
     name: str
     email: str
+    timezone: str | None = None
 
 
 class OrganizerInBooking(BaseModel):
@@ -146,6 +147,7 @@ class BookingListItem(BaseModel):
     lead_id: uuid.UUID
     slot_start: datetime | None
     slot_end: datetime | None
+    booking_link: str | None = None
     lead: LeadInBooking | None = None
     organizer: OrganizerInBooking | None = None
 

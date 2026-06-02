@@ -64,11 +64,13 @@ export interface BookingLead {
   id: string
   name: string
   email: string
+  timezone?: string | null
 }
 
 export interface BookingOrganizer {
   id: string
   display_name: string
+  email?: string
 }
 
 export interface BookingListItem {
@@ -78,6 +80,7 @@ export interface BookingListItem {
   lead_id: string
   slot_start: string | null
   slot_end: string | null
+  booking_link: string | null
   lead: BookingLead | null
   organizer: BookingOrganizer | null
 }

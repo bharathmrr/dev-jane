@@ -41,8 +41,10 @@ export default function Bookings() {
               <tr className="text-[11px] text-gray-400 border-b border-gray-100 bg-gray-50">
                 <th className="text-left px-4 py-2.5 font-medium">Lead</th>
                 {isAdmin && <th className="text-left px-4 py-2.5 font-medium">Organizer</th>}
+                <th className="text-left px-4 py-2.5 font-medium">Timezone</th>
                 <th className="text-left px-4 py-2.5 font-medium">Status</th>
                 <th className="text-left px-4 py-2.5 font-medium">Slot</th>
+                <th className="text-left px-4 py-2.5 font-medium">Booking Link</th>
                 {!isViewer && <th className="px-4 py-2.5" />}
               </tr>
             </thead>
@@ -53,12 +55,25 @@ export default function Bookings() {
                     <p className="font-medium text-gray-800">{b.lead?.name ?? '—'}</p>
                     <p className="text-xs text-gray-400">{b.lead?.email}</p>
                   </td>
-                  {isAdmin && <td className="px-4 py-2.5 text-gray-600">{b.organizer?.display_name ?? '—'}</td>}
+                  {isAdmin && (
+                    <td className="px-4 py-2.5">
+                      <p className="text-sm text-gray-700">{b.organizer?.display_name ?? '—'}</p>
+                      {b.organizer?.email && <p className="text-xs text-gray-400">{b.organizer.email}</p>}
+                    </td>
+                  )}
+                  <td className="px-4 py-2.5 text-xs text-gray-500">
+                    {b.lead?.timezone ?? <span className="text-gray-300">—</span>}
+                  </td>
                   <td className="px-4 py-2.5">
                     <span className={stateBadge(b.state)}>{b.state.replace(/_/g, ' ')}</span>
                   </td>
                   <td className="px-4 py-2.5 text-xs text-gray-500">
                     {b.slot_start ? new Date(b.slot_start).toLocaleString() : '—'}
+                  </td>
+                  <td className="px-4 py-2.5 text-xs">
+                    {b.booking_link
+                      ? <a href={b.booking_link} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">View</a>
+                      : <span className="text-gray-400">—</span>}
                   </td>
                   {!isViewer && (
                     <td className="px-4 py-2.5 text-right">
@@ -76,7 +91,7 @@ export default function Bookings() {
               ))}
               {bookings?.length === 0 && (
                 <tr>
-                  <td colSpan={isAdmin ? 5 : isViewer ? 3 : 4} className="px-4 py-8 text-center text-sm text-gray-400">
+                  <td colSpan={isAdmin ? 7 : isViewer ? 5 : 6} className="px-4 py-8 text-center text-sm text-gray-400">
                     No bookings found.
                   </td>
                 </tr>

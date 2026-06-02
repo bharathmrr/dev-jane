@@ -169,9 +169,9 @@ class Booking(UUIDMixin, TimestampMixin, Base):
     # Stored in UTC; rendered to the lead's tz in emails.
     slot_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     slot_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # Snapshot of slots offered in the most recent email, for reply mapping.
     offered_slots: Mapped[list] = mapped_column(JSONB, default=list)
     cancel_reason: Mapped[str | None] = mapped_column(Text)
+    booking_link: Mapped[str | None] = mapped_column(String(512))
 
     lead: Mapped[Lead] = relationship()
     organizer: Mapped[Organizer] = relationship(back_populates="bookings")

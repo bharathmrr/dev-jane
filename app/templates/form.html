@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Book a Meeting</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f5f7fa;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 440px;
+    }
+    .logo { font-size: 22px; font-weight: 700; color: #1e40af; margin-bottom: 6px; }
+    .subtitle { font-size: 14px; color: #6b7280; margin-bottom: 32px; }
+    label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px; }
+    input, select {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 14px;
+      color: #111827;
+      background: #fff;
+      outline: none;
+      transition: border-color 0.15s;
+      appearance: none;
+    }
+    input:focus, select:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.12); }
+    .field { margin-bottom: 20px; }
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #1d4ed8; }
+    .select-wrap { position: relative; }
+    .select-wrap::after {
+      content: "▾";
+      position: absolute;
+      right: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #9ca3af;
+      pointer-events: none;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Schedule a Meeting</div>
+    <p class="subtitle">Fill in your details and we'll send you a booking link.</p>
+
+    <form action="/submit" method="POST">
+      <div class="field">
+        <label for="name">Full Name</label>
+        <input type="text" id="name" name="name" placeholder="Your full name" required />
+      </div>
+
+      <div class="field">
+        <label for="email">Email Address</label>
+        <input type="email" id="email" name="email" placeholder="you@example.com" required />
+      </div>
+
+      <div class="field">
+        <label for="timezone">Your Timezone</label>
+        <div class="select-wrap">
+          <select id="timezone" name="timezone" required>
+            <option value="" disabled selected>Select your timezone</option>
+
+            <optgroup label="Americas">
+              <option value="America/Los_Angeles">Pacific Time — Los Angeles (UTC−8/7)</option>
+              <option value="America/Denver">Mountain Time — Denver (UTC−7/6)</option>
+              <option value="America/Chicago">Central Time — Chicago (UTC−6/5)</option>
+              <option value="America/New_York">Eastern Time — New York (UTC−5/4)</option>
+              <option value="America/Toronto">Eastern Time — Toronto (UTC−5/4)</option>
+              <option value="America/Vancouver">Pacific Time — Vancouver (UTC−8/7)</option>
+              <option value="America/Mexico_City">Mexico City (UTC−6/5)</option>
+              <option value="America/Bogota">Colombia — Bogotá (UTC−5)</option>
+              <option value="America/Lima">Peru — Lima (UTC−5)</option>
+              <option value="America/Caracas">Venezuela — Caracas (UTC−4)</option>
+              <option value="America/Santiago">Chile — Santiago (UTC−4/3)</option>
+              <option value="America/Sao_Paulo">Brazil — São Paulo (UTC−3)</option>
+              <option value="America/Argentina/Buenos_Aires">Argentina — Buenos Aires (UTC−3)</option>
+            </optgroup>
+
+            <optgroup label="Europe">
+              <option value="Europe/London">UK — London (UTC+0/1)</option>
+              <option value="Europe/Dublin">Ireland — Dublin (UTC+0/1)</option>
+              <option value="Europe/Lisbon">Portugal — Lisbon (UTC+0/1)</option>
+              <option value="Europe/Paris">France — Paris (UTC+1/2)</option>
+              <option value="Europe/Berlin">Germany — Berlin (UTC+1/2)</option>
+              <option value="Europe/Madrid">Spain — Madrid (UTC+1/2)</option>
+              <option value="Europe/Rome">Italy — Rome (UTC+1/2)</option>
+              <option value="Europe/Amsterdam">Netherlands — Amsterdam (UTC+1/2)</option>
+              <option value="Europe/Brussels">Belgium — Brussels (UTC+1/2)</option>
+              <option value="Europe/Stockholm">Sweden — Stockholm (UTC+1/2)</option>
+              <option value="Europe/Zurich">Switzerland — Zurich (UTC+1/2)</option>
+              <option value="Europe/Warsaw">Poland — Warsaw (UTC+1/2)</option>
+              <option value="Europe/Prague">Czech Republic — Prague (UTC+1/2)</option>
+              <option value="Europe/Helsinki">Finland — Helsinki (UTC+2/3)</option>
+              <option value="Europe/Athens">Greece — Athens (UTC+2/3)</option>
+              <option value="Europe/Bucharest">Romania — Bucharest (UTC+2/3)</option>
+              <option value="Europe/Istanbul">Turkey — Istanbul (UTC+3)</option>
+              <option value="Europe/Moscow">Russia — Moscow (UTC+3)</option>
+            </optgroup>
+
+            <optgroup label="Africa">
+              <option value="Africa/Casablanca">Morocco — Casablanca (UTC+0/1)</option>
+              <option value="Africa/Accra">Ghana — Accra (UTC+0)</option>
+              <option value="Africa/Lagos">Nigeria — Lagos (UTC+1)</option>
+              <option value="Africa/Cairo">Egypt — Cairo (UTC+2/3)</option>
+              <option value="Africa/Nairobi">Kenya — Nairobi (UTC+3)</option>
+              <option value="Africa/Addis_Ababa">Ethiopia — Addis Ababa (UTC+3)</option>
+              <option value="Africa/Johannesburg">South Africa — Johannesburg (UTC+2)</option>
+            </optgroup>
+
+            <optgroup label="Middle East">
+              <option value="Asia/Riyadh">Saudi Arabia — Riyadh (UTC+3)</option>
+              <option value="Asia/Kuwait">Kuwait (UTC+3)</option>
+              <option value="Asia/Qatar">Qatar — Doha (UTC+3)</option>
+              <option value="Asia/Dubai">UAE — Dubai (UTC+4)</option>
+              <option value="Asia/Muscat">Oman — Muscat (UTC+4)</option>
+              <option value="Asia/Tehran">Iran — Tehran (UTC+3:30/4:30)</option>
+              <option value="Asia/Beirut">Lebanon — Beirut (UTC+2/3)</option>
+              <option value="Asia/Jerusalem">Israel (UTC+2/3)</option>
+            </optgroup>
+
+            <optgroup label="Asia &amp; Pacific">
+              <option value="Asia/Karachi">Pakistan — Karachi (UTC+5)</option>
+              <option value="Asia/Kolkata">India — Mumbai / Kolkata (UTC+5:30)</option>
+              <option value="Asia/Kathmandu">Nepal — Kathmandu (UTC+5:45)</option>
+              <option value="Asia/Dhaka">Bangladesh — Dhaka (UTC+6)</option>
+              <option value="Asia/Colombo">Sri Lanka — Colombo (UTC+5:30)</option>
+              <option value="Asia/Yangon">Myanmar — Yangon (UTC+6:30)</option>
+              <option value="Asia/Bangkok">Thailand — Bangkok (UTC+7)</option>
+              <option value="Asia/Ho_Chi_Minh">Vietnam — Ho Chi Minh (UTC+7)</option>
+              <option value="Asia/Jakarta">Indonesia — Jakarta (UTC+7)</option>
+              <option value="Asia/Singapore">Singapore (UTC+8)</option>
+              <option value="Asia/Kuala_Lumpur">Malaysia — Kuala Lumpur (UTC+8)</option>
+              <option value="Asia/Manila">Philippines — Manila (UTC+8)</option>
+              <option value="Asia/Hong_Kong">Hong Kong (UTC+8)</option>
+              <option value="Asia/Shanghai">China — Shanghai (UTC+8)</option>
+              <option value="Asia/Taipei">Taiwan — Taipei (UTC+8)</option>
+              <option value="Asia/Seoul">South Korea — Seoul (UTC+9)</option>
+              <option value="Asia/Tokyo">Japan — Tokyo (UTC+9)</option>
+              <option value="Australia/Perth">Australia — Perth (UTC+8)</option>
+              <option value="Australia/Brisbane">Australia — Brisbane (UTC+10)</option>
+              <option value="Australia/Sydney">Australia — Sydney (UTC+10/11)</option>
+              <option value="Australia/Melbourne">Australia — Melbourne (UTC+10/11)</option>
+              <option value="Pacific/Auckland">New Zealand — Auckland (UTC+12/13)</option>
+              <option value="Pacific/Fiji">Fiji (UTC+12)</option>
+              <option value="Pacific/Honolulu">Hawaii — Honolulu (UTC−10)</option>
+            </optgroup>
+
+          </select>
+        </div>
+      </div>
+
+      <button type="submit" class="btn">Send Me the Booking Link</button>
+    </form>
+  </div>
+</body>
+</html>

@@ -11,13 +11,28 @@ from sqlalchemy.ext.asyncio import (
 
 from app.core.config import settings
 
+if not settings.DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL is not set. Add it to your .env file.\n"
+        "Example: DATABASE_URL=postgresql+asyncpg://user:pass@host/dbname"
+    )
+
+_db_url = str(settings.DATABASE_URL)
+
+# Neon (and PgBouncer) poolers require statement_cache_size=0 with asyncpg.
+# We detect pooler endpoints by the "-pooler." hostname pattern.
+_connect_args: dict = {}
+if "-pooler." in _db_url or "pgbouncer" in _db_url.lower():
+    _connect_args["statement_cache_size"] = 0
+
 engine = create_async_engine(
-    str(settings.DATABASE_URL),
+    _db_url,
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_timeout=settings.DB_POOL_TIMEOUT,
     pool_pre_ping=True,
     echo=settings.DEBUG,
+    connect_args=_connect_args,
 )
 
 SessionLocal = async_sessionmaker(

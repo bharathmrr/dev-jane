@@ -7,7 +7,7 @@ or a secrets manager in production.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import Field, PostgresDsn, RedisDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,34 +21,33 @@ class Settings(BaseSettings):
     # --- App ---
     ENV: Literal["dev", "staging", "prod"] = "dev"
     DEBUG: bool = False
-    APP_NAME: str = "email-scheduler"
+    APP_NAME: str = "linkedin-outreach"
     API_V1_PREFIX: str = "/api/v1"
     DEFAULT_TIMEZONE: str = "UTC"
 
-    # --- Security ---
-    JWT_SECRET_KEY: str = Field(..., min_length=32)
+    # --- Security (optional for LinkedIn-only mode) ---
+    JWT_SECRET_KEY: str = Field("dev-jwt-secret-key-not-for-production-use-change-me", min_length=32)
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_TTL_MINUTES: int = 30
     REFRESH_TOKEN_TTL_DAYS: int = 14
-    # HMAC secret for verifying inbound email webhooks / reply tokens.
-    EMAIL_HMAC_SECRET: str = Field(..., min_length=16)
+    EMAIL_HMAC_SECRET: str = Field("dev-hmac-secret-change-me", min_length=16)
 
-    # --- Database ---
-    DATABASE_URL: PostgresDsn
+    # --- Database (optional; not required for LinkedIn outreach mode) ---
+    DATABASE_URL: Optional[PostgresDsn] = None
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 10
     DB_POOL_TIMEOUT: int = 30
 
-    # --- Redis ---
-    REDIS_URL: RedisDsn
-    RESERVATION_TTL_SECONDS: int = 600  # 10 minute slot hold (BookMyShow-style)
-    LOCK_TIMEOUT_SECONDS: int = 5  # how long to wait to acquire a lock
+    # --- Redis (optional; not required for LinkedIn outreach mode) ---
+    REDIS_URL: Optional[RedisDsn] = None
+    RESERVATION_TTL_SECONDS: int = 600
+    LOCK_TIMEOUT_SECONDS: int = 5
 
     # --- Celery ---
-    CELERY_BROKER_URL: RedisDsn | None = None
-    CELERY_RESULT_BACKEND: RedisDsn | None = None
+    CELERY_BROKER_URL: Optional[RedisDsn] = None
+    CELERY_RESULT_BACKEND: Optional[RedisDsn] = None
     IMAP_POLL_INTERVAL_SECONDS: int = 60
-    REMINDER_LEAD_MINUTES: int = 60  # send reminder N minutes before meeting
+    REMINDER_LEAD_MINUTES: int = 60
 
     # --- SMTP (outbound) ---
     SMTP_HOST: str = "localhost"
@@ -58,7 +57,6 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
     SMTP_FROM_EMAIL: str = "scheduler@example.com"
     SMTP_FROM_NAME: str = "Scheduling Assistant"
-    # Address replies are routed to; the local-part may carry a thread token.
     INBOUND_DOMAIN: str = "reply.example.com"
 
     # --- IMAP (inbound) ---
@@ -70,9 +68,8 @@ class Settings(BaseSettings):
     IMAP_USE_SSL: bool = True
 
     # --- LLM ---
-    LLM_PROVIDER: Literal["anthropic", "openai", "stub"] = "anthropic"
+    LLM_PROVIDER: Literal["anthropic", "openai", "stub"] = "stub"
     ANTHROPIC_API_KEY: str = ""
-    # Cheap/fast model for intent classification; larger model for negotiation.
     LLM_INTENT_MODEL: str = "claude-haiku-4-5"
     LLM_NEGOTIATION_MODEL: str = "claude-sonnet-4-6"
     LLM_MAX_TOKENS: int = 1024
@@ -83,21 +80,34 @@ class Settings(BaseSettings):
 
     # --- Observability ---
     LOG_LEVEL: str = "INFO"
-    LOG_JSON: bool = True
-    PROMETHEUS_ENABLED: bool = True
+    LOG_JSON: bool = False
+    PROMETHEUS_ENABLED: bool = False
     OTEL_EXPORTER_OTLP_ENDPOINT: str | None = None
+
+    # --- Unipile ---
+    UNIPILE_API_KEY: str = ""
+    UNIPILE_ACCOUNT_ID: str = ""
+    UNIPILE_DSN: str = "api33.unipile.com:16356"
+
+    # --- SendGrid ---
+    SENDGRID_API_KEY: str = ""
+    SENDGRID_FROM_EMAIL: str = "bharathreddyget@gmail.com"
+
+    # --- Calendly & App URL ---
+    CALENDLY_LINK: str = "https://calendly.com/bharathreddyget"
+    APP_URL: str = "http://localhost:8000"
 
     @field_validator("CELERY_BROKER_URL", "CELERY_RESULT_BACKEND", mode="before")
     @classmethod
     def _default_celery_to_redis(cls, v, info):
-        # If Celery URLs are not set, fall back to REDIS_URL.
         return v or info.data.get("REDIS_URL")
 
     @property
     def database_url_sync(self) -> str:
         """Sync DSN (psycopg) for Alembic and Celery workers."""
+        if not self.DATABASE_URL:
+            return ""
         url = str(self.DATABASE_URL).replace("postgresql+asyncpg", "postgresql+psycopg")
-        # asyncpg uses ?ssl=require; psycopg uses ?sslmode=require
         return url.replace("?ssl=require", "?sslmode=require").replace("&ssl=require", "&sslmode=require")
 
 

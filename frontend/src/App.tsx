@@ -2,9 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import Leads from './pages/Leads'
 import OrganizerManagement from './pages/OrganizerManagement'
-import Bookings from './pages/Bookings'
-import CreateLead from './pages/CreateLead'
 import { getUserInfo } from './api/client'
 
 function isAuthenticated() {
@@ -45,13 +44,8 @@ export default function App() {
           <Route index element={<Dashboard />} />
 
           {/* Admin only */}
+          <Route path="leads" element={<AdminRoute><Leads /></AdminRoute>} />
           <Route path="organizers" element={<AdminRoute><OrganizerManagement /></AdminRoute>} />
-
-          {/* All authenticated users */}
-          <Route path="bookings" element={<Bookings />} />
-
-          {/* Organizer + Admin only (not viewer) */}
-          <Route path="leads/new" element={<ViewerBlock><CreateLead /></ViewerBlock>} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

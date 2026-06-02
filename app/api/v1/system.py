@@ -390,6 +390,64 @@ async def analytics_summary(
     )
 
 
+# --- Leads (admin sees all, organizer sees their own) ---
+@router.get("/leads")
+async def list_leads(
+    search: str = "",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    """List leads. Admin sees all, organizer sees only their own."""
+    # If organizer, get their organizer record
+    organizer_filter = None
+    if user.role == UserRole.ORGANIZER:
+        org = (await db.execute(select(Organizer).where(Organizer.user_id == user.id))).scalar_one_or_none()
+        if org:
+            organizer_filter = org.id
+        else:
+            return []  # No organizer profile, no leads to show
+
+    q = select(Lead)
+    if search:
+        q = q.where((Lead.name.ilike(f"%{search}%")) | (Lead.email.ilike(f"%{search}%")))
+
+    leads = (await db.execute(q.order_by(Lead.created_at.desc()))).scalars().all()
+
+    result = []
+    for lead in leads:
+        booking = (
+            await db.execute(
+                select(Booking).where(Booking.lead_id == lead.id).order_by(Booking.created_at.desc()).limit(1)
+            )
+        ).scalar_one_or_none()
+
+        # If organizer, only show leads assigned to them
+        if organizer_filter and booking and booking.organizer_id != organizer_filter:
+            continue
+
+        organizer = None
+        if booking:
+            organizer = await db.get(Organizer, booking.organizer_id)
+
+        result.append({
+            "id": str(lead.id),
+            "name": lead.name,
+            "email": lead.email,
+            "created_at": lead.created_at.isoformat(),
+            "organizer": {
+                "id": str(organizer.id),
+                "display_name": organizer.display_name,
+            } if organizer else None,
+            "booking": {
+                "id": str(booking.id),
+                "state": booking.state.value,
+                "slot_start": booking.slot_start.isoformat() if booking.slot_start else None,
+            } if booking else None,
+        })
+
+    return result
+
+
 # --- Health checks ---
 @router.get("/health/live")
 async def liveness() -> dict:
