@@ -56,6 +56,8 @@ export const cancelBooking = (id: string) => api.post(`/bookings/${id}/cancel`)
 
 // Leads
 export const createLead = (data: object) => api.post('/leads', data)
+export const previewLeadEmail = (data: { lead_name: string; lead_email: string; organizer_id: string }) =>
+  api.post<{ subject: string; body: string; from_email: string; to_email: string; organizer_name: string; slots_count: number }>('/leads/preview', data)
 export const listSlots = (organizerId: string) =>
   api.get(`/organizers/${organizerId}/slots`)
 

@@ -1,8 +1,12 @@
 import { useState, FormEvent } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { listOrganizers, updateOrganizer } from '../api/client'
+import { ChevronsUpDownIcon, PlusIcon, AlertCircleIcon, UsersIcon } from 'lucide-react'
+import { listOrganizers, updateOrganizer, createOrganizer } from '../api/client'
 import type { Organizer } from '../api/types'
 import OrganizerForm from './OrganizerForm'
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
@@ -53,12 +57,7 @@ export default function OrganizerManagement() {
   const activeCount = organizers.filter((o) => o.is_active).length
 
   if (editingId) {
-    return (
-      <OrganizerForm
-        organizerId={editingId}
-        onBack={() => setEditingId(null)}
-      />
-    )
+    return <OrganizerForm organizerId={editingId} onBack={() => setEditingId(null)} />
   }
 
   return (
@@ -66,42 +65,58 @@ export default function OrganizerManagement() {
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">👥</span>
-            <h1 className="text-2xl font-bold text-gray-900">Organizer Management</h1>
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+              <UsersIcon className="w-4 h-4 text-blue-600" />
+            </div>
+            <h1 className="text-xl font-bold text-gray-900">Organizer Management</h1>
           </div>
           <p className="text-sm text-gray-500 mt-1 ml-10">
-            Manage all organizers — set availability, access level, and account status.
+            Manage organizers — availability, access level, and account status.
           </p>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1.5 rounded-full">
             {organizers.length} total · {activeCount} active
           </span>
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center gap-1.5 bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <span className="text-base">+</span> Add Organizer
-          </button>
+          <Button size="sm" onClick={() => setShowForm((v) => !v)}>
+            <PlusIcon className="h-4 w-4" />
+            Add Organizer
+          </Button>
         </div>
       </div>
 
-      {/* Add form slide-down */}
-      {showForm && (
-        <div className="bg-white border border-blue-200 rounded-xl p-5 mb-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-700">New Organizer</h2>
-            <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
+      {/* Collapsible create form */}
+      <Collapsible open={showForm} onOpenChange={setShowForm}>
+        <CollapsibleContent>
+          <div className="bg-white border border-blue-200 rounded-xl p-5 mb-5 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <PlusIcon className="h-4 w-4 text-blue-600" />
+                <h2 className="text-sm font-semibold text-gray-700">New Organizer</h2>
+              </div>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-gray-600">
+                  <ChevronsUpDownIcon className="h-4 w-4" />
+                </Button>
+              </CollapsibleTrigger>
+            </div>
+            <OrganizerCreateInline
+              onCreated={() => {
+                setShowForm(false)
+                queryClient.invalidateQueries({ queryKey: ['organizers'] })
+              }}
+            />
           </div>
-          <OrganizerCreateInline onCreated={() => { setShowForm(false); queryClient.invalidateQueries({ queryKey: ['organizers'] }) }} />
-        </div>
-      )}
+        </CollapsibleContent>
+      </Collapsible>
 
       {/* Search + Filter */}
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -145,7 +160,6 @@ export default function OrganizerManagement() {
             )}
             {filtered.map((org) => (
               <tr key={org.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
-                {/* Organizer info */}
                 <td className="px-5 py-3.5">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-semibold shrink-0">
@@ -158,7 +172,6 @@ export default function OrganizerManagement() {
                   </div>
                 </td>
 
-                {/* Availability chips */}
                 <td className="px-5 py-3.5">
                   <div className="flex gap-0.5 flex-wrap">
                     {DAYS.map((d, i) => {
@@ -173,7 +186,6 @@ export default function OrganizerManagement() {
                   <p className="text-xs text-gray-400 mt-0.5">{org.timezone}</p>
                 </td>
 
-                {/* Status */}
                 <td className="px-5 py-3.5">
                   <button
                     onClick={() => toggleActiveMutation.mutate({ id: org.id, is_active: !org.is_active })}
@@ -188,7 +200,6 @@ export default function OrganizerManagement() {
                   </button>
                 </td>
 
-                {/* Access level dropdown */}
                 <td className="px-5 py-3.5">
                   {org.user?.role === 'admin' ? (
                     <AccessBadge role="admin" />
@@ -204,7 +215,6 @@ export default function OrganizerManagement() {
                   )}
                 </td>
 
-                {/* Actions */}
                 <td className="px-5 py-3.5 text-right">
                   <div className="relative inline-block">
                     <button
@@ -240,7 +250,6 @@ export default function OrganizerManagement() {
         </table>
       </div>
 
-      {/* Click-away to close action menus */}
       {actionOpen && (
         <div className="fixed inset-0 z-5" onClick={() => setActionOpen(null)} />
       )}
@@ -248,7 +257,7 @@ export default function OrganizerManagement() {
   )
 }
 
-// --- Inline create form (shown in the slide-down panel) ---
+// --- Inline create form ---
 function OrganizerCreateInline({ onCreated }: { onCreated: () => void }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -268,13 +277,8 @@ function OrganizerCreateInline({ onCreated }: { onCreated: () => void }) {
     setError('')
     setLoading(true)
     try {
-      const { createOrganizer } = await import('../api/client')
       await createOrganizer({
-        display_name: name,
-        email,
-        password,
-        timezone,
-        access_level: access,
+        display_name: name, email, password, timezone, access_level: access,
         rules: [
           { weekday: 0, start_time: '09:00', end_time: '17:00' },
           { weekday: 1, start_time: '09:00', end_time: '17:00' },
@@ -294,16 +298,20 @@ function OrganizerCreateInline({ onCreated }: { onCreated: () => void }) {
   return (
     <form onSubmit={handleSubmit}>
       {error && (
-        <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
+        <Alert variant="destructive" className="mb-3">
+          <AlertCircleIcon className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Full Name</label>
-          <input required value={name} onChange={(e) => setName(e.target.value)} className={inp} placeholder="Bharath R" />
+          <input required value={name} onChange={(e) => setName(e.target.value)} className={inp} placeholder="Jane Smith" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
-          <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={inp} placeholder="organizer@co.com" />
+          <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={inp} placeholder="jane@company.com" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Password</label>
@@ -318,15 +326,15 @@ function OrganizerCreateInline({ onCreated }: { onCreated: () => void }) {
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Access Level</label>
           <select value={access} onChange={(e) => setAccess(e.target.value as 'organizer' | 'viewer')} className={inp}>
-            <option value="organizer">Organizer (full)</option>
+            <option value="organizer">Organizer (full access)</option>
             <option value="viewer">Viewer (read-only)</option>
           </select>
         </div>
       </div>
-      <p className="text-xs text-gray-400 mb-3">Availability defaults to Mon–Fri 9–5. You can change it after creation.</p>
-      <button type="submit" disabled={loading} className="bg-blue-600 text-white text-sm font-medium px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
+      <p className="text-xs text-gray-400 mb-3">Availability defaults to Mon–Fri 9–5. Edit after creation.</p>
+      <Button type="submit" disabled={loading} size="sm">
         {loading ? 'Creating…' : 'Create Organizer'}
-      </button>
+      </Button>
     </form>
   )
 }

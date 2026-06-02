@@ -21,9 +21,11 @@ log = get_logger("app")
 async def lifespan(app: FastAPI):
     log.info("startup", env=settings.ENV, app=settings.APP_NAME)
     yield
-    from app.core.redis_client import get_redis
-
-    await get_redis().aclose()
+    try:
+        from app.core.redis_client import get_redis
+        await get_redis().aclose()
+    except Exception:
+        pass
     log.info("shutdown")
 
 

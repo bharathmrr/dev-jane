@@ -55,16 +55,23 @@ def require_roles(*roles: UserRole):
 
 
 async def rate_limit(request: Request) -> None:
-    """Fixed-window per-IP limiter backed by Redis INCR + EXPIRE."""
-    ip = request.client.host if request.client else "unknown"
-    window = int(time.time() // 60)
-    key = f"rl:{ip}:{window}"
-    r = get_redis()
-    count = await r.incr(key)
-    if count == 1:
-        await r.expire(key, 60)
-    if count > settings.RATE_LIMIT_PER_MINUTE:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Rate limit exceeded",
-        )
+    """Fixed-window per-IP limiter backed by Redis INCR + EXPIRE.
+    Degrades gracefully if Redis is unavailable (skips limiting rather than blocking all traffic).
+    """
+    try:
+        ip = request.client.host if request.client else "unknown"
+        window = int(time.time() // 60)
+        key = f"rl:{ip}:{window}"
+        r = get_redis()
+        count = await r.incr(key)
+        if count == 1:
+            await r.expire(key, 60)
+        if count > settings.RATE_LIMIT_PER_MINUTE:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # Redis unavailable — allow the request through
