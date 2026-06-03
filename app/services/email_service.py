@@ -1,10 +1,8 @@
-"""Outbound email helpers — sends via SMTP (Gmail or any provider).
-
-Set SMTP_HOST / SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD in .env.
-For Gmail, generate an App Password at https://myaccount.google.com/apppasswords.
-"""
+"""Outbound email helpers — sends via Gmail SMTP."""
 from __future__ import annotations
 
+import hashlib
+import hmac as _hmac
 import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
@@ -13,9 +11,13 @@ from email.mime.text import MIMEText
 from app.core.config import settings
 
 
-# ------------------------------------------------------------------ #
-#  Internal helper                                                     #
-# ------------------------------------------------------------------ #
+def make_book_url(lead_id: str, slot_idx: int) -> str:
+    """Generate a one-click booking URL signed with HMAC."""
+    msg = f"{lead_id}:{slot_idx}".encode()
+    sig = _hmac.new(settings.EMAIL_HMAC_SECRET.encode(), msg, hashlib.sha256).hexdigest()[:16]
+    base = settings.APP_URL.rstrip("/")
+    return f"{base}/api/v1/v2/book/{lead_id}/{slot_idx}/{sig}"
+
 
 def _send_html_email(to_email: str, subject: str, html_content: str) -> bool:
     """Send an HTML email via SMTP. Returns True on success."""
@@ -28,167 +30,124 @@ def _send_html_email(to_email: str, subject: str, html_content: str) -> bool:
 
         context = ssl.create_default_context()
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=20) as server:
+            server.ehlo()
             if settings.SMTP_USE_TLS:
                 server.starttls(context=context)
+                server.ehlo()
             if settings.SMTP_USERNAME:
                 server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
             server.send_message(msg)
 
-        print(f"[EMAIL] ✓ Sent '{subject}' → {to_email}")
+        print(f"[EMAIL] Sent '{subject}' -> {to_email}")
         return True
     except smtplib.SMTPAuthenticationError:
         print(
-            "[EMAIL] ✗ Authentication failed. "
-            "For Gmail, use an App Password (not your account password). "
-            "See https://myaccount.google.com/apppasswords"
+            "[EMAIL] Auth failed. Go to myaccount.google.com/apppasswords "
+            "and generate an App Password, then set SMTP_PASSWORD in .env"
         )
     except Exception as exc:
-        print(f"[EMAIL] ✗ Failed to send '{subject}' → {to_email}: {exc}")
+        print(f"[EMAIL] Failed to send '{subject}' -> {to_email}: {exc}")
     return False
 
 
-# ------------------------------------------------------------------ #
-#  Public API                                                          #
-# ------------------------------------------------------------------ #
-
-def send_booking_email(to_email: str, recipient_name: str) -> bool:
-    """Sends the Calendly booking link to a lead after they fill the form."""
+def send_v2_slots_email(
+    to_email: str,
+    recipient_name: str,
+    slots: list[str],
+    book_urls: list[str] | None = None,
+) -> bool:
+    """Sends an email with clickable slot cards (or plain list as fallback)."""
     subject = "Let's schedule a call!"
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <style>
-            body {{
-                font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                             Helvetica, Arial, sans-serif;
-                background-color: #f9fafb;
-                margin: 0;
-                padding: 0;
-                -webkit-font-smoothing: antialiased;
-            }}
-            .container {{
-                max-width: 600px;
-                margin: 40px auto;
-                background-color: #ffffff;
-                border: 1px solid #e5e7eb;
-                border-radius: 8px;
-                padding: 40px;
-                box-shadow: 0 4px 6px -1px rgba(0,0,0,.05), 0 2px 4px -1px rgba(0,0,0,.03);
-            }}
-            .logo {{
-                font-size: 20px;
-                font-weight: 700;
-                color: #0f172a;
-                margin-bottom: 24px;
-            }}
-            .content {{
-                font-size: 16px;
-                line-height: 1.6;
-                color: #334155;
-            }}
-            .btn-container {{ margin: 32px 0; text-align: center; }}
-            .btn {{
-                background-color: #2563eb;
-                color: #ffffff !important;
-                text-decoration: none;
-                padding: 12px 32px;
-                border-radius: 6px;
-                font-weight: 600;
-                font-size: 16px;
-                display: inline-block;
-            }}
-            .footer {{
-                margin-top: 40px;
-                border-top: 1px solid #e5e7eb;
-                padding-top: 24px;
-                font-size: 14px;
-                color: #64748b;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="logo">Outreach Automation</div>
-            <div class="content">
-                <p>Hi {recipient_name},</p>
-                <p>Thanks for connecting on LinkedIn! It sounds like there is some great
-                synergy between our businesses, and I would love to explore how we can
-                work together.</p>
-                <p>Please use my Calendly link below to pick a convenient slot. It only
-                takes a minute and we'll both receive a calendar invite automatically.</p>
 
-                <div class="btn-container">
-                    <a href="{settings.CALENDLY_LINK}" class="btn" target="_blank">
-                        Schedule a Meeting
-                    </a>
-                </div>
+    if book_urls:
+        cards_html = ""
+        for slot, url in zip(slots, book_urls):
+            cards_html += f"""
+            <a href="{url}" style="display:block;text-decoration:none;margin-bottom:14px;">
+              <table width="100%" cellpadding="0" cellspacing="0"
+                     style="border:2px solid #3b82f6;border-radius:10px;background:#eff6ff;">
+                <tr>
+                  <td style="padding:18px 22px;">
+                    <div style="font-size:15px;font-weight:700;color:#1e3a8a;">{slot}</div>
+                    <div style="font-size:13px;color:#2563eb;margin-top:6px;">
+                      1-hour meeting &nbsp;&middot;&nbsp; <strong>Click to confirm &rarr;</strong>
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </a>"""
+        slots_section = f"""
+            <p style="font-size:15px;color:#334155;margin-bottom:16px;">
+              Choose a time that works for you — just click to instantly confirm:
+            </p>
+            {cards_html}"""
+    else:
+        items = "".join(f"<li style='margin-bottom:8px;'><strong>{s}</strong></li>" for s in slots)
+        slots_section = f"""
+            <p style="font-size:15px;color:#334155;">
+              Please reply with which time works best:
+            </p>
+            <ul style="background:#f8fafc;padding:16px 32px;border-radius:6px;border:1px solid #e2e8f0;">
+              {items}
+            </ul>"""
 
-                <p>Looking forward to speaking with you soon!</p>
-                <p>Best regards,<br>Bharath Reddy</p>
-            </div>
-            <div class="footer">
-                <p>You're receiving this because you expressed interest on LinkedIn.</p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    print(f"[EMAIL] Sending booking email → {to_email}")
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,sans-serif;background:#f9fafb;margin:0;padding:0;">
+  <div style="max-width:600px;margin:40px auto;background:#fff;border:1px solid #e5e7eb;
+              border-radius:10px;padding:40px;">
+    <div style="font-size:20px;font-weight:700;color:#0f172a;margin-bottom:24px;">
+      Jane Aerospace
+    </div>
+    <p style="font-size:16px;color:#334155;">Hi {recipient_name},</p>
+    <p style="font-size:15px;color:#334155;line-height:1.6;">
+      Thanks for your interest! I'd love to connect and explore how we can work together.
+    </p>
+    {slots_section}
+    <p style="font-size:15px;color:#334155;margin-top:24px;">
+      Looking forward to speaking with you soon!<br><br>
+      Best regards,<br><strong>Bharath Reddy</strong>
+    </p>
+    <div style="margin-top:32px;border-top:1px solid #e5e7eb;padding-top:20px;
+                font-size:13px;color:#94a3b8;">
+      You're receiving this because you expressed interest in connecting.
+    </div>
+  </div>
+</body>
+</html>"""
+    print(f"[EMAIL] Sending V2 slots email -> {to_email}")
     return _send_html_email(to_email, subject, html_content)
 
 
 def send_admin_notification(lead_name: str, lead_email: str, lead_timezone: str) -> bool:
     """Notifies the organizer when a lead submits the details form."""
-    subject = f"New Lead Alert: {lead_name} submitted details!"
+    subject = f"New Lead: {lead_name} submitted details"
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
         <style>
-            body {{
-                font-family: 'Inter', -apple-system, sans-serif;
-                background-color: #f1f5f9;
-                margin: 0; padding: 0;
-            }}
-            .container {{
-                max-width: 600px;
-                margin: 40px auto;
-                background: #fff;
-                border: 1px solid #cbd5e1;
-                border-radius: 8px;
-                padding: 40px;
-            }}
-            .header {{
-                border-bottom: 2px solid #3b82f6;
-                padding-bottom: 16px;
-                margin-bottom: 24px;
-                font-size: 20px;
-                font-weight: 700;
-                color: #1e3a8a;
-            }}
+            body {{ font-family: 'Inter', -apple-system, sans-serif; background-color: #f1f5f9; margin: 0; padding: 0; }}
+            .container {{ max-width: 600px; margin: 40px auto; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 40px; }}
+            .header {{ border-bottom: 2px solid #3b82f6; padding-bottom: 16px; margin-bottom: 24px; font-size: 20px; font-weight: 700; color: #1e3a8a; }}
             table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
             th, td {{ padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: left; }}
             th {{ background: #f8fafc; color: #475569; font-weight: 600; width: 30%; }}
             td {{ color: #0f172a; }}
-            .footer {{ margin-top: 32px; font-size: 12px; color: #94a3b8; text-align: center; }}
         </style>
     </head>
     <body>
         <div class="container">
-            <div class="header">Lead Form Submission Captured</div>
+            <div class="header">New Lead Form Submission</div>
             <p>Hello Bharath,</p>
-            <p>A new lead has submitted their details. A booking email with your
-            Calendly link has been sent to them.</p>
+            <p>A new lead has submitted their details. A booking email with your Calendly link has been sent to them.</p>
             <table>
                 <tr><th>Full Name</th><td>{lead_name}</td></tr>
                 <tr><th>Email</th><td>{lead_email}</td></tr>
-                <tr><th>Timezone</th><td>{lead_timezone}</td></tr>
+                <tr><th>Location</th><td>{lead_timezone}</td></tr>
             </table>
-            <p style="margin-top:24px;">Please follow up if needed.</p>
-            <div class="footer">LinkedIn Outreach Automation</div>
         </div>
     </body>
     </html>
@@ -198,14 +157,14 @@ def send_admin_notification(lead_name: str, lead_email: str, lead_timezone: str)
 
 
 def send_organizer_booking_notification(
-    lead_name: str, lead_email: str, slot_start: str
+    lead_name: str, lead_email: str, slot_start: str, meeting_link: str | None = None
 ) -> bool:
-    """Notifies the organizer when a lead books via Calendly."""
+    """Notifies the organizer when a lead books a meeting."""
     subject = f"New Meeting Booked: {lead_name}"
-    slot_display = (
-        slot_start.replace("T", " ").replace("Z", " UTC")[:19]
-        if slot_start
-        else "Time TBD"
+    link_row = (
+        f"<tr><td style='padding:10px;background:#f8fafc;font-weight:600;color:#475569;'>Meeting Link</td>"
+        f"<td style='padding:10px;'><a href='{meeting_link}'>{meeting_link}</a></td></tr>"
+        if meeting_link else ""
     )
     html_content = f"""
     <div style="font-family:sans-serif;max-width:520px;margin:32px auto;
@@ -213,49 +172,47 @@ def send_organizer_booking_notification(
         <h2 style="color:#1e3a8a;margin-bottom:8px;">A lead just booked a meeting!</h2>
         <table style="width:100%;border-collapse:collapse;margin-top:16px;">
             <tr>
-                <td style="padding:10px;background:#f8fafc;font-weight:600;
-                           color:#475569;width:35%;">Name</td>
+                <td style="padding:10px;background:#f8fafc;font-weight:600;color:#475569;width:35%;">Name</td>
                 <td style="padding:10px;border-bottom:1px solid #e2e8f0;">{lead_name}</td>
             </tr>
             <tr>
-                <td style="padding:10px;background:#f8fafc;font-weight:600;color:#475569;">
-                    Email</td>
+                <td style="padding:10px;background:#f8fafc;font-weight:600;color:#475569;">Email</td>
                 <td style="padding:10px;border-bottom:1px solid #e2e8f0;">{lead_email}</td>
             </tr>
             <tr>
-                <td style="padding:10px;background:#f8fafc;font-weight:600;color:#475569;">
-                    Slot</td>
-                <td style="padding:10px;">{slot_display}</td>
+                <td style="padding:10px;background:#f8fafc;font-weight:600;color:#475569;">Slot</td>
+                <td style="padding:10px;border-bottom:1px solid #e2e8f0;">{slot_start}</td>
             </tr>
+            {link_row}
         </table>
-        <p style="margin-top:24px;color:#6b7280;font-size:13px;">
-            This booking has been recorded in your dashboard.</p>
+        <p style="margin-top:24px;color:#6b7280;font-size:13px;">This booking has been recorded in your dashboard.</p>
     </div>
     """
     return _send_html_email(settings.SMTP_FROM_EMAIL, subject, html_content)
 
 
 def send_booking_confirmation_to_lead(
-    to_email: str, recipient_name: str, slot_start: str
+    to_email: str, recipient_name: str, slot_start: str, meeting_link: str | None = None
 ) -> bool:
-    """Sends a confirmation email to the lead after they book via Calendly."""
-    slot_display = (
-        slot_start.replace("T", " ").replace("Z", " UTC")[:19]
-        if slot_start
-        else "your selected time"
-    )
+    """Sends a confirmation email to the lead with the booked slot and meeting link."""
     subject = "Your meeting is confirmed!"
+    join_button = (
+        f'<p style="margin-top:20px;">'
+        f'<a href="{meeting_link}" style="display:inline-block;padding:12px 24px;'
+        f'background:#1d4ed8;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">'
+        f'Join Meeting</a></p>'
+        if meeting_link else
+        "<p style='color:#6b7280;font-size:13px;margin-top:20px;'>A calendar invite will be sent to you shortly.</p>"
+    )
     html_content = f"""
     <div style="font-family:sans-serif;max-width:520px;margin:32px auto;
                 background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:36px;">
         <h2 style="color:#1e3a8a;margin-bottom:8px;">Meeting Confirmed!</h2>
         <p style="color:#374151;font-size:15px;">Hi {recipient_name},</p>
         <p style="color:#374151;font-size:15px;">
-            Your meeting has been booked for <strong>{slot_display}</strong>.</p>
-        <p style="color:#374151;font-size:15px;">
-            You'll receive a calendar invite shortly. Looking forward to speaking with you!</p>
-        <p style="margin-top:24px;color:#6b7280;font-size:13px;">
-            To reschedule, use the link in your Calendly confirmation email.</p>
+            Your meeting has been booked for <strong>{slot_start}</strong>.</p>
+        <p style="color:#374151;font-size:15px;">Looking forward to speaking with you!</p>
+        {join_button}
     </div>
     """
     return _send_html_email(to_email, subject, html_content)

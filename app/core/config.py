@@ -95,7 +95,22 @@ class Settings(BaseSettings):
 
     # --- Calendly & App URL ---
     CALENDLY_LINK: str = "https://calendly.com/bharathreddyget"
+    CALENDLY_API_TOKEN: str = ""
     APP_URL: str = "http://localhost:8000"
+
+    # --- Google Sheets ---
+    GOOGLE_SHEETS_CREDENTIALS_JSON: str = ""
+    GOOGLE_SHEETS_SPREADSHEET_ID: str = ""
+    GOOGLE_SHEETS_WORKSHEET_NAME: str = "tested-csv"
+
+    # --- Zoho Bookings ---
+    ZOHO_CLIENT_ID: str = ""
+    ZOHO_CLIENT_SECRET: str = ""
+    ZOHO_REFRESH_TOKEN: str = ""
+    ZOHO_SERVICE_ID: str = ""
+    ZOHO_STAFF_ID: str = ""
+    ZOHO_DC: str = "com"
+
 
     @field_validator("CELERY_BROKER_URL", "CELERY_RESULT_BACKEND", mode="before")
     @classmethod

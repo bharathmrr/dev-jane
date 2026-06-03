@@ -50,9 +50,21 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.reminder_tasks.enqueue_upcoming_reminders",
         "schedule": crontab(minute="*/5"),
     },
+    "v2-sync-sheets": {
+        "task": "app.workers.v2_tasks.sync_google_sheet",
+        "schedule": 20.0,
+    },
+    "v2-process-leads": {
+        "task": "app.workers.v2_tasks.process_new_leads",
+        "schedule": 20.0,
+    },
+    "v2-check-inbox": {
+        "task": "app.workers.v2_tasks.check_inbox_replies_v2",
+        "schedule": 20.0,
+    },
 }
 
 # Ensure task modules are imported when the worker boots.
 celery_app.autodiscover_tasks(
-    ["app.workers.email_tasks", "app.workers.reminder_tasks", "app.workers.reservation_tasks"]
+    ["app.workers.email_tasks", "app.workers.reminder_tasks", "app.workers.reservation_tasks", "app.workers.v2_tasks"]
 )

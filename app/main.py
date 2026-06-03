@@ -59,10 +59,6 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
-    # Mount the LinkedIn Outreach Router at root level
-    from app.api.v1.linkedin import router as linkedin_router
-    app.include_router(linkedin_router)
-
     if settings.PROMETHEUS_ENABLED:
         from prometheus_fastapi_instrumentator import Instrumentator
 

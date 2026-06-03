@@ -24,28 +24,17 @@ from app.services.llm_client import get_llm_client
 log = get_logger(__name__)
 
 SYSTEM_PROMPT = """You classify a single email reply from a person who was \
-offered a list of numbered meeting slots. Decide what they want.
+offered a list of meeting slots. Decide which slot they want.
 
 Return ONLY a JSON object (no prose, no markdown fences) with keys:
-  intent: one of [confirm_slot, reject_slots, suggest_new_time, reschedule, \
-cancel, general_query]
-  selected_slot_index: integer (1-based) of the slot they chose, or null
-  proposed_datetime_text: the exact phrase describing a new time they want, or null
-  confidence: number 0..1
-  reasoning: one short sentence
+  selected_slot: a string representing the time they selected (e.g., "15:00", "10:00 AM"), or null if they didn't select any.
 
 Rules:
-- "YES 2", "BOOK 3", "option 2", "the second one", "11am works" => confirm_slot \
-with the matching index when determinable.
-- "none of these", "no thanks" with no alternative => reject_slots.
-- "can we do Wednesday 5pm?", "I prefer mornings" => suggest_new_time and put \
-the phrase in proposed_datetime_text.
-- "need to move our meeting" for an already-booked meeting => reschedule.
-- "cancel", "not interested anymore" => cancel.
-- Questions about the meeting (agenda, who's attending) => general_query.
-- If you cannot tell, use general_query with low confidence."""
+- "3 PM works", "15:00", "I'll take the 3pm one" => { "selected_slot": "15:00" }
+- "None of these work" => { "selected_slot": null }
+"""
 
-USER_TEMPLATE = """Offered slots (1-based):
+USER_TEMPLATE = """Offered slots:
 {slots_block}
 
 The person's email reply:
@@ -56,31 +45,20 @@ The person's email reply:
 
 
 class IntentResult(BaseModel):
-    intent: EmailIntent = EmailIntent.UNKNOWN
-    selected_slot_index: int | None = None
-    proposed_datetime_text: str | None = None
-    confidence: float = Field(0.0, ge=0.0, le=1.0)
-    reasoning: str = ""
-
-    @field_validator("intent", mode="before")
-    @classmethod
-    def _coerce_intent(cls, v):
-        try:
-            return EmailIntent(v)
-        except (ValueError, TypeError):
-            return EmailIntent.UNKNOWN
+    selected_slot: str | None = None
 
 
-def _format_slots(offered: list[dict]) -> str:
+
+def _format_slots(offered: list[str]) -> str:
     if not offered:
         return "(no slots were offered in this thread)"
     lines = []
-    for i, s in enumerate(offered, start=1):
-        lines.append(f"{i}. {s.get('label', s.get('start'))}")
+    for s in offered:
+        lines.append(f"- {s}")
     return "\n".join(lines)
 
 
-async def classify_reply(reply_text: str, offered_slots: list[dict]) -> IntentResult:
+async def classify_reply(reply_text: str, offered_slots: list[str]) -> IntentResult:
     """Classify an inbound reply against the slots most recently offered."""
     client = get_llm_client()
     user = USER_TEMPLATE.format(
@@ -99,17 +77,9 @@ async def classify_reply(reply_text: str, offered_slots: list[dict]) -> IntentRe
         log.warning("intent_validation_failed", raw=raw)
         result = IntentResult()
 
-    # Guard: index must be within the offered range to be trusted.
-    if result.selected_slot_index is not None and not (
-        1 <= result.selected_slot_index <= len(offered_slots)
-    ):
-        result.selected_slot_index = None
-        if result.intent == EmailIntent.CONFIRM_SLOT:
-            result.intent = EmailIntent.GENERAL_QUERY
     log.info(
         "intent_classified",
-        intent=result.intent.value,
-        idx=result.selected_slot_index,
-        confidence=result.confidence,
+        selected_slot=result.selected_slot,
     )
     return result
+

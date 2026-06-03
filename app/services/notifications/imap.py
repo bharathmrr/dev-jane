@@ -12,6 +12,7 @@ from __future__ import annotations
 import email
 import imaplib
 import re
+from datetime import datetime, timedelta
 from email.message import Message
 from email.utils import parseaddr
 
@@ -62,21 +63,23 @@ def strip_quoted(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def fetch_replies() -> list[dict]:
-    """Fetch unseen messages, returning parsed reply dicts. Marks them seen."""
+def fetch_replies(since_days: int = 3, max_emails: int = 25) -> list[dict]:
+    """Fetch unseen messages from the last N days. Marks them seen."""
+    since = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
     conn = (
-        imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT)
+        imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT, timeout=30)
         if settings.IMAP_USE_SSL
-        else imaplib.IMAP4(settings.IMAP_HOST, settings.IMAP_PORT)
+        else imaplib.IMAP4(settings.IMAP_HOST, settings.IMAP_PORT, timeout=30)
     )
     out: list[dict] = []
     try:
         conn.login(settings.IMAP_USERNAME, settings.IMAP_PASSWORD)
         conn.select(settings.IMAP_MAILBOX)
-        typ, data = conn.search(None, "UNSEEN")
+        typ, data = conn.search(None, f"(UNSEEN SINCE {since})")
         if typ != "OK":
             return out
-        for num in data[0].split():
+        nums = data[0].split()[-max_emails:]  # most recent N only
+        for num in nums:
             typ, raw = conn.fetch(num, "(RFC822)")
             if typ != "OK" or not raw or not raw[0]:
                 continue

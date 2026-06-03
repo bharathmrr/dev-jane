@@ -65,8 +65,27 @@ class StubClient:
             intent = "reject_slots"
         else:
             intent = "general_query"
+
+        # Heuristic to find which offered slot is mentioned in the reply for V2
+        selected_slot = None
+        if intent == "confirm_slot":
+            import re
+            offered_slots = re.findall(r"-\s*(.+)", user)
+            for slot in offered_slots:
+                # Check if the slot text (e.g. "10:00 am" or "10:00") is in the reply text
+                clean_slot = slot.strip().lower()
+                # Split at newline to check only the reply part
+                reply_part = body.split("reply:")[-1] if "reply:" in body else body
+                if clean_slot in reply_part or clean_slot.split()[0] in reply_part:
+                    selected_slot = slot.strip()
+                    break
+            # Fallback to the first slot if confirm_slot but not matched by text
+            if not selected_slot and offered_slots:
+                selected_slot = offered_slots[0].strip()
+
         return {
             "intent": intent,
+            "selected_slot": selected_slot,
             "selected_slot_index": 1 if intent == "confirm_slot" else None,
             "proposed_datetime_text": None,
             "confidence": 0.4,

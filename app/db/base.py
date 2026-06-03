@@ -74,3 +74,17 @@ class ReservationStatus(str, enum.Enum):
     CONFIRMED = "confirmed"
     EXPIRED = "expired"
     RELEASED = "released"
+
+
+class LeadStatus(str, enum.Enum):
+    NEW = "NEW"
+    SENT = "SENT"
+    REPLIED = "REPLIED"
+    BOOKED = "BOOKED"
+    FAILED = "FAILED"
+
+
+class SlotStatus(str, enum.Enum):
+    AVAILABLE = "AVAILABLE"
+    BOOKED = "BOOKED"
+

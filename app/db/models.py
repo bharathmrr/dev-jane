@@ -38,7 +38,9 @@ from app.db.base import (
     BookingState,
     EmailDirection,
     EmailIntent,
+    LeadStatus,
     ReservationStatus,
+    SlotStatus,
     TimestampMixin,
     UserRole,
     UUIDMixin,
@@ -290,3 +292,42 @@ class SystemSetting(UUIDMixin, TimestampMixin, Base):
 
     key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     value: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class LeadV2(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "leads_v2"
+
+    business_name: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    status: Mapped[LeadStatus] = mapped_column(
+        Enum(LeadStatus, name="lead_status_v2", values_callable=_val),
+        default=LeadStatus.NEW,
+        index=True,
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    replied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    booked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    selected_slot: Mapped[str | None] = mapped_column(String(128))
+    booking_id: Mapped[str | None] = mapped_column(String(255))
+    offered_slots_json: Mapped[str | None] = mapped_column(Text)
+    zoho_meeting_link: Mapped[str | None] = mapped_column(String(512))
+
+
+class ZohoSlot(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "zoho_slots"
+
+    zoho_slot_id: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    slot_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[SlotStatus] = mapped_column(
+        Enum(SlotStatus, name="slot_status_v2", values_callable=_val),
+        default=SlotStatus.AVAILABLE,
+    )
+    booked_email: Mapped[str | None] = mapped_column(String(320))
+
+
+class AvailableDateV2(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "available_dates_v2"
+
+    slot_datetime: Mapped[datetime] = mapped_column(DateTime(timezone=True), unique=True, index=True)
+    is_available: Mapped[bool] = mapped_column(Boolean, default=True)
+

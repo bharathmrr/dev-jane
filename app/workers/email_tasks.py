@@ -171,8 +171,13 @@ def poll_imap() -> int:
     replies = fetch_replies()
     queued = 0
     for reply in replies:
-        msg_id = run_async(_persist_reply, reply)
-        if msg_id:
-            process_inbound_message.delay(msg_id)
+        if reply.get("thread_token"):
+            msg_id = run_async(_persist_reply, reply)
+            if msg_id:
+                process_inbound_message.delay(msg_id)
+                queued += 1
+        else:
+            from app.workers.v2_tasks import process_reply_v2
+            process_reply_v2.delay(reply)
             queued += 1
     return queued

@@ -8,20 +8,23 @@ from __future__ import annotations
 import asyncio
 from typing import Awaitable, Callable, TypeVar
 
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 
 T = TypeVar("T")
 
 
 def run_async(coro_factory: Callable[..., Awaitable[T]], *args, **kwargs) -> T:
     async def _wrapped() -> T:
-        async with SessionLocal() as db:
-            try:
-                result = await coro_factory(db, *args, **kwargs)
-                await db.commit()
-                return result
-            except Exception:
-                await db.rollback()
-                raise
+        try:
+            async with SessionLocal() as db:
+                try:
+                    result = await coro_factory(db, *args, **kwargs)
+                    await db.commit()
+                    return result
+                except Exception:
+                    await db.rollback()
+                    raise
+        finally:
+            await engine.dispose()
 
     return asyncio.run(_wrapped())

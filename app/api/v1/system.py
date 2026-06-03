@@ -451,6 +451,100 @@ async def list_leads(
     return result
 
 
+# --- Calendly sync (polls API, updates booking states) ---
+@router.post("/sync/calendly")
+async def sync_calendly(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Poll Calendly API for scheduled events and update booking states in DB."""
+    from app.core.config import settings
+    from app.db.base import BookingState
+    from datetime import datetime
+    import httpx
+
+    token = settings.CALENDLY_API_TOKEN
+    if not token:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "CALENDLY_API_TOKEN not configured")
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        me_resp = await client.get("https://api.calendly.com/users/me", headers=headers)
+        if me_resp.status_code != 200:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Calendly API error")
+        user_uri = me_resp.json()["resource"]["uri"]
+
+        events_resp = await client.get(
+            "https://api.calendly.com/scheduled_events",
+            headers=headers,
+            params={"user": user_uri, "count": 100, "status": "active"},
+        )
+        if events_resp.status_code != 200:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Calendly events error: {events_resp.text}")
+        events = events_resp.json().get("collection", [])
+
+    organizer = (await db.execute(select(Organizer).limit(1))).scalar_one_or_none()
+
+    def parse_dt(s):
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    synced = 0
+    for event in events:
+        event_uri = event.get("uri", "")
+        start_time = event.get("start_time", "")
+        end_time = event.get("end_time", "")
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            inv_resp = await client.get(f"{event_uri}/invitees", headers=headers, params={"count": 10})
+            if inv_resp.status_code != 200:
+                continue
+            invitees = inv_resp.json().get("collection", [])
+
+        for invitee in invitees:
+            inv_email = invitee.get("email", "").lower()
+            inv_name = invitee.get("name", "")
+            if not inv_email:
+                continue
+
+            lead = (await db.execute(select(Lead).where(Lead.email == inv_email))).scalar_one_or_none()
+            if not lead:
+                lead = Lead(email=inv_email, name=inv_name)
+                db.add(lead)
+                await db.flush()
+
+            existing = (await db.execute(
+                select(Booking).where(Booking.lead_id == lead.id)
+                .order_by(Booking.created_at.desc()).limit(1)
+            )).scalar_one_or_none()
+
+            if existing:
+                existing.state = BookingState.BOOKING_CONFIRMED
+                existing.slot_start = parse_dt(start_time)
+                existing.slot_end = parse_dt(end_time)
+                existing.booking_link = event_uri
+            else:
+                if not organizer:
+                    continue
+                db.add(Booking(
+                    lead_id=lead.id,
+                    organizer_id=organizer.id,
+                    state=BookingState.BOOKING_CONFIRMED,
+                    slot_start=parse_dt(start_time),
+                    slot_end=parse_dt(end_time),
+                    booking_link=event_uri,
+                ))
+            synced += 1
+
+    await db.commit()
+    return {"synced": synced, "events_checked": len(events)}
+
+
 # --- Health checks ---
 @router.get("/health/live")
 async def liveness() -> dict:
