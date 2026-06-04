@@ -52,7 +52,7 @@ celery_app.conf.beat_schedule = {
     },
     "v2-sync-sheets": {
         "task": "app.workers.v2_tasks.sync_google_sheet",
-        "schedule": 20.0,
+        "schedule": 30.0,
     },
     "v2-process-leads": {
         "task": "app.workers.v2_tasks.process_new_leads",
@@ -61,6 +61,10 @@ celery_app.conf.beat_schedule = {
     "v2-check-inbox": {
         "task": "app.workers.v2_tasks.check_inbox_replies_v2",
         "schedule": 20.0,
+    },
+    "v2-send-reminders": {
+        "task": "app.workers.v2_tasks.send_v2_reminders",
+        "schedule": 300.0,  # every 5 minutes
     },
 }
 

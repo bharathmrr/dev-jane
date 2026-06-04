@@ -166,15 +166,51 @@ async def _persist_reply(db: AsyncSession, reply: dict) -> str | None:
 
 @celery_app.task
 def poll_imap() -> int:
+    import redis as _redis
     from app.services.notifications.imap import fetch_replies
+    from app.core.config import settings
+
+    # Redis client for message-id de-duplication (7-day TTL)
+    try:
+        _r = _redis.from_url(str(settings.CELERY_BROKER_URL), decode_responses=True)
+    except Exception:
+        _r = None
+
+    def _already_processed(message_id: str) -> bool:
+        if not message_id or _r is None:
+            return False
+        key = f"imap:seen:{message_id}"
+        # SET NX returns True if key was newly set (not seen before)
+        return not _r.set(key, "1", nx=True, ex=86400 * 7)
+
+    # Senders we never want to process — bounces and automations only
+    _SKIP_PREFIXES = ("mailer-daemon@", "no-reply@", "noreply@", "postmaster@",
+                      "donotreply@", "bounce@", "daemon@")
+
+    def _should_skip(from_addr: str) -> bool:
+        fa = (from_addr or "").lower()
+        if not fa:
+            return True
+        return any(fa.startswith(p) for p in _SKIP_PREFIXES)
 
     replies = fetch_replies()
     queued = 0
     for reply in replies:
+        from_addr = reply.get("from_addr", "")
+        body = (reply.get("body") or "").strip()
+
+        # Skip bounce/automation emails and emails with empty body
+        if _should_skip(from_addr) or not body:
+            continue
+
+        msg_id = reply.get("message_id", "")
+        if _already_processed(msg_id):
+            continue  # skip — already handled in a previous poll cycle
+
         if reply.get("thread_token"):
-            msg_id = run_async(_persist_reply, reply)
-            if msg_id:
-                process_inbound_message.delay(msg_id)
+            db_msg_id = run_async(_persist_reply, reply)
+            if db_msg_id:
+                process_inbound_message.delay(db_msg_id)
                 queued += 1
         else:
             from app.workers.v2_tasks import process_reply_v2

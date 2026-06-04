@@ -63,8 +63,13 @@ def strip_quoted(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def fetch_replies(since_days: int = 3, max_emails: int = 25) -> list[dict]:
-    """Fetch unseen messages from the last N days. Marks them seen."""
+def fetch_replies(since_days: int = 3, max_emails: int = 50) -> list[dict]:
+    """Fetch ALL recent messages (seen or unseen) from the last N days.
+
+    De-duplication by message_id is handled in the caller (poll_imap via Redis).
+    We no longer rely on the UNSEEN flag because Gmail marks emails as read
+    as soon as the mobile/web client opens them, which causes IMAP to miss them.
+    """
     since = (datetime.now() - timedelta(days=since_days)).strftime("%d-%b-%Y")
     conn = (
         imaplib.IMAP4_SSL(settings.IMAP_HOST, settings.IMAP_PORT, timeout=30)
@@ -75,7 +80,8 @@ def fetch_replies(since_days: int = 3, max_emails: int = 25) -> list[dict]:
     try:
         conn.login(settings.IMAP_USERNAME, settings.IMAP_PASSWORD)
         conn.select(settings.IMAP_MAILBOX)
-        typ, data = conn.search(None, f"(UNSEEN SINCE {since})")
+        # Search ALL emails since N days ago — not just UNSEEN
+        typ, data = conn.search(None, f"(SINCE {since})")
         if typ != "OK":
             return out
         nums = data[0].split()[-max_emails:]  # most recent N only
@@ -83,14 +89,17 @@ def fetch_replies(since_days: int = 3, max_emails: int = 25) -> list[dict]:
             typ, raw = conn.fetch(num, "(RFC822)")
             if typ != "OK" or not raw or not raw[0]:
                 continue
-            msg = email.message_from_bytes(raw[0][1])
+            raw_bytes = raw[0][1]
+            if not isinstance(raw_bytes, (bytes, bytearray)):
+                continue
+            msg = email.message_from_bytes(raw_bytes)
             token = extract_token(msg)
             from_name, from_addr = parseaddr(msg.get("From", ""))
             body = strip_quoted(_get_plaintext(msg))
             out.append(
                 {
                     "thread_token": token,
-                    "message_id": msg.get("Message-ID"),
+                    "message_id": msg.get("Message-ID", ""),
                     "in_reply_to": msg.get("In-Reply-To"),
                     "from_addr": from_addr,
                     "from_name": from_name,
@@ -98,7 +107,6 @@ def fetch_replies(since_days: int = 3, max_emails: int = 25) -> list[dict]:
                     "body": body,
                 }
             )
-            conn.store(num, "+FLAGS", "\\Seen")
     finally:
         try:
             conn.logout()

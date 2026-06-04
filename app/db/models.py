@@ -298,6 +298,7 @@ class LeadV2(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "leads_v2"
 
     business_name: Mapped[str] = mapped_column(String(255))
+    contact_name: Mapped[str | None] = mapped_column(String(255))
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     status: Mapped[LeadStatus] = mapped_column(
         Enum(LeadStatus, name="lead_status_v2", values_callable=_val),
@@ -311,6 +312,9 @@ class LeadV2(UUIDMixin, TimestampMixin, Base):
     booking_id: Mapped[str | None] = mapped_column(String(255))
     offered_slots_json: Mapped[str | None] = mapped_column(Text)
     zoho_meeting_link: Mapped[str | None] = mapped_column(String(512))
+    reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    follow_up_count: Mapped[int] = mapped_column(Integer, default=0)
+    summary: Mapped[str | None] = mapped_column(Text)
 
 
 class ZohoSlot(UUIDMixin, TimestampMixin, Base):

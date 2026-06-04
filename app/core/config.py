@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # --- App ---
     ENV: Literal["dev", "staging", "prod"] = "dev"
     DEBUG: bool = False
-    APP_NAME: str = "linkedin-outreach"
+    APP_NAME: str = "jane-aerospace-scheduler"
     API_V1_PREFIX: str = "/api/v1"
     DEFAULT_TIMEZONE: str = "UTC"
 
@@ -84,14 +84,9 @@ class Settings(BaseSettings):
     PROMETHEUS_ENABLED: bool = False
     OTEL_EXPORTER_OTLP_ENDPOINT: str | None = None
 
-    # --- Unipile ---
-    UNIPILE_API_KEY: str = ""
-    UNIPILE_ACCOUNT_ID: str = ""
-    UNIPILE_DSN: str = "api33.unipile.com:16356"
-
     # --- SendGrid ---
     SENDGRID_API_KEY: str = ""
-    SENDGRID_FROM_EMAIL: str = "bharathreddyget@gmail.com"
+    SENDGRID_FROM_EMAIL: str = "bharath.p@janeaerospace.co.in"
 
     # --- Calendly & App URL ---
     CALENDLY_LINK: str = "https://calendly.com/bharathreddyget"
@@ -110,6 +105,16 @@ class Settings(BaseSettings):
     ZOHO_SERVICE_ID: str = ""
     ZOHO_STAFF_ID: str = ""
     ZOHO_DC: str = "com"
+
+    # --- Groq (email generation) ---
+    GROQ_API_KEY: str = ""
+
+    # --- Organizer contact ---
+    ORGANIZER_EMAIL: str = "bharath.p@janeaerospace.co.in"
+    ORGANIZER_NAME: str = "Leo Charles"
+
+    # --- Zoho availability cache ---
+    ZOHO_CACHE_TTL: int = 300
 
 
     @field_validator("CELERY_BROKER_URL", "CELERY_RESULT_BACKEND", mode="before")

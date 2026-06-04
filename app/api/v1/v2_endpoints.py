@@ -5,22 +5,27 @@ import hmac as _hmac
 import json
 import uuid
 from typing import Any, Dict
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.db.models import AvailableDateV2, LeadV2, LeadStatus, ZohoSlot
+from app.db.models import LeadV2, LeadStatus, ZohoSlot, SlotStatus
+from app.services.availability_v2 import get_slots_for_week, invalidate_week_cache
 from app.services.email_service import (
+    make_book_url,
     send_booking_confirmation_to_lead,
     send_organizer_booking_notification,
+    send_v2_slots_email,
 )
 from app.services.zoho import ZohoBookingsService
 from app.workers.v2_tasks import sync_google_sheet, process_new_leads
+
+_IST = ZoneInfo("Asia/Kolkata")
 
 router = APIRouter(prefix="/v2", tags=["v2"])
 
@@ -41,6 +46,7 @@ def trigger_send_email():
     return {"message": "Lead processing triggered in background"}
 
 
+
 # ---------------------------------------------------------------------------
 # Leads
 # ---------------------------------------------------------------------------
@@ -57,9 +63,9 @@ async def get_leads(db: AsyncSession = Depends(get_db)):
             "business_name": lead.business_name,
             "email": lead.email,
             "status": lead.status.value,
-            "sent_at": lead.sent_at,
-            "replied_at": lead.replied_at,
-            "booked_at": lead.booked_at,
+            "sent_at": lead.sent_at.isoformat() if lead.sent_at else None,
+            "replied_at": lead.replied_at.isoformat() if lead.replied_at else None,
+            "booked_at": lead.booked_at.isoformat() if lead.booked_at else None,
             "selected_slot": lead.selected_slot,
             "booking_id": lead.booking_id,
             "zoho_meeting_link": lead.zoho_meeting_link,
@@ -80,7 +86,7 @@ async def get_slots(db: AsyncSession = Depends(get_db)):
         {
             "id": str(slot.id),
             "zoho_slot_id": slot.zoho_slot_id,
-            "slot_time": slot.slot_time,
+            "slot_time": slot.slot_time.isoformat() if slot.slot_time else None,
             "status": slot.status.value,
             "booked_email": slot.booked_email,
         }
@@ -105,87 +111,129 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
         "sent_leads":      sent,
         "replied_leads":   replied,
         "booked_leads":    booked,
-        "conversion_rate": (booked / total) if total > 0 else 0.0,
+        "conversion_rate": round((booked / total) * 100, 1) if total > 0 else 0.0,
     }
-
-
-# ---------------------------------------------------------------------------
-# Available date-time slots (admin-managed)
-# ---------------------------------------------------------------------------
-
-def _slot_to_dict(slot: AvailableDateV2) -> dict:
-    return {
-        "id":            str(slot.id),
-        "slot_datetime": slot.slot_datetime.isoformat(),
-        "is_available":  slot.is_available,
-        "display":       slot.slot_datetime.strftime("%A, %b %d at %I:%M %p"),
-    }
-
-
-@router.get("/available-dates")
-async def get_available_dates(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(AvailableDateV2).order_by(AvailableDateV2.slot_datetime)
-    )
-    return [_slot_to_dict(s) for s in result.scalars().all()]
-
-
-class AddSlotRequest(BaseModel):
-    slot_datetime: str  # ISO-8601, e.g. "2026-06-05T10:00:00"
-
-
-@router.post("/available-dates")
-async def add_available_date(req: AddSlotRequest, db: AsyncSession = Depends(get_db)):
-    try:
-        parsed = dt.datetime.fromisoformat(req.slot_datetime)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid datetime format. Use ISO-8601.")
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=dt.timezone.utc)
-
-    existing = (await db.execute(
-        select(AvailableDateV2).where(AvailableDateV2.slot_datetime == parsed)
-    )).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=409, detail="Slot already exists.")
-
-    slot = AvailableDateV2(slot_datetime=parsed, is_available=True)
-    db.add(slot)
-    await db.flush()
-    await db.refresh(slot)
-    return _slot_to_dict(slot)
-
-
-@router.patch("/available-dates/{slot_id}/toggle")
-async def toggle_available_date(slot_id: str, db: AsyncSession = Depends(get_db)):
-    try:
-        sid = uuid.UUID(slot_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid slot ID.")
-    slot = await db.get(AvailableDateV2, sid)
-    if not slot:
-        raise HTTPException(status_code=404, detail="Slot not found.")
-    slot.is_available = not slot.is_available
-    await db.flush()
-    return _slot_to_dict(slot)
-
-
-@router.delete("/available-dates/{slot_id}")
-async def delete_available_date(slot_id: str, db: AsyncSession = Depends(get_db)):
-    try:
-        sid = uuid.UUID(slot_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid slot ID.")
-    slot = await db.get(AvailableDateV2, sid)
-    if not slot:
-        raise HTTPException(status_code=404, detail="Slot not found.")
-    await db.delete(slot)
-    return {"status": "deleted"}
 
 
 # ---------------------------------------------------------------------------
 # One-click booking via email card link
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Week selection via email card click (Stage 1 → Stage 2)
+# ---------------------------------------------------------------------------
+
+def _verify_week_sig(lead_id: str, week: str, sig: str) -> bool:
+    msg = f"{lead_id}:week:{week}".encode()
+    expected = _hmac.new(
+        settings.EMAIL_HMAC_SECRET.encode(), msg, hashlib.sha256
+    ).hexdigest()[:16]
+    return _hmac.compare_digest(sig, expected)
+
+
+def _slots_sent_page(name: str, week_label: str) -> str:
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:-apple-system,sans-serif;background:#eff6ff;
+             display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;">
+  <div style="background:#fff;border-radius:14px;padding:48px 40px;max-width:480px;
+              text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+    <div style="font-size:48px;margin-bottom:16px;">&#x1F4EC;</div>
+    <h1 style="color:#1e3a8a;font-size:22px;margin:0 0 12px;">Slots Sent!</h1>
+    <p style="color:#374151;font-size:15px;margin:0 0 8px;">Hi <strong>{name}</strong>,</p>
+    <p style="color:#374151;font-size:15px;">
+      We've sent the available slots for <strong>{week_label}</strong> to your inbox.<br>
+      Please check your email and click any slot to confirm instantly.
+    </p>
+    <p style="color:#9ca3af;font-size:13px;margin-top:24px;">You can close this tab.</p>
+  </div>
+</body></html>"""
+
+
+def _arranging_slots_page(name: str) -> str:
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:-apple-system,sans-serif;background:#f0f9ff;
+             display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;">
+  <div style="background:#fff;border-radius:14px;padding:48px 40px;max-width:480px;
+              text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+    <div style="font-size:48px;margin-bottom:16px;">&#x1F4EC;</div>
+    <h1 style="color:#1e3a8a;font-size:22px;margin:0 0 12px;">We're On It, {name}!</h1>
+    <p style="color:#374151;font-size:15px;margin:0 0 8px;">
+      We are personally arranging the best available times for you.
+    </p>
+    <p style="color:#374151;font-size:15px;">
+      You will receive an email shortly with your options — please check your inbox.
+    </p>
+    <p style="color:#9ca3af;font-size:13px;margin-top:24px;">You can close this tab.</p>
+  </div>
+</body></html>"""
+
+
+@router.get("/week/{lead_id}/{week}/{sig}", response_class=HTMLResponse)
+async def select_week(
+    lead_id: str, week: str, sig: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    if week not in ("this", "next"):
+        raise HTTPException(status_code=400, detail="Invalid week selection.")
+    if not _verify_week_sig(lead_id, week, sig):
+        raise HTTPException(status_code=400, detail="Invalid or expired link.")
+
+    try:
+        lid = uuid.UUID(lead_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid link.")
+
+    lead = await db.get(LeadV2, lid)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+
+    if lead.status == LeadStatus.BOOKED:
+        return HTMLResponse(_already_booked_page(lead.selected_slot or "", lead.zoho_meeting_link))
+
+    from app.services.availability_v2 import get_available_slots
+
+    # Try requested week → other week → broad 14-day search
+    slot_infos = await get_slots_for_week(db, week, 6)
+    if not slot_infos:
+        other = "next" if week == "this" else "this"
+        slot_infos = await get_slots_for_week(db, other, 6)
+        if slot_infos:
+            week = other
+    if not slot_infos:
+        slot_infos = await get_available_slots(db, n=6, lookahead_days=14)
+
+    greeting_name = (lead.contact_name or lead.business_name).split()[0].capitalize()
+
+    if not slot_infos:
+        # Truly nothing available — send graceful "when are you available?" email
+        from app.workers.v2_tasks import _send_graceful_no_slots
+        background_tasks.add_task(_send_graceful_no_slots, lead)
+        return HTMLResponse(_arranging_slots_page(greeting_name))
+
+    slot_strings = [s["display"] for s in slot_infos]
+    book_urls = [make_book_url(str(lead.id), i) for i in range(len(slot_infos))]
+
+    # Send Stage 2 email with clickable slot cards in background
+    background_tasks.add_task(
+        send_v2_slots_email,
+        lead.email, lead.business_name, slot_strings,
+        book_urls=book_urls,
+        contact_name=lead.contact_name,
+    )
+
+    # Store offered slots — marks lead as Stage 2
+    lead.offered_slots_json = json.dumps(slot_infos)
+    await db.flush()
+
+    # Bust the week cache so the NEXT lead gets a fresh Zoho fetch
+    invalidate_week_cache(week)
+
+    week_label = "This Week" if week == "this" else "Next Week"
+    return HTMLResponse(_slots_sent_page(greeting_name, week_label))
+
 
 def _verify_book_sig(lead_id: str, slot_idx: int, sig: str) -> bool:
     msg = f"{lead_id}:{slot_idx}".encode()
@@ -266,7 +314,9 @@ def _already_booked_page(slot: str, meeting_link: str | None) -> str:
 
 @router.get("/book/{lead_id}/{slot_idx}/{sig}", response_class=HTMLResponse)
 async def one_click_book(
-    lead_id: str, slot_idx: int, sig: str, db: AsyncSession = Depends(get_db)
+    lead_id: str, slot_idx: int, sig: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
 ):
     if not _verify_book_sig(lead_id, slot_idx, sig):
         raise HTTPException(status_code=400, detail="Invalid or expired booking link.")
@@ -280,70 +330,100 @@ async def one_click_book(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found.")
 
-    # Idempotent — already booked
     if lead.status == LeadStatus.BOOKED:
         return HTMLResponse(_already_booked_page(lead.selected_slot or "", lead.zoho_meeting_link))
 
     if not lead.offered_slots_json:
         raise HTTPException(status_code=400, detail="No slots on record for this lead.")
 
-    slot_strings = json.loads(lead.offered_slots_json)
-    if slot_idx >= len(slot_strings):
-        raise HTTPException(status_code=400, detail="Slot no longer available.")
+    raw_slots = json.loads(lead.offered_slots_json)
+    if slot_idx >= len(raw_slots):
+        raise HTTPException(status_code=400, detail="Slot index out of range.")
 
-    selected_str = slot_strings[slot_idx]
+    slot_item = raw_slots[slot_idx]
 
-    # Find the matching AvailableDateV2 record
-    all_slots = (await db.execute(select(AvailableDateV2))).scalars().all()
-    matched = next(
-        (s for s in all_slots
-         if s.slot_datetime.strftime("%A, %b %d at %I:%M %p") == selected_str),
-        None,
-    )
+    if isinstance(slot_item, dict):
+        selected_str = slot_item["display"]
+        date_str = slot_item.get("date_str") or ""
+        time_str = slot_item.get("time_str") or ""
+    else:
+        selected_str = str(slot_item)
+        date_str = ""
+        time_str = ""
 
-    # Check DB availability BEFORE calling Zoho
-    # Covers: slot deleted, or already booked by someone else
-    if not matched or not matched.is_available:
-        return HTMLResponse(_slot_taken_page(selected_str))
+    # Parse date/time from display string if missing (legacy format)
+    if not date_str or not time_str:
+        try:
+            import dateutil.parser
+            parsed = dateutil.parser.parse(selected_str)
+            date_str = parsed.strftime("%d-%b-%Y")
+            time_str = parsed.strftime("%H:%M")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Cannot parse slot date/time.")
 
-    date_str = matched.slot_datetime.strftime("%d-%b-%Y")
-    time_str = matched.slot_datetime.strftime("%H:%M")
+    # Check if slot is already booked locally
+    from app.services.availability_v2 import _get_booked_slots, IST as _IST
+    booked_iso, booked_display = await _get_booked_slots(db)
+    try:
+        hour = int(time_str.split(":")[0])
+        slot_date = dt.datetime.strptime(date_str, "%d-%b-%Y").date()
+        slot_dt_ist = dt.datetime(slot_date.year, slot_date.month, slot_date.day, hour, 0, tzinfo=_IST)
+        if slot_dt_ist.isoformat() in booked_iso or slot_dt_ist.strftime("%A, %b %d at %I:%M %p") in booked_display or selected_str in booked_display:
+            return HTMLResponse(_slot_taken_page(selected_str))
+    except Exception:
+        pass
 
-    # Create Zoho booking (blocking I/O — run in thread)
+    # Call Zoho to create the booking
     zoho = ZohoBookingsService()
     booking_id, meeting_link = await asyncio.to_thread(
         zoho.create_booking,
-        name=lead.business_name,
+        name=lead.contact_name or lead.business_name,
         email=lead.email,
         date_str=date_str,
         time_str=time_str,
     )
 
-    # Mark slot unavailable
-    if matched:
-        matched.is_available = False
+    if booking_id is None:
+        return HTMLResponse(_slot_taken_page(selected_str))
 
-    # Update lead
     now = dt.datetime.now(dt.timezone.utc)
     lead.status = LeadStatus.BOOKED
     lead.replied_at = now
     lead.booked_at = now
     lead.selected_slot = selected_str
-    lead.booking_id = booking_id or f"click_{uuid.uuid4()}"
+    lead.booking_id = booking_id
     lead.zoho_meeting_link = meeting_link
+
+    # Sync ZohoSlot status in DB
+    try:
+        hour = int(time_str.split(":")[0])
+        slot_date = dt.datetime.strptime(date_str, "%d-%b-%Y").date()
+        slot_dt_ist = dt.datetime(slot_date.year, slot_date.month, slot_date.day, hour, 0, tzinfo=_IST)
+        slot_dt_utc = slot_dt_ist.astimezone(dt.timezone.utc)
+        slot_row = (await db.execute(
+            select(ZohoSlot).where(ZohoSlot.slot_time == slot_dt_utc)
+        )).scalar_one_or_none()
+        if slot_row:
+            slot_row.status = SlotStatus.BOOKED
+            slot_row.booked_email = lead.email
+    except Exception:
+        pass
+
     await db.flush()
 
-    # Send confirmation emails (blocking I/O — run in thread)
-    await asyncio.to_thread(
+    # Offload slow email dispatches to FastAPI background tasks so the web response returns immediately
+    background_tasks.add_task(
         send_booking_confirmation_to_lead,
         lead.email, lead.business_name, selected_str, meeting_link,
+        lead.contact_name,
     )
-    await asyncio.to_thread(
+    background_tasks.add_task(
         send_organizer_booking_notification,
         lead.business_name, lead.email, selected_str, meeting_link,
     )
 
-    return HTMLResponse(_confirmed_page(lead.business_name, selected_str, meeting_link))
+    greeting_name = (lead.contact_name or lead.business_name).split()[0]
+    return HTMLResponse(_confirmed_page(greeting_name, selected_str, meeting_link))
 
 
 # ---------------------------------------------------------------------------

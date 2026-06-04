@@ -16,20 +16,54 @@ depends_on = None
 
 def upgrade() -> None:
     # --- available_dates_v2: replace date_value with slot_datetime + is_available ---
-    op.drop_index('ix_available_dates_v2_date_value', table_name='available_dates_v2')
-    op.drop_column('available_dates_v2', 'date_value')
-    op.add_column('available_dates_v2',
-        sa.Column('slot_datetime', sa.DateTime(timezone=True),
-                  server_default=sa.text('now()'), nullable=False))
-    op.add_column('available_dates_v2',
-        sa.Column('is_available', sa.Boolean(), server_default='true', nullable=False))
-    op.alter_column('available_dates_v2', 'slot_datetime', server_default=None)
-    op.create_index('ix_available_dates_v2_slot_datetime', 'available_dates_v2',
-                    ['slot_datetime'], unique=True)
+    op.execute(sa.text('DROP INDEX IF EXISTS ix_available_dates_v2_date_value'))
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='available_dates_v2' AND column_name='date_value'
+            ) THEN ALTER TABLE available_dates_v2 DROP COLUMN date_value; END IF;
+        END $$;
+    """))
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='available_dates_v2' AND column_name='slot_datetime'
+            ) THEN ALTER TABLE available_dates_v2 ADD COLUMN slot_datetime TIMESTAMPTZ NOT NULL DEFAULT NOW(); END IF;
+        END $$;
+    """))
+    op.execute(sa.text('ALTER TABLE available_dates_v2 ALTER COLUMN slot_datetime DROP DEFAULT'))
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='available_dates_v2' AND column_name='is_available'
+            ) THEN ALTER TABLE available_dates_v2 ADD COLUMN is_available BOOLEAN NOT NULL DEFAULT TRUE; END IF;
+        END $$;
+    """))
+    op.execute(sa.text(
+        'CREATE UNIQUE INDEX IF NOT EXISTS ix_available_dates_v2_slot_datetime '
+        'ON available_dates_v2(slot_datetime)'
+    ))
 
     # --- leads_v2: add offered_slots_json + zoho_meeting_link ---
-    op.add_column('leads_v2', sa.Column('offered_slots_json', sa.Text(), nullable=True))
-    op.add_column('leads_v2', sa.Column('zoho_meeting_link', sa.String(length=512), nullable=True))
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='leads_v2' AND column_name='offered_slots_json'
+            ) THEN ALTER TABLE leads_v2 ADD COLUMN offered_slots_json TEXT; END IF;
+        END $$;
+    """))
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name='leads_v2' AND column_name='zoho_meeting_link'
+            ) THEN ALTER TABLE leads_v2 ADD COLUMN zoho_meeting_link VARCHAR(512); END IF;
+        END $$;
+    """))
 
 
 def downgrade() -> None:
