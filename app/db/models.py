@@ -36,8 +36,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import (
     Base,
     BookingState,
+    CompanyType,
+    DocumentStatus,
     EmailDirection,
     EmailIntent,
+    KYCStatus,
     LeadStatus,
     ReservationStatus,
     SlotStatus,
@@ -334,4 +337,105 @@ class AvailableDateV2(UUIDMixin, TimestampMixin, Base):
 
     slot_datetime: Mapped[datetime] = mapped_column(DateTime(timezone=True), unique=True, index=True)
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+# ---------------------------------------------------------------------------
+# Onboarding models
+# ---------------------------------------------------------------------------
+
+class OnboardingRecord(UUIDMixin, TimestampMixin, Base):
+    """One record per lead — tracks the full KYC → NDA → Agreement pipeline."""
+    __tablename__ = "onboarding_records"
+
+    lead_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("leads_v2.id", ondelete="CASCADE"),
+        unique=True, nullable=False, index=True,
+    )
+    company_type: Mapped[str | None] = mapped_column(
+        Enum(CompanyType, name="company_type_enum", values_callable=_val), nullable=True
+    )
+
+    # --- KYC ---
+    kyc_status: Mapped[str] = mapped_column(
+        Enum(KYCStatus, name="kyc_status_enum", values_callable=_val),
+        default=KYCStatus.PENDING, nullable=False,
+    )
+    kyc_status_display: Mapped[str | None] = mapped_column(String(512))
+    kyc_form_token: Mapped[str | None] = mapped_column(String(128))
+    kyc_form_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    kyc_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    kyc_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    kyc_followup_count: Mapped[int] = mapped_column(Integer, default=0)
+    kyc_last_followup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # --- NDA ---
+    nda_status: Mapped[str] = mapped_column(
+        Enum(DocumentStatus, name="nda_status_enum", values_callable=_val),
+        default=DocumentStatus.PENDING, nullable=False,
+    )
+    nda_status_display: Mapped[str | None] = mapped_column(String(512))
+    nda_draft_content: Mapped[str | None] = mapped_column(Text)
+    nda_draft_zoho_file_id: Mapped[str | None] = mapped_column(String(255))
+    nda_signed_zoho_file_id: Mapped[str | None] = mapped_column(String(255))
+    nda_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    nda_signed_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    nda_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    nda_followup_count: Mapped[int] = mapped_column(Integer, default=0)
+    nda_last_followup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    nda_draft_revision: Mapped[int] = mapped_column(Integer, default=0)
+    nda_team_notes: Mapped[str | None] = mapped_column(Text)
+
+    # --- Customer Agreement ---
+    agreement_status: Mapped[str] = mapped_column(
+        Enum(DocumentStatus, name="agreement_status_enum", values_callable=_val),
+        default=DocumentStatus.PENDING, nullable=False,
+    )
+    agreement_status_display: Mapped[str | None] = mapped_column(String(512))
+    agreement_draft_content: Mapped[str | None] = mapped_column(Text)
+    agreement_draft_zoho_file_id: Mapped[str | None] = mapped_column(String(255))
+    agreement_signed_zoho_file_id: Mapped[str | None] = mapped_column(String(255))
+    agreement_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    agreement_signed_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    agreement_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    agreement_followup_count: Mapped[int] = mapped_column(Integer, default=0)
+    agreement_last_followup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    agreement_draft_revision: Mapped[int] = mapped_column(Integer, default=0)
+    agreement_team_notes: Mapped[str | None] = mapped_column(Text)
+
+    # relationships
+    lead: Mapped["LeadV2"] = relationship("LeadV2", foreign_keys=[lead_id])
+    kyc_submissions: Mapped[list["KYCSubmission"]] = relationship(
+        "KYCSubmission", back_populates="onboarding", cascade="all, delete-orphan"
+    )
+
+
+class KYCSubmission(UUIDMixin, TimestampMixin, Base):
+    """Stores each attempt a lead makes at submitting the KYC form."""
+    __tablename__ = "kyc_submissions"
+
+    onboarding_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("onboarding_records.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, default=1)
+
+    # Form fields (mandatory for all)
+    company_type: Mapped[str] = mapped_column(
+        Enum(CompanyType, name="kyc_company_type_enum", values_callable=_val), nullable=False
+    )
+    company_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    contact_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    contact_number: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    # File references in Zoho WorkDrive (file IDs)
+    gst_certificate_zoho_id: Mapped[str | None] = mapped_column(String(255))   # Indian only
+    gst_certificate_filename: Mapped[str | None] = mapped_column(String(255))
+    incorporation_zoho_id: Mapped[str | None] = mapped_column(String(255))
+    incorporation_filename: Mapped[str | None] = mapped_column(String(255))
+
+    # Team review
+    reviewer_notes: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    onboarding: Mapped["OnboardingRecord"] = relationship("OnboardingRecord", back_populates="kyc_submissions")
 

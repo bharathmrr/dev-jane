@@ -88,3 +88,31 @@ class SlotStatus(str, enum.Enum):
     AVAILABLE = "AVAILABLE"
     BOOKED = "BOOKED"
 
+
+class CompanyType(str, enum.Enum):
+    INDIAN = "indian"
+    OVERSEAS = "overseas"
+
+
+class KYCStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    FORM_SENT = "FORM_SENT"
+    SUBMITTED = "SUBMITTED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    REJECTED = "REJECTED"
+    APPROVED = "APPROVED"
+
+
+class DocumentStatus(str, enum.Enum):
+    """Shared status enum for NDA and Customer Agreement."""
+    PENDING = "PENDING"
+    DRAFT_GENERATED = "DRAFT_GENERATED"
+    TEAM_REVIEW = "TEAM_REVIEW"
+    DRAFT_REJECTED = "DRAFT_REJECTED"
+    SENT_TO_LEAD = "SENT_TO_LEAD"
+    SIGNED_RECEIVED = "SIGNED_RECEIVED"
+    SIGN_UNDER_REVIEW = "SIGN_UNDER_REVIEW"
+    SIGN_REJECTED = "SIGN_REJECTED"
+    APPROVED = "APPROVED"
+    PROCEED_NEXT = "PROCEED_NEXT"
+

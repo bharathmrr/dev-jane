@@ -206,13 +206,27 @@ def poll_imap(self) -> int:
         from_addr = reply.get("from_addr", "")
         body = (reply.get("body") or "").strip()
 
-        # Skip bounce/automation emails and emails with empty body
-        if _should_skip(from_addr) or not body:
+        if _should_skip(from_addr):
             continue
 
         msg_id = reply.get("message_id", "")
         if _already_processed(msg_id):
             continue  # skip — already handled in a previous poll cycle
+
+        # Check for signed document attachments (NDA / Agreement) — process even if no body
+        attachments = reply.get("attachments") or []
+        if attachments and from_addr:
+            for att in attachments:
+                att_bytes = att.get("content")
+                att_name = att.get("filename", "attachment.pdf")
+                if att_bytes:
+                    from app.workers.onboarding_tasks import process_signed_doc_reply
+                    process_signed_doc_reply.delay(from_addr, att_bytes, att_name)
+                    queued += 1
+
+        # Skip emails with no body for text-reply processing
+        if not body:
+            continue
 
         if reply.get("thread_token"):
             db_msg_id = run_async(_persist_reply, reply)

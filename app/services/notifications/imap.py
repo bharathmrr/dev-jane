@@ -55,6 +55,26 @@ def _get_plaintext(msg: Message) -> str:
     return str(payload) if payload else ""
 
 
+def _get_attachments(msg: Message) -> list[dict]:
+    """Extract file attachments (PDF, images) from the email."""
+    attachments = []
+    if not msg.is_multipart():
+        return attachments
+    for part in msg.walk():
+        filename = part.get_filename()
+        if not filename:
+            continue
+        ct = part.get_content_type()
+        # Only grab document-type attachments (PDF, images, office docs)
+        if ct in ("application/pdf", "image/jpeg", "image/png", "image/tiff",
+                  "application/msword",
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"):
+            content = part.get_payload(decode=True)
+            if content:
+                attachments.append({"filename": filename, "content": content, "content_type": ct})
+    return attachments
+
+
 def strip_quoted(text: str) -> str:
     cut = len(text)
     for rx in _QUOTE_MARKERS:
@@ -109,6 +129,7 @@ def fetch_replies(since_days: int = 1, max_emails: int = 20) -> list[dict]:
                         "from_name": from_name,
                         "subject": msg.get("Subject"),
                         "body": body,
+                        "attachments": _get_attachments(msg),
                     }
                 )
             except Exception as e:

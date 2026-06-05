@@ -1,0 +1,30 @@
+{
+  "plugin_id": "jane-aerospace-onboarding",
+  "plugin_name": "Jane Aerospace Onboarding",
+  "version": "1.0",
+  "namespace": "janeaerospace",
+  "resources": [
+    {
+      "type": "entity",
+      "entity_name": "Leads",
+      "location": "entity.detail.RA",
+      "label": "Onboarding Pipeline",
+      "url": "index.html",
+      "params": [
+        {"variable_name_in_js": "EntityId", "param_name": "EntityId"},
+        {"variable_name_in_js": "Entity",   "param_name": "Entity"}
+      ]
+    },
+    {
+      "type": "entity",
+      "entity_name": "Contacts",
+      "location": "entity.detail.RA",
+      "label": "Onboarding Pipeline",
+      "url": "index.html",
+      "params": [
+        {"variable_name_in_js": "EntityId", "param_name": "EntityId"},
+        {"variable_name_in_js": "Entity",   "param_name": "Entity"}
+      ]
+    }
+  ]
+}

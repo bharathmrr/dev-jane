@@ -116,6 +116,19 @@ class Settings(BaseSettings):
     # --- Zoho availability cache ---
     ZOHO_CACHE_TTL: int = 300
 
+    # --- Zoho WorkDrive (file uploads for onboarding docs) ---
+    ZOHO_WORKDRIVE_TEAM_ID: str = ""
+    ZOHO_WORKDRIVE_FOLDER_ID: str = ""          # root folder for onboarding uploads
+    ZOHO_NDA_TEMPLATE_ID_INDIAN: str = ""       # Zoho WorkDrive file ID for Indian NDA template
+    ZOHO_NDA_TEMPLATE_ID_OVERSEAS: str = ""
+    ZOHO_AGREEMENT_TEMPLATE_ID_INDIAN: str = ""
+    ZOHO_AGREEMENT_TEMPLATE_ID_OVERSEAS: str = ""
+
+    # --- Onboarding ---
+    ONBOARDING_HMAC_SECRET: str = Field("dev-onboarding-hmac-change-me", min_length=16)
+    ONBOARDING_WORKSHEET_NAME: str = "Onboarding"
+    LEADS_CSV_PATH: str = "/app/leads.csv"
+
 
     @field_validator("CELERY_BROKER_URL", "CELERY_RESULT_BACKEND", mode="before")
     @classmethod

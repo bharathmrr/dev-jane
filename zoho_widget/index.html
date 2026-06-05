@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Onboarding Pipeline</title>
+<script src="https://live.zwidgets.com/js-sdk/1.0.3/ZohoEmbeddedAppSDK.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,sans-serif;background:#f5f7fb;color:#1a1a2e;font-size:13px}
+  .wrap{padding:16px}
+  .card{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 6px rgba(0,0,0,.08);margin-bottom:12px}
+  h2{font-size:15px;color:#1a3a6b;margin-bottom:12px;border-bottom:2px solid #e8ecf6;padding-bottom:8px}
+  h3{font-size:13px;color:#444;margin-bottom:8px;font-weight:600}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #f0f0f0}
+  .row:last-child{border-bottom:none}
+  .label{color:#666;font-size:12px}
+  .val{font-weight:600;font-size:12px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+  .pill-green{background:#d4edda;color:#155724}
+  .pill-yellow{background:#fff3cd;color:#856404}
+  .pill-red{background:#f8d7da;color:#721c24}
+  .pill-blue{background:#cce5ff;color:#004085}
+  .pill-grey{background:#e2e3e5;color:#383d41}
+  .stages{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}
+  .stage{flex:1;min-width:80px;text-align:center;padding:8px 4px;border-radius:8px;border:2px solid #e8ecf6}
+  .stage.done{background:#d4edda;border-color:#28a745}
+  .stage.active{background:#cce5ff;border-color:#007bff}
+  .stage.rejected{background:#f8d7da;border-color:#dc3545}
+  .stage.waiting{background:#fff3cd;border-color:#ffc107}
+  .stage.pending{background:#f8f9fa;border-color:#dee2e6}
+  .stage-icon{font-size:18px;display:block;margin-bottom:2px}
+  .stage-name{font-size:10px;font-weight:600;color:#555}
+  .stage-sub{font-size:9px;color:#888;margin-top:1px}
+  .actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  button{border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;transition:opacity .15s}
+  button:hover{opacity:.85}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .btn-primary{background:#1a56db;color:#fff}
+  .btn-success{background:#28a745;color:#fff}
+  .btn-danger{background:#dc3545;color:#fff}
+  .btn-warning{background:#ffc107;color:#1a1a2e}
+  .btn-outline{background:#fff;color:#1a56db;border:1px solid #1a56db}
+  textarea{width:100%;border:1px solid #ccc;border-radius:6px;padding:8px;font-size:12px;resize:vertical;margin-top:6px;font-family:Arial,sans-serif}
+  .msg{padding:10px 12px;border-radius:6px;margin-top:8px;font-size:12px}
+  .msg-ok{background:#d4edda;color:#155724}
+  .msg-err{background:#f8d7da;color:#721c24}
+  .loading{text-align:center;padding:32px;color:#888}
+  .kyc-details{background:#f8f9fa;border-radius:6px;padding:10px;font-size:12px;margin-top:8px}
+  .kyc-details .krow{display:flex;gap:8px;padding:2px 0}
+  .kyc-details .kl{color:#666;min-width:90px}
+  .doc-preview{background:#f0f4ff;border-radius:6px;padding:10px;font-size:11px;color:#333;
+               max-height:120px;overflow-y:auto;white-space:pre-wrap;border:1px solid #d0dbff;margin:8px 0}
+  .action-pending{background:#fff3cd;border:1px solid #ffd966;border-radius:8px;
+                  padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .complete-banner{background:#d4edda;border:1px solid #c3e6cb;border-radius:8px;
+                   padding:12px;text-align:center;font-weight:600;color:#155724}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="loading">Loading onboarding status…</div>
+</div>
+
+<script>
+var API = "https://barrier-thirteen-untidy.ngrok-free.dev/api/v1/onboarding";
+var _data = null;
+
+// ---------- Zoho SDK init ----------
+ZOHO.embeddedApp.on("PageLoad", function(pageData) {
+  var entity = pageData.Entity;
+  var recordId = pageData.EntityId;
+  ZOHO.CRM.API.getRecord({Entity: entity, RecordID: recordId}).then(function(resp) {
+    var record = (resp.data || [])[0];
+    if (!record) { showError("Could not read lead record from Zoho CRM."); return; }
+    var email = record.Email || record.email;
+    if (!email) { showError("This lead has no Email address in Zoho CRM."); return; }
+    loadStatus(email);
+  }).catch(function(e) { showError("Zoho API error: " + e); });
+});
+ZOHO.embeddedApp.init();
+
+// ---------- API calls ----------
+function loadStatus(email) {
+  fetch(API + "/status-by-email?email=" + encodeURIComponent(email), {
+    headers: {"ngrok-skip-browser-warning": "1"}
+  })
+  .then(function(r) {
+    if (r.status === 404) { renderNotInSystem(email); return null; }
+    return r.json();
+  })
+  .then(function(d) { if (d) { _data = d; render(d); } })
+  .catch(function(e) { showError("API error: " + e); });
+}
+
+function doAction(endpoint, payload, successMsg) {
+  var btn = document.querySelectorAll("button");
+  btn.forEach(function(b){ b.disabled = true; });
+  clearMsg();
+  fetch(endpoint, {
+    method: "POST",
+    headers: {"Content-Type":"application/json","ngrok-skip-browser-warning":"1"},
+    body: JSON.stringify(payload)
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    showMsg(d.message || successMsg, "ok");
+    setTimeout(function(){ loadStatus(_data.lead_email); }, 1800);
+  })
+  .catch(function(e){ showMsg("Error: " + e, "err"); btn.forEach(function(b){ b.disabled = false; }); });
+}
+
+// ---------- Render ----------
+function renderNotInSystem(email) {
+  document.getElementById("app").innerHTML = [
+    '<div class="card">',
+    '<h2>Onboarding Pipeline</h2>',
+    '<p style="color:#888;font-size:12px">Lead <strong>' + esc(email) + '</strong> is not yet in the scheduler system.</p>',
+    '<p style="color:#aaa;font-size:11px;margin-top:8px">Leads are auto-imported from Zoho Bookings when they book a meeting.</p>',
+    '</div>'
+  ].join("");
+}
+
+function render(d) {
+  var html = ['<div class="card">'];
+  html.push('<h2>Onboarding Pipeline</h2>');
+
+  // Lead info
+  html.push('<div class="row"><span class="label">Company</span><span class="val">' + esc(d.lead_business_name || "—") + '</span></div>');
+  html.push('<div class="row"><span class="label">Contact</span><span class="val">' + esc(d.lead_contact_name || "—") + '</span></div>');
+  if (d.company_type) {
+    var ct = d.company_type === "indian" ? "🇮🇳 Indian" : "🌐 Overseas";
+    html.push('<div class="row"><span class="label">Type</span><span class="val">' + ct + '</span></div>');
+  }
+
+  // Not started
+  if (!d.onboarding_started) {
+    html.push('<div style="margin-top:14px">');
+    html.push('<p style="color:#666;font-size:12px;margin-bottom:10px">Onboarding has not been started for this lead.</p>');
+    html.push('<button class="btn-primary" onclick="startOnboarding(\'' + d.lead_id + '\')">Start Onboarding Process</button>');
+    html.push('</div>');
+    html.push('</div>');
+    document.getElementById("app").innerHTML = html.join("");
+    return;
+  }
+
+  html.push('</div>'); // close first card
+
+  // Stage progress bar
+  html.push('<div class="card">');
+  html.push('<h2>Pipeline Stages</h2>');
+  html.push(renderStages(d));
+  html.push('<div class="row" style="margin-top:8px"><span class="label">Stage Score</span><span class="val">' + d.stage_score + ' / 11</span></div>');
+  html.push('</div>');
+
+  // Pending action banner
+  var pa = d.pending_action || {};
+  if (pa.type === "complete") {
+    html.push('<div class="complete-banner">✅ Onboarding Complete — Proceed with Training</div>');
+  } else if (pa.type !== "waiting") {
+    html.push('<div class="action-pending">⚠️ <strong>Action required:</strong> ' + esc(pa.label) + '</div>');
+    html.push(renderActionCard(d, pa));
+  } else {
+    html.push('<div class="card"><div class="row"><span class="label">Status</span><span class="val">⏳ ' + esc(pa.label) + '</span></div></div>');
+  }
+
+  document.getElementById("app").innerHTML = html.join("");
+}
+
+function renderStages(d) {
+  var k = d.kyc_status || "PENDING";
+  var n = d.nda_status || "PENDING";
+  var a = d.agreement_status || "PENDING";
+
+  function stageClass(status) {
+    if (!status || status === "PENDING") return "pending";
+    if (["APPROVED","PROCEED_NEXT"].includes(status)) return "done";
+    if (["REJECTED","DRAFT_REJECTED","SIGN_REJECTED"].includes(status)) return "rejected";
+    if (["FORM_SENT","SUBMITTED","UNDER_REVIEW","TEAM_REVIEW","DRAFT_GENERATED","SIGN_UNDER_REVIEW","SIGNED_RECEIVED"].includes(status)) return "active";
+    if (["SENT_TO_LEAD"].includes(status)) return "waiting";
+    return "pending";
+  }
+  function stageIcon(cls) {
+    return {done:"✅",active:"🔵",rejected:"❌",waiting:"📤",pending:"⬜"}[cls] || "⬜";
+  }
+
+  var kc = stageClass(k), nc = stageClass(n), ac = stageClass(a);
+  return [
+    '<div class="stages">',
+    '<div class="stage ' + kc + '"><span class="stage-icon">' + stageIcon(kc) + '</span>',
+    '<span class="stage-name">KYC</span><span class="stage-sub">' + shortStatus(k) + '</span></div>',
+    '<div class="stage ' + nc + '"><span class="stage-icon">' + stageIcon(nc) + '</span>',
+    '<span class="stage-name">NDA</span><span class="stage-sub">' + shortStatus(n) + '</span></div>',
+    '<div class="stage ' + ac + '"><span class="stage-icon">' + stageIcon(ac) + '</span>',
+    '<span class="stage-name">Agreement</span><span class="stage-sub">' + shortStatus(a) + '</span></div>',
+    '</div>'
+  ].join("");
+}
+
+function shortStatus(s) {
+  var map = {
+    PENDING:"Pending", FORM_SENT:"Sent", SUBMITTED:"Submitted",
+    UNDER_REVIEW:"In Review", REJECTED:"Rejected", APPROVED:"Approved",
+    DRAFT_GENERATED:"Draft Ready", TEAM_REVIEW:"Team Review",
+    DRAFT_REJECTED:"Rejected", SENT_TO_LEAD:"Sent to Lead",
+    SIGNED_RECEIVED:"Signed Rcvd", SIGN_UNDER_REVIEW:"Sign Review",
+    SIGN_REJECTED:"Sign Rejected", PROCEED_NEXT:"Complete"
+  };
+  return map[s] || s;
+}
+
+function renderActionCard(d, pa) {
+  var html = ['<div class="card" id="action-card">'];
+  var oid = d.id;
+
+  if (pa.type === "kyc_review") {
+    var ks = d.kyc_submission || {};
+    html.push('<h2>KYC Review</h2>');
+    html.push('<div class="kyc-details">');
+    html.push('<div class="krow"><span class="kl">Company</span><span>' + esc(ks.company_name || d.lead_business_name) + '</span></div>');
+    html.push('<div class="krow"><span class="kl">Contact</span><span>' + esc(ks.contact_name || "") + '</span></div>');
+    html.push('<div class="krow"><span class="kl">Phone</span><span>' + esc(ks.contact_number || "") + '</span></div>');
+    html.push('<div class="krow"><span class="kl">Type</span><span>' + esc(ks.company_type || "") + '</span></div>');
+    html.push('<div class="krow"><span class="kl">GST Cert</span><span>' + (ks.has_gst ? "✅ Uploaded" : "—") + '</span></div>');
+    html.push('<div class="krow"><span class="kl">Inc. Cert</span><span>' + (ks.has_incorporation ? "✅ Uploaded" : "❌ Missing") + '</span></div>');
+    html.push('<div class="krow"><span class="kl">Attempt</span><span>#' + (ks.attempt_number || 1) + '</span></div>');
+    html.push('</div>');
+    html.push('<h3 style="margin-top:10px">Rejection notes (required if rejecting)</h3>');
+    html.push('<textarea id="notes" rows="3" placeholder="Reason for rejection…"></textarea>');
+    html.push('<div class="actions">');
+    html.push('<button class="btn-success" onclick="reviewAction(\'' + API + '/kyc/review/' + oid + '\',\'approve\')">✅ Approve KYC</button>');
+    html.push('<button class="btn-danger" onclick="reviewAction(\'' + API + '/kyc/review/' + oid + '\',\'reject\')">❌ Reject KYC</button>');
+    html.push('</div>');
+
+  } else if (pa.type === "nda_draft_review") {
+    html.push('<h2>NDA Draft Review</h2>');
+    if (d.nda_draft_content) {
+      html.push('<div class="doc-preview">' + esc(d.nda_draft_content.substring(0, 600)) + (d.nda_draft_content.length > 600 ? "\n…[truncated]" : "") + '</div>');
+    }
+    html.push('<h3>Feedback / revision notes</h3>');
+    html.push('<textarea id="notes" rows="3" placeholder="Leave blank to approve. Add notes to request revision."></textarea>');
+    html.push('<div class="actions">');
+    html.push('<button class="btn-success" onclick="reviewAction(\'' + API + '/nda/draft-review/' + oid + '\',\'approve\')">✅ Approve &amp; Send to Lead</button>');
+    html.push('<button class="btn-warning" onclick="reviewAction(\'' + API + '/nda/draft-review/' + oid + '\',\'reject\')">🔄 Request Revision</button>');
+    html.push('</div>');
+
+  } else if (pa.type === "nda_sign_review") {
+    html.push('<h2>Signed NDA Review</h2>');
+    html.push('<p style="color:#555;font-size:12px;margin-bottom:8px">Lead has returned a signed copy. Review and approve to proceed to Customer Agreement.</p>');
+    html.push('<h3>Notes (required if rejecting)</h3>');
+    html.push('<textarea id="notes" rows="3" placeholder="Reason for rejection…"></textarea>');
+    html.push('<div class="actions">');
+    html.push('<button class="btn-success" onclick="reviewAction(\'' + API + '/nda/sign-review/' + oid + '\',\'approve\')">✅ Approve Signed NDA</button>');
+    html.push('<button class="btn-danger" onclick="reviewAction(\'' + API + '/nda/sign-review/' + oid + '\',\'reject\')">❌ Reject Signature</button>');
+    html.push('</div>');
+
+  } else if (pa.type === "agreement_draft_review") {
+    html.push('<h2>Customer Agreement Review</h2>');
+    if (d.agreement_draft_content) {
+      html.push('<div class="doc-preview">' + esc(d.agreement_draft_content.substring(0, 600)) + (d.agreement_draft_content.length > 600 ? "\n…[truncated]" : "") + '</div>');
+    }
+    html.push('<h3>Feedback / revision notes</h3>');
+    html.push('<textarea id="notes" rows="3" placeholder="Leave blank to approve. Add notes to request revision."></textarea>');
+    html.push('<div class="actions">');
+    html.push('<button class="btn-success" onclick="reviewAction(\'' + API + '/agreement/draft-review/' + oid + '\',\'approve\')">✅ Approve &amp; Send to Lead</button>');
+    html.push('<button class="btn-warning" onclick="reviewAction(\'' + API + '/agreement/draft-review/' + oid + '\',\'reject\')">🔄 Request Revision</button>');
+    html.push('</div>');
+
+  } else if (pa.type === "agreement_sign_review") {
+    html.push('<h2>Signed Agreement Review</h2>');
+    html.push('<p style="color:#555;font-size:12px;margin-bottom:8px">Lead has returned the signed Customer Agreement.</p>');
+    html.push('<h3>Notes (required if rejecting)</h3>');
+    html.push('<textarea id="notes" rows="3" placeholder="Reason for rejection…"></textarea>');
+    html.push('<div class="actions">');
+    html.push('<button class="btn-success" onclick="reviewAction(\'' + API + '/agreement/sign-review/' + oid + '\',\'approve\')">✅ Approve — Onboarding Complete</button>');
+    html.push('<button class="btn-danger" onclick="reviewAction(\'' + API + '/agreement/sign-review/' + oid + '\',\'reject\')">❌ Reject Signature</button>');
+    html.push('</div>');
+  }
+
+  html.push('<div id="msg"></div>');
+  html.push('</div>');
+  return html.join("");
+}
+
+// ---------- Actions ----------
+function startOnboarding(leadId) {
+  clearMsg();
+  var btn = document.querySelector("button");
+  if (btn) btn.disabled = true;
+  fetch(API + "/start/" + leadId, {
+    method: "POST",
+    headers: {"ngrok-skip-browser-warning":"1"}
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    showMsg(d.message || "Onboarding started. KYC form will be sent to the lead.", "ok");
+    setTimeout(function(){ loadStatus(_data.lead_email); }, 2500);
+  })
+  .catch(function(e){ showMsg("Error: " + e, "err"); if (btn) btn.disabled = false; });
+}
+
+function reviewAction(endpoint, action) {
+  var notesEl = document.getElementById("notes");
+  var notes = notesEl ? notesEl.value.trim() : "";
+  if (action === "reject" && !notes) {
+    showMsg("Please enter rejection notes before rejecting.", "err");
+    if (notesEl) notesEl.focus();
+    return;
+  }
+  doAction(endpoint, {action: action, notes: notes}, action === "approve" ? "Approved successfully." : "Rejected. Lead will be notified.");
+}
+
+// ---------- Helpers ----------
+function esc(s) {
+  return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function showMsg(txt, type) {
+  var el = document.getElementById("msg");
+  if (el) el.innerHTML = '<div class="msg msg-' + type + '">' + esc(txt) + '</div>';
+}
+function clearMsg() {
+  var el = document.getElementById("msg");
+  if (el) el.innerHTML = "";
+}
+function showError(txt) {
+  document.getElementById("app").innerHTML = '<div class="card"><p style="color:#dc3545;font-size:12px">⚠ ' + esc(txt) + '</p></div>';
+}
+</script>
+</body>
+</html>

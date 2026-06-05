@@ -27,6 +27,7 @@ celery_app.conf.update(
         "app.workers.reminder_tasks.*": {"queue": "reminders"},
         "app.workers.reservation_tasks.*": {"queue": "maintenance"},
         "app.workers.email_tasks.poll_imap": {"queue": "maintenance"},
+        "app.workers.onboarding_tasks.*": {"queue": "onboarding"},
     },
     task_time_limit=300,
     task_soft_time_limit=270,
@@ -62,9 +63,19 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.v2_tasks.send_v2_reminders",
         "schedule": 300.0,  # every 5 minutes
     },
+    "onboarding-daily-reminders": {
+        "task": "app.workers.onboarding_tasks.sweep_onboarding_reminders",
+        "schedule": crontab(hour="8", minute="0"),  # every day at 8:00 UTC
+    },
 }
 
 # Ensure task modules are imported when the worker boots.
 celery_app.autodiscover_tasks(
-    ["app.workers.email_tasks", "app.workers.reminder_tasks", "app.workers.reservation_tasks", "app.workers.v2_tasks"]
+    [
+        "app.workers.email_tasks",
+        "app.workers.reminder_tasks",
+        "app.workers.reservation_tasks",
+        "app.workers.v2_tasks",
+        "app.workers.onboarding_tasks",
+    ]
 )

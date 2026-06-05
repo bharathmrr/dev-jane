@@ -33,7 +33,7 @@ services:
     volumes:
       - ./leads.csv:/app/leads.csv:ro
     command: celery -A app.workers.celery_app:celery_app worker
-             -Q email,reminders,maintenance --concurrency=4 -l info
+             -Q email,reminders,maintenance,onboarding --concurrency=4 -l info
 
   beat:
     build: .
