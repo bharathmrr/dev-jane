@@ -694,15 +694,20 @@ async def _process_reply_v2(db, reply: dict) -> str:
     if not from_addr or not body:
         return "Missing email or body"
 
-    # Look for SENT or REPLIED lead (REPLIED = has responded but not yet booked)
-    lead = (
+    # Look for SENT or REPLIED lead — prefer the one with offered_slots_json (Stage 2)
+    result = (
         await db.execute(
             select(LeadV2).where(
                 LeadV2.email == from_addr,
                 LeadV2.status.in_([LeadStatus.SENT, LeadStatus.REPLIED]),
-            )
+            ).order_by(LeadV2.created_at.desc())
         )
-    ).scalar_one_or_none()
+    ).scalars().all()
+    if result:
+        # Prefer whichever has offered_slots_json; otherwise take most recent
+        lead = next((r for r in result if r.offered_slots_json), result[0])
+    else:
+        lead = None
 
     # If BOOKED and the meeting has already passed, reset to SENT for rescheduling
     if not lead:
@@ -711,9 +716,9 @@ async def _process_reply_v2(db, reply: dict) -> str:
                 select(LeadV2).where(
                     LeadV2.email == from_addr,
                     LeadV2.status == LeadStatus.BOOKED,
-                )
+                ).order_by(LeadV2.created_at.desc())
             )
-        ).scalar_one_or_none()
+        ).scalars().first()
         if booked_lead:
             slot_passed = False
             if booked_lead.selected_slot:
@@ -743,6 +748,13 @@ async def _process_reply_v2(db, reply: dict) -> str:
     # Priority 1: If Stage 2 (has offered slots), try matching them simple-first
     selected_display = None
     if lead.offered_slots_json:
+        # If slots were already sent very recently (< 5 min), don't send again
+        if lead.replied_at:
+            seconds_since = (datetime.now(timezone.utc) - lead.replied_at.replace(tzinfo=timezone.utc) if lead.replied_at.tzinfo is None else datetime.now(timezone.utc) - lead.replied_at).total_seconds()
+            if seconds_since < 300:
+                logger.info("slots_sent_recently_skipping_reply", email=from_addr, seconds_ago=int(seconds_since))
+                return "Slots sent recently — skipping to avoid duplicate"
+
         slot_infos, slot_strings = _load_slot_infos(lead)
         selected_display = _match_slot_simple(body, slot_strings)
         if selected_display:

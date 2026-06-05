@@ -211,6 +211,11 @@ def poll_imap(self) -> int:
             continue
 
         msg_id = reply.get("message_id", "")
+        if not msg_id:
+            # No Message-ID header — generate a stable fallback key from sender + body
+            import hashlib as _hl
+            body_snippet = (reply.get("body") or "")[:200]
+            msg_id = f"fallback:{from_addr}:{_hl.md5(body_snippet.encode()).hexdigest()[:12]}"
         if _already_processed(msg_id):
             continue  # skip — already handled in a previous poll cycle
 

@@ -372,18 +372,17 @@ def _distribute_morning_afternoon(slots: list[SlotInfo]) -> list[SlotInfo]:
 
     result: list[SlotInfo] = []
     dates = list(by_date.keys())
-    # Interleave: for each date, add one morning then one afternoon, round-robin across dates
     max_per_half = max(
         max(len(v["morning"]) for v in by_date.values()),
         max(len(v["afternoon"]) for v in by_date.values()),
     )
+    # Per-date interleave: morning[i] then afternoon[i] for each date before moving to i+1
     for i in range(max_per_half):
         for d in dates:
             m = by_date[d]["morning"]
+            a = by_date[d]["afternoon"]
             if i < len(m):
                 result.append(m[i])
-        for d in dates:
-            a = by_date[d]["afternoon"]
             if i < len(a):
                 result.append(a[i])
     return result
