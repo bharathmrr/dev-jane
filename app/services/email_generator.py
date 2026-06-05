@@ -1,4 +1,4 @@
-"""Groq-powered email body generation + lead scoring for Jane Aerospace outreach.
+"""Claude-powered email body generation + lead scoring for Jane Aerospace outreach.
 
 Pipeline:
   1. score_lead()           — Scores a lead 1-10 using contact name + summary notes.
@@ -9,6 +9,10 @@ Pipeline:
   4. extract_slot_from_reply() — Legacy: extracts specific date+time from reply text.
   5. detect_week_preference()  — Legacy: heuristic this/next week detection.
 
+Models:
+  - claude-haiku-4-5  → scoring + intent (fast, low cost)
+  - claude-sonnet-4-6 → outreach body generation (higher quality)
+
 Rules enforced in all AI outputs:
   - Sender is Leo Charles, Jane Aerospace
   - Focus on supply chain, vendor integration, Atmanirbhar Bharat, drone manufacturing
@@ -18,6 +22,7 @@ Rules enforced in all AI outputs:
 """
 from __future__ import annotations
 
+import json as _json
 import random
 from structlog import get_logger
 
@@ -25,17 +30,36 @@ from app.core.config import settings
 
 logger = get_logger(__name__)
 
-_MODEL = "llama-3.3-70b-versatile"
+_HAIKU  = "claude-haiku-4-5"
+_SONNET = "claude-sonnet-4-6"
 
-_groq_client = None
+_claude_client = None
 
 
 def _get_client():
-    global _groq_client
-    if _groq_client is None:
-        from groq import Groq
-        _groq_client = Groq(api_key=settings.GROQ_API_KEY)
-    return _groq_client
+    global _claude_client
+    if _claude_client is None:
+        import anthropic
+        _claude_client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    return _claude_client
+
+
+def _ask(system: str, user: str, model: str, max_tokens: int = 256) -> str:
+    """Call Claude and return the text response. Returns '' on any error."""
+    if not settings.ANTHROPIC_API_KEY:
+        return ""
+    try:
+        client = _get_client()
+        msg = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return msg.content[0].text.strip()
+    except Exception as exc:
+        logger.warning("claude_api_error", model=model, error=str(exc))
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -43,17 +67,10 @@ def _get_client():
 # ---------------------------------------------------------------------------
 
 def score_lead(contact_name: str | None, business_name: str, summary: str | None) -> int:
-    """Score a lead 1-10 using contact name + summary notes.
-
-    Returns an integer 1-10. Leads scoring < 6 are skipped (not worth emailing).
-    Falls back to score 7 (send) if Groq is unavailable.
-    """
-    if not settings.GROQ_API_KEY:
-        logger.info("groq_key_missing_scoring_default_7", lead=business_name)
+    """Score a lead 1-10. Leads scoring < 6 are skipped. Falls back to 7 if AI unavailable."""
+    if not settings.ANTHROPIC_API_KEY:
+        logger.info("claude_key_missing_scoring_default_7", lead=business_name)
         return 7
-
-    name_info = contact_name or business_name
-    summary_info = summary or "No additional notes available."
 
     system_prompt = (
         "You are a B2B sales qualification assistant for Jane Aerospace, an Indian company "
@@ -71,40 +88,29 @@ def score_lead(contact_name: str | None, business_name: str, summary: str | None
         "Reply with ONLY a single integer from 1 to 10. No explanation."
     )
     user_msg = (
-        f"Contact: {name_info}\n"
+        f"Contact: {contact_name or business_name}\n"
         f"Company: {business_name}\n"
-        f"Notes/Summary: {summary_info}"
+        f"Notes/Summary: {summary or 'No additional notes available.'}"
     )
 
+    text = _ask(system_prompt, user_msg, model=_HAIKU, max_tokens=5)
+    if not text:
+        return 7
     try:
-        client = _get_client()
-        resp = client.chat.completions.create(
-            model=_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_msg},
-            ],
-            max_tokens=5,
-            temperature=0,
-        )
-        text = resp.choices[0].message.content.strip()
         score = int("".join(c for c in text if c.isdigit())[:2])
         score = max(1, min(10, score))
-        logger.info("lead_scored", lead=business_name, contact=name_info, score=score)
+        logger.info("lead_scored", lead=business_name, score=score)
         return score
-    except Exception as exc:
-        logger.warning("groq_lead_scoring_failed", error=str(exc), lead=business_name)
-        return 7  # default: send
+    except Exception:
+        logger.warning("claude_lead_scoring_parse_failed", raw=text)
+        return 7
 
 
 # ---------------------------------------------------------------------------
-# Static fallback body (used when Groq is unavailable)
+# Static fallback body (used when Claude is unavailable)
 # ---------------------------------------------------------------------------
 
-def _static_body(contact_name: str | None, business_name: str, summary: str | None = None) -> str:
-    name_ref = contact_name or business_name
-
-    # Para 1 — personal reference built from summary if available
+def _static_body(_contact_name: str | None, business_name: str, summary: str | None = None) -> str:
     if summary:
         para1 = (
             f"I came across your profile while researching companies in the supply chain and "
@@ -138,12 +144,11 @@ def _static_body(contact_name: str | None, business_name: str, summary: str | No
             "A brief call would tell us quickly."
         ),
     ]
-    para2 = random.choice(bodies_para2)
-    return f"{para1}\n\n{para2}"
+    return f"{para1}\n\n{random.choice(bodies_para2)}"
 
 
 # ---------------------------------------------------------------------------
-# Outreach body generation (2 personalised paragraphs via Groq)
+# Outreach body generation (2 personalised paragraphs via Claude Sonnet)
 # ---------------------------------------------------------------------------
 
 def generate_outreach_body(
@@ -152,14 +157,9 @@ def generate_outreach_body(
     summary: str | None = None,
     contact_name: str | None = None,
 ) -> str:
-    """Generate a 2-paragraph personalised outreach body using Groq.
-
-    Para 1 — personal reference: weave in contact_name + summary notes naturally.
-    Para 2 — Jane Aerospace pitch + soft CTA (no sign-off, no greeting).
-    Falls back to static body if Groq fails.
-    """
-    if not settings.GROQ_API_KEY:
-        logger.info("groq_key_missing_using_static_body")
+    """Generate a 2-paragraph personalised outreach body using Claude Sonnet."""
+    if not settings.ANTHROPIC_API_KEY:
+        logger.info("claude_key_missing_using_static_body")
         return _static_body(contact_name, business_name, summary)
 
     name_ref = contact_name or recipient_name
@@ -191,23 +191,10 @@ def generate_outreach_body(
         user_msg += f"Notes/Context about this lead: {summary}\n"
     user_msg += "\nWrite the 2-paragraph email body now."
 
-    try:
-        client = _get_client()
-        resp = client.chat.completions.create(
-            model=_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_msg},
-            ],
-            max_tokens=220,
-            temperature=0.80,
-        )
-        body = resp.choices[0].message.content.strip()
-        if body:
-            logger.info("outreach_body_generated", lead=business_name, contact=name_ref, chars=len(body))
-            return body
-    except Exception as exc:
-        logger.warning("groq_email_generation_failed", error=str(exc))
+    body = _ask(system_prompt, user_msg, model=_SONNET, max_tokens=220)
+    if body:
+        logger.info("outreach_body_generated", lead=business_name, chars=len(body))
+        return body
 
     return _static_body(contact_name, business_name, summary)
 
@@ -217,16 +204,16 @@ def generate_outreach_body(
 # ---------------------------------------------------------------------------
 
 def analyze_reply_intent(reply_body: str, today_str: str) -> dict:
-    """Analyze the lead's reply using Groq to detect booking intent and date constraints.
+    """Analyze the lead's reply using Claude Haiku to detect booking intent and date constraints.
 
     Returns:
       {
         "intent": "book" | "list_slots" | "decline" | "unclear",
-        "date": "YYYY-MM-DD" or None,        # specific date+time booking request
+        "date": "YYYY-MM-DD" or None,
         "time": "HH:MM" or None,
-        "after_date": "YYYY-MM-DD" or None,  # "after Jan 8" range start
+        "after_date": "YYYY-MM-DD" or None,
         "week": "this" | "next" or None,
-        "specific_date": "YYYY-MM-DD" or None  # "free on Monday" / "Monday works" — show ONLY that day
+        "specific_date": "YYYY-MM-DD" or None
       }
     """
     default_res = {
@@ -239,13 +226,13 @@ def analyze_reply_intent(reply_body: str, today_str: str) -> dict:
     }
     body_lower = reply_body.lower()
 
-    # Decline keywords — fast path
+    # Fast-path: hard decline keywords
     decline_kws = ["not interested", "unsubscribe", "remove me", "no thanks", "no thank you", "stop emailing"]
     if any(w in body_lower for w in decline_kws):
         default_res["intent"] = "decline"
         return default_res
 
-    # Week keywords — heuristic fallback
+    # Heuristic week fallback (used even when Claude is available, as a safety net)
     this_kws = ["this week", "this one", "sooner", "asap", "as soon", "now", "current week", "today", "tomorrow"]
     next_kws = ["next week", "next one", "later", "after this", "following week", "week after"]
     if any(k in body_lower for k in this_kws):
@@ -255,55 +242,51 @@ def analyze_reply_intent(reply_body: str, today_str: str) -> dict:
         default_res["intent"] = "list_slots"
         default_res["week"] = "next"
 
-    if not settings.GROQ_API_KEY:
+    if not settings.ANTHROPIC_API_KEY:
+        return default_res
+
+    system_prompt = (
+        f"Today is {today_str}.\n"
+        "Analyze a lead's email reply to a meeting scheduling invitation.\n"
+        "Return ONLY valid JSON (no markdown) with exactly these keys:\n"
+        "{\n"
+        "  \"intent\": \"book\" | \"list_slots\" | \"decline\" | \"unclear\",\n"
+        "  \"date\": \"YYYY-MM-DD\" or null,\n"
+        "  \"time\": \"HH:MM\" or null,\n"
+        "  \"after_date\": \"YYYY-MM-DD\" or null,\n"
+        "  \"week\": \"this\" | \"next\" or null,\n"
+        "  \"specific_date\": \"YYYY-MM-DD\" or null\n"
+        "}\n\n"
+        "Rules:\n"
+        "- \"decline\": not interested / unsubscribe / stop emailing / no thank you.\n"
+        "- \"book\": lead mentions a specific date AND time (e.g. 'Tuesday at 2pm', 'Monday 10am'). "
+        "  Set date (YYYY-MM-DD) + time (HH:MM, 24h). Use: morning=09:00, afternoon=14:00, evening=17:00.\n"
+        "- \"list_slots\": lead wants to SEE available options. Sub-cases:\n"
+        "    a) Specific day mentioned but NO time (e.g. 'free on Monday', 'Monday works for me', "
+        "       'what about Tuesday?', 'I can do Wednesday', 'Monday is good'): "
+        "       set specific_date = that day's date (resolve relative to today). Leave after_date null.\n"
+        "    b) Date range (e.g. 'after Jan 8', 'from next Wednesday onwards'): set after_date.\n"
+        "    c) Week preference ('next week', 'this week'): set week.\n"
+        "- \"unclear\": positive/vague reply with no date/time info ('sounds good', 'yes', 'sure', 'great').\n"
+        "- Always resolve relative day names (Monday, Tuesday…) to the next upcoming occurrence from today.\n"
+        "- Do NOT set both specific_date and after_date. Prefer specific_date for single-day mentions."
+    )
+
+    text = _ask(system_prompt, f"Reply: {reply_body[:600]}", model=_HAIKU, max_tokens=150)
+    if not text:
         return default_res
 
     try:
-        import json as _json
-        client = _get_client()
-        system_prompt = (
-            f"Today is {today_str}.\n"
-            "Analyze a lead's email reply to a meeting scheduling invitation.\n"
-            "Return ONLY valid JSON (no markdown) with exactly these keys:\n"
-            "{\n"
-            "  \"intent\": \"book\" | \"list_slots\" | \"decline\" | \"unclear\",\n"
-            "  \"date\": \"YYYY-MM-DD\" or null,\n"
-            "  \"time\": \"HH:MM\" or null,\n"
-            "  \"after_date\": \"YYYY-MM-DD\" or null,\n"
-            "  \"week\": \"this\" | \"next\" or null,\n"
-            "  \"specific_date\": \"YYYY-MM-DD\" or null\n"
-            "}\n\n"
-            "Rules:\n"
-            "- \"decline\": not interested / unsubscribe / stop emailing / no thank you.\n"
-            "- \"book\": lead mentions a specific date AND time (e.g. 'Tuesday at 2pm', 'Monday 10am'). "
-            "  Set date (YYYY-MM-DD) + time (HH:MM, 24h). Use: morning=09:00, afternoon=14:00, evening=17:00.\n"
-            "- \"list_slots\": lead wants to SEE available options. Sub-cases:\n"
-            "    a) Specific day mentioned but NO time (e.g. 'free on Monday', 'Monday works for me', "
-            "       'what about Tuesday?', 'I can do Wednesday', 'Monday is good'): "
-            "       set specific_date = that day's date (resolve relative to today). Leave after_date null.\n"
-            "    b) Date range (e.g. 'after Jan 8', 'from next Wednesday onwards'): set after_date.\n"
-            "    c) Week preference ('next week', 'this week'): set week.\n"
-            "- \"unclear\": positive/vague reply with no date/time info ('sounds good', 'yes', 'sure', 'great').\n"
-            "- Always resolve relative day names (Monday, Tuesday…) to the next upcoming occurrence from today.\n"
-            "- Do NOT set both specific_date and after_date. Prefer specific_date for single-day mentions."
-        )
-        resp = client.chat.completions.create(
-            model=_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Reply: {reply_body[:600]}"},
-            ],
-            max_tokens=150,
-            temperature=0,
-        )
-        text = resp.choices[0].message.content.strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        data = _json.loads(text.strip())
+        # Strip markdown code fences if present
+        clean = text
+        if clean.startswith("```json"):
+            clean = clean[7:]
+        if clean.startswith("```"):
+            clean = clean[3:]
+        if clean.endswith("```"):
+            clean = clean[:-3]
+
+        data = _json.loads(clean.strip())
         if isinstance(data, dict) and "intent" in data:
             for key in ["date", "time", "after_date", "week", "specific_date"]:
                 if key not in data or data[key] == "null":
@@ -319,7 +302,7 @@ def analyze_reply_intent(reply_body: str, today_str: str) -> dict:
             )
             return data
     except Exception as exc:
-        logger.warning("groq_reply_intent_analysis_failed", error=str(exc))
+        logger.warning("claude_reply_intent_parse_failed", error=str(exc), raw=text)
 
     return default_res
 

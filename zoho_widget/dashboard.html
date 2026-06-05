@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Onboarding Dashboard</title>
+<script src="https://live.zwidgets.com/js-sdk/1.0.3/ZohoEmbeddedAppSDK.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:#f5f7fb;color:#1a1a2e;font-size:13px}
+.wrap{padding:16px}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.header h1{font-size:17px;color:#1a3a6b;font-weight:700}
+.refresh-btn{background:#1a56db;color:#fff;border:none;padding:7px 14px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600}
+.refresh-btn:hover{opacity:.85}
+.stats{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.stat-card{background:#fff;border-radius:10px;padding:12px 18px;box-shadow:0 1px 5px rgba(0,0,0,.07);flex:1;min-width:100px;text-align:center}
+.stat-num{font-size:22px;font-weight:700;color:#1a3a6b}
+.stat-label{font-size:11px;color:#888;margin-top:2px}
+.search-bar{margin-bottom:12px}
+.search-bar input{width:100%;padding:8px 12px;border:1px solid #dce1f0;border-radius:8px;font-size:13px;outline:none}
+.search-bar input:focus{border-color:#1a56db}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 5px rgba(0,0,0,.07)}
+thead{background:#1a3a6b;color:#fff}
+thead th{padding:10px 12px;text-align:left;font-size:11px;font-weight:600;letter-spacing:.4px}
+tbody tr{border-bottom:1px solid #f0f2f8;transition:background .1s}
+tbody tr:hover{background:#f5f8ff}
+tbody tr:last-child{border-bottom:none}
+td{padding:9px 12px;font-size:12px;vertical-align:middle}
+.pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700}
+.pill-green{background:#d4edda;color:#155724}
+.pill-yellow{background:#fff3cd;color:#856404}
+.pill-red{background:#f8d7da;color:#721c24}
+.pill-blue{background:#cce5ff;color:#004085}
+.pill-grey{background:#e2e3e5;color:#383d41}
+.pill-orange{background:#ffe5cc;color:#7a3500}
+.score-bar{display:flex;align-items:center;gap:6px}
+.bar-bg{background:#e8ecf6;border-radius:6px;height:6px;width:60px;overflow:hidden}
+.bar-fill{background:#1a56db;height:100%;border-radius:6px;transition:width .3s}
+.bar-fill.complete{background:#28a745}
+.bar-fill.mid{background:#ffc107}
+.btn-start{background:#28a745;color:#fff;border:none;padding:5px 11px;border-radius:5px;font-size:11px;cursor:pointer;font-weight:600;white-space:nowrap}
+.btn-start:hover{opacity:.85}
+.btn-start:disabled{opacity:.5;cursor:not-allowed}
+.btn-view{background:#1a56db;color:#fff;border:none;padding:5px 11px;border-radius:5px;font-size:11px;cursor:pointer;font-weight:600}
+.btn-view:hover{opacity:.85}
+.action-badge{display:inline-block;padding:3px 8px;border-radius:5px;font-size:10px;font-weight:700;background:#fff3cd;color:#856404;border:1px solid #ffc107}
+.action-badge.complete{background:#d4edda;color:#155724;border-color:#28a745}
+.action-badge.waiting{background:#e2e3e5;color:#383d41;border-color:#ccc}
+.loading{text-align:center;padding:40px;color:#888}
+.empty{text-align:center;padding:30px;color:#aaa;font-size:13px}
+.toast{position:fixed;bottom:20px;right:20px;padding:10px 18px;border-radius:8px;font-size:12px;font-weight:600;color:#fff;z-index:9999;opacity:0;transition:opacity .3s}
+.toast.show{opacity:1}
+.toast.ok{background:#28a745}
+.toast.err{background:#dc3545}
+.tab-bar{display:flex;gap:4px;margin-bottom:14px}
+.tab{padding:7px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #dce1f0;background:#fff;color:#555}
+.tab.active{background:#1a3a6b;color:#fff;border-color:#1a3a6b}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <h1>🚀 Onboarding Dashboard</h1>
+    <button class="refresh-btn" onclick="loadAll()">↻ Refresh</button>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats" id="stats">
+    <div class="stat-card"><div class="stat-num" id="s-total">—</div><div class="stat-label">Total Leads</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-booked">—</div><div class="stat-label">Booked</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-onboarding">—</div><div class="stat-label">In Onboarding</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-action">—</div><div class="stat-label">Action Needed</div></div>
+    <div class="stat-card"><div class="stat-num" id="s-complete">—</div><div class="stat-label">Complete</div></div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tab-bar">
+    <div class="tab active" id="tab-all" onclick="switchTab('all')">All Leads</div>
+    <div class="tab" id="tab-action" onclick="switchTab('action')">⚠ Action Needed</div>
+    <div class="tab" id="tab-booked" onclick="switchTab('booked')">Ready to Start</div>
+    <div class="tab" id="tab-complete" onclick="switchTab('complete')">✅ Complete</div>
+  </div>
+
+  <!-- Search -->
+  <div class="search-bar">
+    <input type="text" id="search" placeholder="Search by name, company or email…" oninput="renderTable()">
+  </div>
+
+  <!-- Table -->
+  <div id="table-wrap"><div class="loading">Loading…</div></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+var API = "https://barrier-thirteen-untidy.ngrok-free.dev/api/v1";
+var _leads = [];
+var _onboarding = [];
+var _currentTab = "all";
+
+ZOHO.embeddedApp.on("PageLoad", function() { loadAll(); });
+ZOHO.embeddedApp.init();
+
+function loadAll() {
+  document.getElementById("table-wrap").innerHTML = '<div class="loading">Loading…</div>';
+  var h = {"ngrok-skip-browser-warning": "1"};
+  Promise.all([
+    fetch(API + "/v2/leads", {headers: h}).then(function(r){ return r.json(); }),
+    fetch(API + "/onboarding/list", {headers: h}).then(function(r){ return r.json(); })
+  ]).then(function(results) {
+    _leads = results[0] || [];
+    _onboarding = results[1] || [];
+    updateStats();
+    renderTable();
+  }).catch(function(e) {
+    document.getElementById("table-wrap").innerHTML = '<div class="empty">⚠ Failed to load data. Check API connection.</div>';
+  });
+}
+
+function updateStats() {
+  var booked = _leads.filter(function(l){ return l.status === "BOOKED"; });
+  var needsAction = _onboarding.filter(function(o){
+    return o.pending_action && o.pending_action.type !== "waiting" && o.pending_action.type !== "complete";
+  });
+  var complete = _onboarding.filter(function(o){
+    return o.pending_action && o.pending_action.type === "complete";
+  });
+  document.getElementById("s-total").textContent = _leads.length;
+  document.getElementById("s-booked").textContent = booked.length;
+  document.getElementById("s-onboarding").textContent = _onboarding.length;
+  document.getElementById("s-action").textContent = needsAction.length;
+  document.getElementById("s-complete").textContent = complete.length;
+}
+
+function switchTab(tab) {
+  _currentTab = tab;
+  ["all","action","booked","complete"].forEach(function(t){
+    document.getElementById("tab-" + t).classList.toggle("active", t === tab);
+  });
+  renderTable();
+}
+
+function getOnboarding(leadId) {
+  return _onboarding.find(function(o){ return o.lead_id === leadId; }) || null;
+}
+
+function renderTable() {
+  var q = (document.getElementById("search").value || "").toLowerCase();
+
+  // Build combined rows
+  var rows = _leads.filter(function(l) {
+    if (q && !((l.email||"").toLowerCase().includes(q) ||
+               (l.business_name||"").toLowerCase().includes(q) ||
+               (l.contact_name||"").toLowerCase().includes(q))) return false;
+
+    var ob = getOnboarding(l.id);
+    var pa = ob ? ob.pending_action : null;
+
+    if (_currentTab === "action") {
+      return pa && pa.type !== "waiting" && pa.type !== "complete";
+    }
+    if (_currentTab === "booked") {
+      return l.status === "BOOKED" && !ob;
+    }
+    if (_currentTab === "complete") {
+      return pa && pa.type === "complete";
+    }
+    return true; // all
+  });
+
+  if (!rows.length) {
+    document.getElementById("table-wrap").innerHTML = '<div class="empty">No leads found.</div>';
+    return;
+  }
+
+  // Sort: action needed first, then by stage score desc
+  rows.sort(function(a, b) {
+    var oa = getOnboarding(a.id), ob2 = getOnboarding(b.id);
+    var pa = oa ? oa.pending_action : null, pb = ob2 ? ob2.pending_action : null;
+    var aAction = pa && pa.type !== "waiting" && pa.type !== "complete" ? 1 : 0;
+    var bAction = pb && pb.type !== "waiting" && pb.type !== "complete" ? 1 : 0;
+    if (bAction !== aAction) return bAction - aAction;
+    var aScore = oa ? oa.stage_score : -1;
+    var bScore = ob2 ? ob2.stage_score : -1;
+    return bScore - aScore;
+  });
+
+  var html = [
+    '<table>',
+    '<thead><tr>',
+    '<th>#</th>',
+    '<th>Lead / Company</th>',
+    '<th>Email</th>',
+    '<th>Lead Status</th>',
+    '<th>KYC</th>',
+    '<th>NDA</th>',
+    '<th>Agreement</th>',
+    '<th>Score</th>',
+    '<th>Next Action</th>',
+    '<th>Start</th>',
+    '</tr></thead><tbody>'
+  ];
+
+  rows.forEach(function(lead, i) {
+    var ob = getOnboarding(lead.id);
+    var pa = ob ? ob.pending_action : null;
+
+    html.push('<tr>');
+    html.push('<td style="color:#aaa">' + (i+1) + '</td>');
+
+    // Name + company
+    html.push('<td><strong>' + esc(lead.contact_name || lead.business_name || "—") + '</strong>' +
+      (lead.business_name && lead.contact_name ? '<br><span style="color:#888;font-size:11px">' + esc(lead.business_name) + '</span>' : '') +
+      '</td>');
+
+    html.push('<td style="color:#555">' + esc(lead.email || "—") + '</td>');
+
+    // Lead status
+    html.push('<td>' + statusPill(lead.status) + '</td>');
+
+    if (ob) {
+      html.push('<td>' + stagePill(ob.kyc_status, "kyc") + '</td>');
+      html.push('<td>' + stagePill(ob.nda_status, "doc") + '</td>');
+      html.push('<td>' + stagePill(ob.agreement_status, "doc") + '</td>');
+
+      // Score bar
+      var pct = Math.round((ob.stage_score / 11) * 100);
+      var barClass = pct >= 80 ? "complete" : pct >= 40 ? "mid" : "";
+      html.push('<td><div class="score-bar"><div class="bar-bg"><div class="bar-fill ' + barClass + '" style="width:' + pct + '%"></div></div>' +
+        '<span style="font-size:11px;font-weight:600;color:#1a3a6b">' + ob.stage_score + '/11</span></div></td>');
+
+      // Pending action
+      if (pa) {
+        var badgeClass = pa.type === "complete" ? "complete" : pa.type === "waiting" ? "waiting" : "";
+        html.push('<td><span class="action-badge ' + badgeClass + '">' + esc(pa.label) + '</span></td>');
+      } else {
+        html.push('<td>—</td>');
+      }
+
+      html.push('<td>—</td>');
+
+    } else {
+      html.push('<td colspan="4" style="color:#bbb;font-size:11px">Not started</td>');
+
+      // Start button only for BOOKED leads
+      if (lead.status === "BOOKED") {
+        html.push('<td><button class="btn-start" onclick="startOnboarding(\'' + lead.id + '\', this)">▶ Start</button></td>');
+      } else {
+        html.push('<td><span style="color:#bbb;font-size:11px">—</span></td>');
+      }
+    }
+
+    html.push('</tr>');
+  });
+
+  html.push('</tbody></table>');
+  document.getElementById("table-wrap").innerHTML = html.join("");
+}
+
+function statusPill(status) {
+  var map = {
+    NEW: ["grey","NEW"],
+    SENT: ["blue","SENT"],
+    REPLIED: ["yellow","REPLIED"],
+    BOOKED: ["green","BOOKED"]
+  };
+  var p = map[status] || ["grey", status || "—"];
+  return '<span class="pill pill-' + p[0] + '">' + p[1] + '</span>';
+}
+
+function stagePill(status, kind) {
+  if (!status || status === "PENDING") return '<span style="color:#ccc;font-size:11px">—</span>';
+  var good = ["APPROVED","PROCEED_NEXT"];
+  var bad  = ["REJECTED","DRAFT_REJECTED","SIGN_REJECTED"];
+  var wait = ["SENT_TO_LEAD"];
+  var cls = good.includes(status) ? "green" : bad.includes(status) ? "red" : wait.includes(status) ? "orange" : "blue";
+  var label = {
+    FORM_SENT:"Sent", SUBMITTED:"Submitted", UNDER_REVIEW:"Review",
+    REJECTED:"Rejected", APPROVED:"Approved", DRAFT_GENERATED:"Draft",
+    TEAM_REVIEW:"Team Rev", DRAFT_REJECTED:"Rejected", SENT_TO_LEAD:"Sent",
+    SIGNED_RECEIVED:"Signed", SIGN_UNDER_REVIEW:"Sign Rev",
+    SIGN_REJECTED:"Rejected", PROCEED_NEXT:"Done"
+  }[status] || status;
+  return '<span class="pill pill-' + cls + '">' + label + '</span>';
+}
+
+function startOnboarding(leadId, btn) {
+  btn.disabled = true;
+  btn.textContent = "Starting…";
+  fetch(API + "/onboarding/start/" + leadId, {
+    method: "POST",
+    headers: {"ngrok-skip-browser-warning": "1"}
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    showToast(d.message || "Onboarding started! KYC form sent to lead.", "ok");
+    setTimeout(loadAll, 2500);
+  })
+  .catch(function(e){
+    showToast("Error: " + e, "err");
+    btn.disabled = false;
+    btn.textContent = "▶ Start";
+  });
+}
+
+function showToast(msg, type) {
+  var el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "toast show " + type;
+  setTimeout(function(){ el.className = "toast"; }, 4000);
+}
+
+function esc(s) {
+  return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+</script>
+</body>
+</html>
