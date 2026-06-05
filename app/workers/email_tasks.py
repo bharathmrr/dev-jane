@@ -164,8 +164,8 @@ async def _persist_reply(db: AsyncSession, reply: dict) -> str | None:
     return str(msg.id)
 
 
-@celery_app.task
-def poll_imap() -> int:
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=15)
+def poll_imap(self) -> int:
     import redis as _redis
     from app.services.notifications.imap import fetch_replies
     from app.core.config import settings
@@ -193,7 +193,14 @@ def poll_imap() -> int:
             return True
         return any(fa.startswith(p) for p in _SKIP_PREFIXES)
 
-    replies = fetch_replies()
+    try:
+        replies = fetch_replies()
+    except Exception as exc:
+        err = str(exc)
+        if "name resolution" in err or "gaierror" in err or "timeout" in err.lower() or "Connection" in err:
+            log.warning("imap_dns_failure_retrying", error=err)
+            raise self.retry(exc=exc)
+        raise
     queued = 0
     for reply in replies:
         from_addr = reply.get("from_addr", "")

@@ -222,10 +222,11 @@ def analyze_reply_intent(reply_body: str, today_str: str) -> dict:
     Returns:
       {
         "intent": "book" | "list_slots" | "decline" | "unclear",
-        "date": "YYYY-MM-DD" or None,
+        "date": "YYYY-MM-DD" or None,        # specific date+time booking request
         "time": "HH:MM" or None,
-        "after_date": "YYYY-MM-DD" or None,
-        "week": "this" | "next" or None
+        "after_date": "YYYY-MM-DD" or None,  # "after Jan 8" range start
+        "week": "this" | "next" or None,
+        "specific_date": "YYYY-MM-DD" or None  # "free on Monday" / "Monday works" — show ONLY that day
       }
     """
     default_res = {
@@ -234,6 +235,7 @@ def analyze_reply_intent(reply_body: str, today_str: str) -> dict:
         "time": None,
         "after_date": None,
         "week": None,
+        "specific_date": None,
     }
     body_lower = reply_body.lower()
 
@@ -261,24 +263,29 @@ def analyze_reply_intent(reply_body: str, today_str: str) -> dict:
         client = _get_client()
         system_prompt = (
             f"Today is {today_str}.\n"
-            "Analyze a lead's reply to a meeting invitation.\n"
-            "Return ONLY valid JSON with these keys:\n"
+            "Analyze a lead's email reply to a meeting scheduling invitation.\n"
+            "Return ONLY valid JSON (no markdown) with exactly these keys:\n"
             "{\n"
             "  \"intent\": \"book\" | \"list_slots\" | \"decline\" | \"unclear\",\n"
             "  \"date\": \"YYYY-MM-DD\" or null,\n"
             "  \"time\": \"HH:MM\" or null,\n"
             "  \"after_date\": \"YYYY-MM-DD\" or null,\n"
-            "  \"week\": \"this\" | \"next\" or null\n"
+            "  \"week\": \"this\" | \"next\" or null,\n"
+            "  \"specific_date\": \"YYYY-MM-DD\" or null\n"
             "}\n\n"
-            "Guidelines:\n"
-            "- \"decline\": not interested / unsubscribe / stop emailing.\n"
-            "- \"book\": specific date AND time mentioned (e.g. 'Tuesday at 2pm'). "
-            "  Set date+time. morning=09:00, afternoon=14:00, evening=17:00.\n"
-            "- \"list_slots\": wants to see available slots, or specifies a range "
-            "  (e.g. 'after Jan 8', 'next week', 'any time after Wednesday'). "
-            "  Set after_date (inclusive start date) or week.\n"
-            "- \"unclear\": positive but no time info ('sounds good', 'yes sure').\n"
-            "- Resolve relative dates relative to today."
+            "Rules:\n"
+            "- \"decline\": not interested / unsubscribe / stop emailing / no thank you.\n"
+            "- \"book\": lead mentions a specific date AND time (e.g. 'Tuesday at 2pm', 'Monday 10am'). "
+            "  Set date (YYYY-MM-DD) + time (HH:MM, 24h). Use: morning=09:00, afternoon=14:00, evening=17:00.\n"
+            "- \"list_slots\": lead wants to SEE available options. Sub-cases:\n"
+            "    a) Specific day mentioned but NO time (e.g. 'free on Monday', 'Monday works for me', "
+            "       'what about Tuesday?', 'I can do Wednesday', 'Monday is good'): "
+            "       set specific_date = that day's date (resolve relative to today). Leave after_date null.\n"
+            "    b) Date range (e.g. 'after Jan 8', 'from next Wednesday onwards'): set after_date.\n"
+            "    c) Week preference ('next week', 'this week'): set week.\n"
+            "- \"unclear\": positive/vague reply with no date/time info ('sounds good', 'yes', 'sure', 'great').\n"
+            "- Always resolve relative day names (Monday, Tuesday…) to the next upcoming occurrence from today.\n"
+            "- Do NOT set both specific_date and after_date. Prefer specific_date for single-day mentions."
         )
         resp = client.chat.completions.create(
             model=_MODEL,
@@ -292,14 +299,24 @@ def analyze_reply_intent(reply_body: str, today_str: str) -> dict:
         text = resp.choices[0].message.content.strip()
         if text.startswith("```json"):
             text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
         if text.endswith("```"):
             text = text[:-3]
         data = _json.loads(text.strip())
         if isinstance(data, dict) and "intent" in data:
-            for key in ["date", "time", "after_date", "week"]:
+            for key in ["date", "time", "after_date", "week", "specific_date"]:
                 if key not in data or data[key] == "null":
                     data[key] = None
-            logger.info("reply_intent_parsed", intent=data["intent"], after_date=data.get("after_date"), week=data.get("week"))
+            logger.info(
+                "reply_intent_parsed",
+                intent=data["intent"],
+                specific_date=data.get("specific_date"),
+                after_date=data.get("after_date"),
+                week=data.get("week"),
+                date=data.get("date"),
+                time=data.get("time"),
+            )
             return data
     except Exception as exc:
         logger.warning("groq_reply_intent_analysis_failed", error=str(exc))

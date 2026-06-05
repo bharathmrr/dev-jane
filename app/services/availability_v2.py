@@ -45,7 +45,7 @@ logger = get_logger(__name__)
 
 IST = ZoneInfo("Asia/Kolkata")
 SLOT_START_HOUR = 9
-SLOT_END_HOUR = 19
+SLOT_END_HOUR = 18
 
 # ---------------------------------------------------------------------------
 # Layer 2 — In-process TTL caches
@@ -92,7 +92,11 @@ class SlotInfo(TypedDict):
 # ---------------------------------------------------------------------------
 
 def _parse_zoho_slot_hour(slot_item: dict | str) -> int | None:
-    """Extract the hour (int) from a Zoho slot item."""
+    """Extract the 24h hour (int) from a Zoho slot item.
+
+    Zoho returns times like '09:30 AM', '05:00 PM'.
+    Must try 12h format FIRST (before stripping AM/PM) to get correct hour.
+    """
     try:
         raw = (
             slot_item.get("time") or slot_item.get("start_time") or slot_item.get("from_time") or ""
@@ -101,14 +105,16 @@ def _parse_zoho_slot_hour(slot_item: dict | str) -> int | None:
         raw = raw.strip()
         if not raw:
             return None
-        for fmt in ("%H:%M", "%H:%M:%S"):
-            try:
-                return datetime.strptime(raw.split()[0], fmt).hour
-            except ValueError:
-                pass
+        # Try 12-hour format first (e.g. "05:00 PM" → 17, "09:30 AM" → 9)
         for fmt in ("%I:%M %p", "%I:%M:%S %p"):
             try:
                 return datetime.strptime(raw, fmt).hour
+            except ValueError:
+                pass
+        # Fall back to 24-hour format (e.g. "14:00", "09:30:00")
+        for fmt in ("%H:%M", "%H:%M:%S"):
+            try:
+                return datetime.strptime(raw.split()[0], fmt).hour
             except ValueError:
                 pass
     except Exception:
@@ -204,14 +210,11 @@ async def _get_booked_slots(db: AsyncSession) -> tuple[set[str], set[str]]:
 
 
 async def _get_held_slots(db: AsyncSession, exclude_lead_id=None) -> set[str]:
-    """ISO set of slots offered to SENT/REPLIED leads in the last 48 h.
+    """ISO set of slots offered to leads in the last 2 h (soft hold window).
 
-    These are SOFT exclusions — we don't want to double-offer the same slot
-    to two people while one is still deciding.  48 h gives each lead a full
-    day to decide before the slot is released back into the pool.
-
-    Pass exclude_lead_id (UUID) to skip the current lead's own offered slots
-    (used at booking time so we don't block a lead from booking their own slot).
+    Slots are held for 2h after being offered so two leads never see the
+    same slot simultaneously. After 2h, unreserved slots return to the pool.
+    `replied_at` is always set when slots are offered (both week-click and reply).
     """
     from sqlalchemy import or_
     from app.db.models import LeadV2, LeadStatus
@@ -220,11 +223,8 @@ async def _get_held_slots(db: AsyncSession, exclude_lead_id=None) -> set[str]:
         select(LeadV2.offered_slots_json).where(
             LeadV2.status.in_([LeadStatus.SENT, LeadStatus.REPLIED]),
             LeadV2.offered_slots_json.is_not(None),
-            # A lead is "active" if sent OR replied within 48 h
-            or_(
-                LeadV2.sent_at >= cutoff,
-                LeadV2.replied_at >= cutoff,
-            ),
+            # replied_at is set whenever slots are offered (week-click or reply)
+            LeadV2.replied_at >= cutoff,
         )
     )
     if exclude_lead_id is not None:
@@ -305,42 +305,113 @@ async def _apply_db_guard(
 # Public API — Week-based fetch (Stage 1 → Stage 2 via week buttons)
 # ---------------------------------------------------------------------------
 
-def _fetch_week_slots_sync(week: str, max_slots: int = 20) -> list[SlotInfo]:
-    """Blocking: fetch up to max_slots for a calendar week (Layer 1 only, no DB)."""
+def _next_n_working_days(from_date, n: int) -> list:
+    """Return n working days (Mon-Fri) starting from from_date (inclusive if weekday)."""
+    days = []
+    d = from_date
+    while len(days) < n:
+        if d.weekday() < 5:
+            days.append(d)
+        d += timedelta(days=1)
+    return days
+
+
+def _pick_spread_hours(available_hours: set[int], now_ist_ts, day, slots_per_day: int = 2) -> list[int]:
+    """Pick hours spread across the day (morning + afternoon), not just earliest."""
+    valid = sorted(
+        h for h in available_hours
+        if SLOT_START_HOUR <= h <= SLOT_END_HOUR
+        and datetime(day.year, day.month, day.day, h, 0, tzinfo=IST) > now_ist_ts
+    )
+    if not valid:
+        return []
+
+    if len(valid) <= slots_per_day:
+        return valid
+
+    # Split into morning (before 13) and afternoon (13+)
+    morning = [h for h in valid if h < 13]
+    afternoon = [h for h in valid if h >= 13]
+
+    picked = []
+    if morning and afternoon:
+        # One from morning, one from afternoon — spread across the day
+        picked.append(morning[len(morning) // 2])    # mid-morning
+        picked.append(afternoon[len(afternoon) // 2])  # mid-afternoon
+    elif morning:
+        # Only morning available — pick two spread out
+        picked.append(morning[0])
+        picked.append(morning[-1])
+    else:
+        # Only afternoon — pick two spread out
+        picked.append(afternoon[0])
+        picked.append(afternoon[-1])
+
+    return sorted(picked[:slots_per_day])
+
+
+def _distribute_morning_afternoon(slots: list[SlotInfo]) -> list[SlotInfo]:
+    """Reorder slots so morning and afternoon alternate within each day.
+
+    Each lead sees a mix of morning + afternoon slots, not a block of all-morning.
+    Order: Day1-morning, Day1-afternoon, Day2-morning, Day2-afternoon, ...
+    """
+    if not slots:
+        return []
+    # Group by date
+    by_date: dict[str, dict] = {}
+    for s in slots:
+        d = s["date_str"]
+        if d not in by_date:
+            by_date[d] = {"morning": [], "afternoon": []}
+        hour = int(s["time_str"].split(":")[0])
+        if hour < 13:
+            by_date[d]["morning"].append(s)
+        else:
+            by_date[d]["afternoon"].append(s)
+
+    result: list[SlotInfo] = []
+    dates = list(by_date.keys())
+    # Interleave: for each date, add one morning then one afternoon, round-robin across dates
+    max_per_half = max(
+        max(len(v["morning"]) for v in by_date.values()),
+        max(len(v["afternoon"]) for v in by_date.values()),
+    )
+    for i in range(max_per_half):
+        for d in dates:
+            m = by_date[d]["morning"]
+            if i < len(m):
+                result.append(m[i])
+        for d in dates:
+            a = by_date[d]["afternoon"]
+            if i < len(a):
+                result.append(a[i])
+    return result
+
+
+def _fetch_week_slots_sync(week: str, max_slots: int = 30) -> list[SlotInfo]:
+    """Fetch ALL valid slots for 3 working days (full pool for DB guard to filter).
+
+    'this' = today + next working days (3 days total, starting TODAY)
+    'next' = 3 working days after 'this week' (always distinct)
+
+    Pool is large (max_slots=30) so held-slot mechanism gives different
+    leads genuinely different slots. Morning+afternoon are both included.
+    """
     now_ist = datetime.now(IST)
     today = now_ist.date()
-    tomorrow = today + timedelta(days=1)
-    resolved_week = week
-
-    if week == "this":
-        # This week: tomorrow through Thursday only (Mon–Thu, 4 days max)
-        days_until_thursday = 3 - today.weekday()
-        if days_until_thursday <= 0:
-            resolved_week = "next"
-        else:
-            start = tomorrow
-            end = today + timedelta(days=days_until_thursday)
-
-    if resolved_week == "next":
-        # Next week: Monday, Tuesday, Wednesday only (3 days)
-        days_to_monday = (7 - today.weekday()) % 7 or 7
-        next_monday = today + timedelta(days=days_to_monday)
-        start = next_monday
-        end = next_monday + timedelta(days=2)
-
-    slots: list[SlotInfo] = []
-    day = start
     now_ist_ts = datetime.now(IST)
 
-    while day <= end and len(slots) < max_slots:
-        if day.weekday() >= 5:
-            day += timedelta(days=1)
-            continue
+    # Start from TODAY so "this week" includes today's afternoon slots
+    all_work_days = _next_n_working_days(today, 6)
 
-        # Layer 1 + per-day Layer 2
+    work_days = all_work_days[:3] if week == "this" else all_work_days[3:6]
+
+    slots: list[SlotInfo] = []
+
+    for day in work_days:
         available_hours = _zoho_available_hours_for_day(day)
         if available_hours is None:
-            day += timedelta(days=1)
             continue
 
         for hour in sorted(available_hours):
@@ -352,8 +423,6 @@ def _fetch_week_slots_sync(week: str, max_slots: int = 20) -> list[SlotInfo]:
             if slot_dt <= now_ist_ts:
                 continue
             slots.append(_build_slot_info(day, hour))
-
-        day += timedelta(days=1)
 
     return slots
 
@@ -371,15 +440,15 @@ async def get_slots_for_week(db: AsyncSession, week: str, n: int = 6) -> list[Sl
         logger.info("week_cache_hit", week=week, cached=len(all_slots))
     else:
         # Layer 1 — Zoho fetch (blocking, run in thread pool)
-        all_slots = await asyncio.to_thread(_fetch_week_slots_sync, week, 20)
+        all_slots = await asyncio.to_thread(_fetch_week_slots_sync, week, 30)
         _week_slots_cache[week] = {"slots": all_slots, "at": _time.time() + ttl}
         logger.info("week_cache_refreshed", week=week, slots=len(all_slots))
 
     # Layer 3 — DB guard (booked + held)
     all_slots = await _apply_db_guard(db, list(all_slots))
 
-    # Spread across different days
-    all_slots = _distribute_slots_by_date(all_slots)
+    # Interleave morning + afternoon across days so every lead sees time variety
+    all_slots = _distribute_morning_afternoon(all_slots)
 
     logger.info("slots_returned", week=week, n=len(all_slots[:n]))
     return all_slots[:n]

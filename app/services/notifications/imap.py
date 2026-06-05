@@ -45,11 +45,14 @@ def _get_plaintext(msg: Message) -> str:
     if msg.is_multipart():
         for part in msg.walk():
             if part.get_content_type() == "text/plain" and not part.get_filename():
-                payload = part.get_payload(decode=True) or b""
-                return payload.decode(part.get_content_charset() or "utf-8", "replace")
+                payload = part.get_payload(decode=True)
+                if isinstance(payload, (bytes, bytearray)):
+                    return payload.decode(part.get_content_charset() or "utf-8", "replace")
         return ""
-    payload = msg.get_payload(decode=True) or b""
-    return payload.decode(msg.get_content_charset() or "utf-8", "replace")
+    payload = msg.get_payload(decode=True)
+    if isinstance(payload, (bytes, bytearray)):
+        return payload.decode(msg.get_content_charset() or "utf-8", "replace")
+    return str(payload) if payload else ""
 
 
 def strip_quoted(text: str) -> str:
@@ -63,7 +66,7 @@ def strip_quoted(text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def fetch_replies(since_days: int = 3, max_emails: int = 50) -> list[dict]:
+def fetch_replies(since_days: int = 1, max_emails: int = 20) -> list[dict]:
     """Fetch ALL recent messages (seen or unseen) from the last N days.
 
     De-duplication by message_id is handled in the caller (poll_imap via Redis).
@@ -86,27 +89,31 @@ def fetch_replies(since_days: int = 3, max_emails: int = 50) -> list[dict]:
             return out
         nums = data[0].split()[-max_emails:]  # most recent N only
         for num in nums:
-            typ, raw = conn.fetch(num, "(RFC822)")
-            if typ != "OK" or not raw or not raw[0]:
+            try:
+                typ, raw = conn.fetch(num, "(RFC822)")
+                if typ != "OK" or not raw or not raw[0]:
+                    continue
+                raw_bytes = raw[0][1]
+                if not isinstance(raw_bytes, (bytes, bytearray)):
+                    continue
+                msg = email.message_from_bytes(raw_bytes)
+                token = extract_token(msg)
+                from_name, from_addr = parseaddr(msg.get("From", ""))
+                body = strip_quoted(_get_plaintext(msg))
+                out.append(
+                    {
+                        "thread_token": token,
+                        "message_id": msg.get("Message-ID", ""),
+                        "in_reply_to": msg.get("In-Reply-To"),
+                        "from_addr": from_addr,
+                        "from_name": from_name,
+                        "subject": msg.get("Subject"),
+                        "body": body,
+                    }
+                )
+            except Exception as e:
+                log.warning("imap_email_parse_error", num=str(num), error=str(e))
                 continue
-            raw_bytes = raw[0][1]
-            if not isinstance(raw_bytes, (bytes, bytearray)):
-                continue
-            msg = email.message_from_bytes(raw_bytes)
-            token = extract_token(msg)
-            from_name, from_addr = parseaddr(msg.get("From", ""))
-            body = strip_quoted(_get_plaintext(msg))
-            out.append(
-                {
-                    "thread_token": token,
-                    "message_id": msg.get("Message-ID", ""),
-                    "in_reply_to": msg.get("In-Reply-To"),
-                    "from_addr": from_addr,
-                    "from_name": from_name,
-                    "subject": msg.get("Subject"),
-                    "body": body,
-                }
-            )
     finally:
         try:
             conn.logout()

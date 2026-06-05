@@ -224,8 +224,10 @@ async def select_week(
         contact_name=lead.contact_name,
     )
 
-    # Store offered slots — marks lead as Stage 2
+    # Store offered slots and mark offered_at so _get_held_slots blocks these
+    # slots for other leads within the 2h hold window
     lead.offered_slots_json = json.dumps(slot_infos)
+    lead.replied_at = dt.datetime.now(dt.timezone.utc)
     await db.flush()
 
     # Bust the week cache so the NEXT lead gets a fresh Zoho fetch

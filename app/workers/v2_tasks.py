@@ -68,43 +68,37 @@ def _extract_min_hour(body: str) -> int | None:
 
 
 def _match_slot_simple(body: str, slot_strings: list[str]) -> str | None:
-    """Pick the lead's chosen slot display-string from reply body, no LLM needed."""
+    """Pick the lead's chosen slot ONLY when they explicitly name it.
+
+    Never auto-books based on vague words like 'ok', 'sure', 'great'.
+    Those go to the AI intent layer which may show slots again or confirm.
+    Only books when:
+      1. Lead mentions a slot by ordinal (first, 1st, option 2...)
+      2. Lead mentions the exact day + time of one of the offered slots
+    """
     body_lower = body.lower()
 
-    decline = [
-        "not interested", "unsubscribe", "remove me",
-        "stop emailing", "no thanks", "no thank you",
-    ]
-    if any(w in body_lower for w in decline):
-        return None
-
+    # Ordinal selection — "the first one", "option 2", "slot 3"
     ordinals = [
-        (["first", "1st", "option 1", "number 1", "slot 1", " 1 ", "(1)"], 0),
-        (["second", "2nd", "option 2", "number 2", "slot 2", " 2 ", "(2)"], 1),
-        (["third", "3rd", "option 3", "number 3", "slot 3", " 3 ", "(3)"], 2),
-        (["fourth", "4th", "option 4", "number 4", "slot 4", " 4 ", "(4)"], 3),
-        (["fifth", "5th", "option 5", "number 5", "slot 5", " 5 ", "(5)"], 4),
-        (["sixth", "6th", "option 6", "number 6", "slot 6", " 6 ", "(6)"], 5),
+        (["first one", "1st one", "option 1", "number 1", "slot 1", "first slot", "1st slot"], 0),
+        (["second one", "2nd one", "option 2", "number 2", "slot 2", "second slot", "2nd slot"], 1),
+        (["third one", "3rd one", "option 3", "number 3", "slot 3", "third slot", "3rd slot"], 2),
+        (["fourth one", "4th one", "option 4", "number 4", "slot 4", "fourth slot", "4th slot"], 3),
+        (["fifth one", "5th one", "option 5", "number 5", "slot 5", "fifth slot", "5th slot"], 4),
+        (["sixth one", "6th one", "option 6", "number 6", "slot 6", "sixth slot", "6th slot"], 5),
     ]
     for keywords, idx in ordinals:
         if idx < len(slot_strings) and any(kw in body_lower for kw in keywords):
             return slot_strings[idx]
 
+    # Exact slot match — day name AND time both present in reply
     for slot_str in slot_strings:
         parts = slot_str.lower().replace(",", "").split()
         day_name = parts[0] if parts else ""
+        # time_part e.g. "09:00 am"
         time_part = " ".join(parts[-2:]) if len(parts) >= 2 else ""
         if day_name and time_part and day_name in body_lower and time_part in body_lower:
             return slot_str
-
-    confirm = [
-        "yes", "yeah", "yep", "sure", "ok", "okay", "confirm", "works for me",
-        "that works", "perfect", "great", "sounds good", "looks good",
-        "let's do it", "lets do it", "any of them", "any works", "available",
-        "i'm in", "im in",
-    ]
-    if any(w in body_lower for w in confirm):
-        return slot_strings[0] if slot_strings else None
 
     return None
 
@@ -489,7 +483,7 @@ async def _do_booking(db, lead, date_str: str, time_str: str, display_str: str) 
             send_v2_slots_email(
                 lead.email, lead.business_name, slot_strings,
                 book_urls=book_urls,
-                body_text="That slot is no longer available — here are the next open times. Please click any to confirm:",
+                body_text=None,
                 contact_name=lead.contact_name,
             )
         else:
@@ -497,21 +491,27 @@ async def _do_booking(db, lead, date_str: str, time_str: str, display_str: str) 
             lead.replied_at = datetime.now(timezone.utc)
         return f"{reason} — sent {len(alt_slots) if alt_slots else 0} alternatives"
 
-    # ── Check 1: Hard DB exclusion (already confirmed-booked in our DB) ────────
+    # Build slot_dt_ist once — used by both guard checks below
+    slot_dt_ist = None
     try:
         hour = int(time_str.split(":")[0])
         slot_date = datetime.strptime(date_str, "%d-%b-%Y").date()
         slot_dt_ist = datetime(slot_date.year, slot_date.month, slot_date.day, hour, 0, tzinfo=IST)
+    except Exception as exc:
+        logger.warning("booking_parse_slot_dt_error", error=str(exc))
+
+    # ── Check 1: Hard DB exclusion (already confirmed-booked in our DB) ────────
+    try:
         booked_iso, booked_display = await _get_booked_slots(db)
-        if slot_dt_ist.isoformat() in booked_iso or display_str in booked_display:
+        if slot_dt_ist and (slot_dt_ist.isoformat() in booked_iso or display_str in booked_display):
             return await _send_alternatives("booking_rejected_hard_booked_in_db")
     except Exception as exc:
         logger.warning("booking_precheck_error", error=str(exc))
 
-    # ── Check 2: Soft DB exclusion (held by another lead in last 48 h) ─────────
+    # ── Check 2: Soft DB exclusion (held by another lead in last 2 h) ──────────
     try:
         held = await _get_held_slots(db, exclude_lead_id=lead.id)
-        if slot_dt_ist.isoformat() in held:
+        if slot_dt_ist and slot_dt_ist.isoformat() in held:
             return await _send_alternatives("booking_rejected_held_by_another_lead")
     except Exception as exc:
         logger.warning("booking_held_check_error", error=str(exc))
@@ -590,17 +590,15 @@ async def _try_specific_date_reply(db, lead, body: str) -> str | None:
     if not available_items:
         return None
 
-    from app.services.availability_v2 import _get_booked_slots
+    from app.services.availability_v2 import _get_booked_slots, _parse_zoho_slot_hour
     booked_iso, booked_display = await _get_booked_slots(db)
 
     available_hours: set[int] = set()
     for item in available_items:
         try:
-            raw = (
-                item.get("time") or item.get("start_time") or item.get("from_time", "")
-                if isinstance(item, dict) else str(item)
-            )
-            h = datetime.strptime(raw.strip().split()[0], "%H:%M").hour
+            h = _parse_zoho_slot_hour(item)  # handles "05:00 PM" → 17 correctly
+            if h is None:
+                continue
             slot_dt = datetime(parsed_date.year, parsed_date.month, parsed_date.day, h, 0, tzinfo=IST)
             if slot_dt.isoformat() in booked_iso or slot_dt.strftime("%A, %b %d at %I:%M %p") in booked_display:
                 continue
@@ -639,14 +637,11 @@ async def _try_specific_date_reply(db, lead, body: str) -> str | None:
     send_v2_slots_email(
         lead.email, lead.business_name, slot_strings,
         book_urls=book_urls,
-        body_text=(
-            f"The time you requested ({time_str} on {date_str}) is no longer available. "
-            "Here are the open slots for that day — click any to confirm instantly:"
-        ),
+        body_text=None,
         contact_name=lead.contact_name,
     )
     logger.info("specific_date_alternatives_sent", email=lead.email, date=date_str, count=len(alt_slots))
-    return f"Requested time taken — sent {len(alt_slots)} alternatives for {date_str}"
+    return f"Sent {len(alt_slots)} slots for {date_str}"
 
 
 # ---------------------------------------------------------------------------
@@ -699,12 +694,12 @@ async def _process_reply_v2(db, reply: dict) -> str:
     if not from_addr or not body:
         return "Missing email or body"
 
-    # Look for a SENT lead first
+    # Look for SENT or REPLIED lead (REPLIED = has responded but not yet booked)
     lead = (
         await db.execute(
             select(LeadV2).where(
                 LeadV2.email == from_addr,
-                LeadV2.status == LeadStatus.SENT,
+                LeadV2.status.in_([LeadStatus.SENT, LeadStatus.REPLIED]),
             )
         )
     ).scalar_one_or_none()
@@ -817,7 +812,6 @@ async def _process_reply_v2(db, reply: dict) -> str:
         except Exception:
             display_str = f"{date_str} at {time_str}"
             try:
-                # Fallback parsed_dt
                 parsed_dt = datetime.strptime(f"{analysis['date']} 09:00", "%Y-%m-%d %H:%M").replace(tzinfo=IST)
             except Exception:
                 parsed_dt = datetime.now(IST)
@@ -827,18 +821,16 @@ async def _process_reply_v2(db, reply: dict) -> str:
         available_items = await asyncio.to_thread(zoho.fetch_available_slots, date_str)
 
         # Filter out booked slots
-        from app.services.availability_v2 import _get_booked_slots
+        from app.services.availability_v2 import _get_booked_slots, _parse_zoho_slot_hour
         booked_iso, booked_display = await _get_booked_slots(db)
 
         available_hours = set()
         if available_items:
             for item in available_items:
                 try:
-                    raw = (
-                        item.get("time") or item.get("start_time") or item.get("from_time", "")
-                        if isinstance(item, dict) else str(item)
-                    )
-                    h = datetime.strptime(raw.strip().split()[0], "%H:%M").hour
+                    h = _parse_zoho_slot_hour(item)  # handles "05:00 PM" → 17 correctly
+                    if h is None:
+                        continue
                     slot_dt = datetime(parsed_dt.year, parsed_dt.month, parsed_dt.day, h, 0, tzinfo=IST)
                     if slot_dt.isoformat() in booked_iso or slot_dt.strftime("%A, %b %d at %I:%M %p") in booked_display:
                         continue
@@ -877,13 +869,10 @@ async def _process_reply_v2(db, reply: dict) -> str:
             book_urls = [make_book_url(str(lead.id), i) for i in range(len(alt_slots))]
             lead.offered_slots_json = json.dumps(alt_slots)
             lead.replied_at = datetime.now(timezone.utc)
-            hour_note = f" after {min_hour:02d}:00" if min_hour else ""
             send_v2_slots_email(
                 lead.email, lead.business_name, slot_strings,
                 book_urls=book_urls,
-                body_text=(
-                    f"Here are the available times on {date_str}{hour_note} — click any to confirm instantly:"
-                ),
+                body_text=None,
                 contact_name=lead.contact_name,
             )
             logger.info("specific_date_alternatives_sent", email=lead.email, date=date_str, count=len(alt_slots))
@@ -896,6 +885,7 @@ async def _process_reply_v2(db, reply: dict) -> str:
     if analysis["intent"] == "list_slots":
         week = analysis.get("week")
         after_date_str = analysis.get("after_date")
+        specific_date_str = analysis.get("specific_date")
 
         after_date = None
         if after_date_str:
@@ -904,9 +894,56 @@ async def _process_reply_v2(db, reply: dict) -> str:
             except ValueError:
                 pass
 
-        from app.services.availability_v2 import get_slots_for_week, get_available_slots
+        from app.services.availability_v2 import (
+            get_slots_for_week, get_available_slots,
+            _parse_zoho_slot_hour, _apply_db_guard, _build_slot_info, IST as _IST_AV,
+        )
 
-        if after_date:
+        slot_infos = []
+
+        # ── Specific day request ("I'm free Monday", "Monday works") ─────────────
+        if specific_date_str:
+            try:
+                from datetime import date as _date_type
+                specific_date = datetime.strptime(specific_date_str, "%Y-%m-%d").date()
+                date_fmt = specific_date.strftime("%d-%b-%Y")
+                logger.info("fetching_slots_for_specific_day", email=lead.email, date=date_fmt)
+
+                zoho = ZohoBookingsService()
+                zoho_items = await asyncio.to_thread(zoho.fetch_available_slots, date_fmt)
+                if zoho_items:
+                    now_ist_ts = datetime.now(_IST_AV)
+                    raw_day_slots = []
+                    for item in zoho_items:
+                        h = _parse_zoho_slot_hour(item)
+                        if h is None or h < 9 or h > 18:
+                            continue
+                        slot_dt = datetime(specific_date.year, specific_date.month, specific_date.day, h, 0, tzinfo=_IST_AV)
+                        if slot_dt <= now_ist_ts:
+                            continue
+                        raw_day_slots.append(_build_slot_info(specific_date, h))
+
+                    # Apply DB guard (removes booked + held)
+                    if raw_day_slots:
+                        slot_infos = await _apply_db_guard(db, raw_day_slots)
+
+                if not slot_infos:
+                    # No Zoho slots that specific day — try the next few days starting from it
+                    logger.info("no_slots_for_specific_day_falling_back", email=lead.email, date=date_fmt)
+                    slot_infos = await get_available_slots(db, n=6, start_date=specific_date)
+
+                if not slot_infos:
+                    # Still nothing — fall back to this week / next week pool
+                    logger.info("specific_day_fallback_to_week", email=lead.email)
+                    slot_infos = await get_slots_for_week(db, "this", 6)
+                if not slot_infos:
+                    slot_infos = await get_slots_for_week(db, "next", 6)
+
+            except Exception as exc:
+                logger.warning("specific_day_fetch_error", email=lead.email, error=str(exc))
+                slot_infos = []
+
+        elif after_date:
             logger.info("fetching_slots_after_date", email=lead.email, after_date=after_date)
             slot_infos = await get_available_slots(db, n=6, start_date=after_date)
         else:

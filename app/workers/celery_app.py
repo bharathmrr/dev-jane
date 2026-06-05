@@ -28,16 +28,12 @@ celery_app.conf.update(
         "app.workers.reservation_tasks.*": {"queue": "maintenance"},
         "app.workers.email_tasks.poll_imap": {"queue": "maintenance"},
     },
-    task_time_limit=120,
-    task_soft_time_limit=90,
+    task_time_limit=300,
+    task_soft_time_limit=270,
     timezone="UTC",
 )
 
 celery_app.conf.beat_schedule = {
-    "poll-imap": {
-        "task": "app.workers.email_tasks.poll_imap",
-        "schedule": settings.IMAP_POLL_INTERVAL_SECONDS,
-    },
     "sweep-expired-holds": {
         "task": "app.workers.reservation_tasks.sweep_expired_reservations",
         "schedule": 60.0,
