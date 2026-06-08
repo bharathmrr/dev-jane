@@ -1,6 +1,7 @@
 """FastAPI application factory and entrypoint."""
 from __future__ import annotations
 
+import pathlib
 import uuid
 from contextlib import asynccontextmanager
 
@@ -9,8 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+_DASHBOARD_FILE = pathlib.Path(__file__).parent / "static" / "dashboard.html"
+
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.workers.celery_app import celery_app as _celery_app  # noqa: F401 — ensures Redis broker is set before tasks dispatch
 from app.core.logging import configure_logging, get_logger, request_id_ctx
 
 configure_logging()
@@ -46,7 +50,8 @@ def create_app() -> FastAPI:
         title=settings.APP_NAME,
         version="1.0.0",
         lifespan=lifespan,
-        docs_url="/docs" if settings.ENV != "prod" else None,
+        docs_url=None,
+        redoc_url=None,
     )
 
     app.add_middleware(RequestContextMiddleware)
@@ -64,9 +69,14 @@ def create_app() -> FastAPI:
 
         Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
-    @app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
-    async def dashboard():
-        return HTMLResponse(_DASHBOARD_HTML)
+    _no_cache = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
+
+    def _dash_html():
+        return HTMLResponse(_DASHBOARD_FILE.read_text(encoding="utf-8"), headers=_no_cache)
+
+    app.add_api_route("/dashboard", _dash_html, response_class=HTMLResponse, include_in_schema=False)
+    app.add_api_route("/app", _dash_html, response_class=HTMLResponse, include_in_schema=False)
+    app.add_api_route("/pipeline", _dash_html, response_class=HTMLResponse, include_in_schema=False)
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception):  # pragma: no cover

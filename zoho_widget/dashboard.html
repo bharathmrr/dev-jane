@@ -42,6 +42,9 @@ td{padding:9px 12px;font-size:12px;vertical-align:middle}
 .btn-start{background:#28a745;color:#fff;border:none;padding:5px 11px;border-radius:5px;font-size:11px;cursor:pointer;font-weight:600;white-space:nowrap}
 .btn-start:hover{opacity:.85}
 .btn-start:disabled{opacity:.5;cursor:not-allowed}
+.btn-cancel{background:#dc3545;color:#fff;border:none;padding:5px 11px;border-radius:5px;font-size:11px;cursor:pointer;font-weight:600;white-space:nowrap}
+.btn-cancel:hover{opacity:.85}
+.btn-cancel:disabled{opacity:.5;cursor:not-allowed}
 .btn-view{background:#1a56db;color:#fff;border:none;padding:5px 11px;border-radius:5px;font-size:11px;cursor:pointer;font-weight:600}
 .btn-view:hover{opacity:.85}
 .action-badge{display:inline-block;padding:3px 8px;border-radius:5px;font-size:10px;font-weight:700;background:#fff3cd;color:#856404;border:1px solid #ffc107}
@@ -199,7 +202,7 @@ function renderTable() {
     '<th>Agreement</th>',
     '<th>Score</th>',
     '<th>Next Action</th>',
-    '<th>Start</th>',
+    '<th>Action</th>',
     '</tr></thead><tbody>'
   ];
 
@@ -239,17 +242,14 @@ function renderTable() {
         html.push('<td>—</td>');
       }
 
-      html.push('<td>—</td>');
+      // Cancel button
+      html.push('<td><button class="btn-cancel" onclick="cancelOnboarding(\'' + lead.id + '\', this)">✕ Cancel</button></td>');
 
     } else {
       html.push('<td colspan="4" style="color:#bbb;font-size:11px">Not started</td>');
-
-      // Start button only for BOOKED leads
-      if (lead.status === "BOOKED") {
-        html.push('<td><button class="btn-start" onclick="startOnboarding(\'' + lead.id + '\', this)">▶ Start</button></td>');
-      } else {
-        html.push('<td><span style="color:#bbb;font-size:11px">—</span></td>');
-      }
+      html.push('<td>—</td>');
+      // Start button for all leads
+      html.push('<td><button class="btn-start" onclick="startOnboarding(\'' + lead.id + '\', this)">▶ Start</button></td>');
     }
 
     html.push('</tr>');
@@ -302,6 +302,26 @@ function startOnboarding(leadId, btn) {
     showToast("Error: " + e, "err");
     btn.disabled = false;
     btn.textContent = "▶ Start";
+  });
+}
+
+function cancelOnboarding(leadId, btn) {
+  if (!confirm("Cancel and remove onboarding for this lead?")) return;
+  btn.disabled = true;
+  btn.textContent = "Cancelling…";
+  fetch(API + "/onboarding/cancel/" + leadId, {
+    method: "DELETE",
+    headers: {"ngrok-skip-browser-warning": "1"}
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    showToast(d.message || "Onboarding cancelled.", "ok");
+    setTimeout(loadAll, 1500);
+  })
+  .catch(function(e){
+    showToast("Error: " + e, "err");
+    btn.disabled = false;
+    btn.textContent = "✕ Cancel";
   });
 }
 

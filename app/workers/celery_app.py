@@ -67,6 +67,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.onboarding_tasks.sweep_onboarding_reminders",
         "schedule": crontab(hour="8", minute="0"),  # every day at 8:00 UTC
     },
+    "pipeline-sheet-export": {
+        "task": "app.workers.v2_tasks.export_pipeline_to_sheets",
+        "schedule": 60.0,  # every 60 seconds
+    },
 }
 
 # Ensure task modules are imported when the worker boots.

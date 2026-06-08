@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +24,7 @@ from app.services.email_service import (
     send_v2_slots_email,
 )
 from app.services.zoho import ZohoBookingsService
-from app.workers.v2_tasks import sync_google_sheet, process_new_leads
+from app.workers.celery_app import celery_app
 
 _IST = ZoneInfo("Asia/Kolkata")
 
@@ -36,13 +37,13 @@ router = APIRouter(prefix="/v2", tags=["v2"])
 
 @router.post("/sync-sheet")
 def trigger_sync_sheet():
-    sync_google_sheet.delay()
+    celery_app.send_task("app.workers.v2_tasks.sync_google_sheet")
     return {"message": "Google Sheet sync triggered in background"}
 
 
 @router.post("/send-email")
 def trigger_send_email():
-    process_new_leads.delay()
+    celery_app.send_task("app.workers.v2_tasks.process_new_leads")
     return {"message": "Lead processing triggered in background"}
 
 
@@ -60,8 +61,10 @@ async def get_leads(db: AsyncSession = Depends(get_db)):
     return [
         {
             "id": str(lead.id),
-            "business_name": lead.business_name,
+            "contact_name": lead.contact_name or "",
+            "business_name": lead.business_name or "",
             "email": lead.email,
+            "summary": lead.summary or "",
             "status": lead.status.value,
             "sent_at": lead.sent_at.isoformat() if lead.sent_at else None,
             "replied_at": lead.replied_at.isoformat() if lead.replied_at else None,
@@ -69,9 +72,51 @@ async def get_leads(db: AsyncSession = Depends(get_db)):
             "selected_slot": lead.selected_slot,
             "booking_id": lead.booking_id,
             "zoho_meeting_link": lead.zoho_meeting_link,
+            "created_at": lead.created_at.isoformat() if lead.created_at else None,
         }
         for lead in leads
     ]
+
+
+# ---------------------------------------------------------------------------
+# CRM import — Zoho Flow pushes leads here when created/updated in Zoho CRM
+# ---------------------------------------------------------------------------
+
+class CRMLeadPayload(BaseModel):
+    email: str
+    contact_name: str = ""
+    business_name: str = ""
+    summary: str = ""
+
+
+@router.post("/leads/import-crm")
+async def import_crm_lead(payload: CRMLeadPayload, db: AsyncSession = Depends(get_db)):
+    """Zoho Flow webhook — create or update a lead from Zoho CRM."""
+    existing = (await db.execute(
+        select(LeadV2).where(LeadV2.email == payload.email)
+    )).scalar_one_or_none()
+
+    if existing:
+        if payload.contact_name:
+            existing.contact_name = payload.contact_name
+        if payload.business_name:
+            existing.business_name = payload.business_name
+        if payload.summary:
+            existing.summary = payload.summary
+        await db.commit()
+        return {"message": "Lead updated", "lead_id": str(existing.id), "action": "updated"}
+
+    new_lead = LeadV2(
+        email=payload.email,
+        contact_name=payload.contact_name,
+        business_name=payload.business_name,
+        summary=payload.summary,
+        status=LeadStatus.NEW,
+    )
+    db.add(new_lead)
+    await db.commit()
+    await db.refresh(new_lead)
+    return {"message": "Lead created", "lead_id": str(new_lead.id), "action": "created"}
 
 
 # ---------------------------------------------------------------------------

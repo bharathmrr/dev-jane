@@ -103,6 +103,15 @@ def initiate_onboarding_task(self, lead_id: str) -> None:
         raise self.retry(exc=exc)
 
 
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+def send_kyc_email_task(self, email: str, contact_name: str, business_name: str, kyc_url: str) -> None:
+    try:
+        from app.services.onboarding_email import send_kyc_form_email
+        send_kyc_form_email(email, contact_name, business_name, kyc_url)
+    except Exception as exc:
+        raise self.retry(exc=exc)
+
+
 # ---------------------------------------------------------------------------
 # KYC: rejection email
 # ---------------------------------------------------------------------------

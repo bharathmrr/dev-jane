@@ -149,6 +149,19 @@ def _serialize(rec: OnboardingRecord) -> dict:
 # Initiate onboarding
 # ---------------------------------------------------------------------------
 
+@router.delete("/cancel/{lead_id}")
+async def cancel_onboarding(lead_id: str, db: AsyncSession = Depends(get_db)):
+    """Team cancels / removes onboarding for a lead."""
+    rec = (await db.execute(
+        select(OnboardingRecord).where(OnboardingRecord.lead_id == uuid.UUID(lead_id))
+    )).scalar_one_or_none()
+    if not rec:
+        raise HTTPException(404, "No onboarding record found for this lead")
+    await db.delete(rec)
+    await db.commit()
+    return {"message": "Onboarding cancelled and removed"}
+
+
 @router.post("/start/{lead_id}")
 async def start_onboarding(lead_id: str, db: AsyncSession = Depends(get_db)):
     lead = await _get_lead(db, lead_id)
@@ -160,11 +173,30 @@ async def start_onboarding(lead_id: str, db: AsyncSession = Depends(get_db)):
     if existing:
         return {"message": "Onboarding already started", "onboarding_id": str(existing.id)}
 
-    # Detect company type via AI (run in background via task to avoid blocking)
-    from app.workers.onboarding_tasks import initiate_onboarding_task
-    initiate_onboarding_task.delay(lead_id)
+    # Create record immediately so the dashboard shows KYC status right away
+    from app.services.onboarding_email import make_kyc_token, make_kyc_url
+    now = _now_ist()
+    rec = OnboardingRecord(
+        lead_id=uuid.UUID(lead_id),
+        company_type=CompanyType.INDIAN,  # default; task will detect and update
+        kyc_status=KYCStatus.FORM_SENT,
+        kyc_status_display=f"KYC Form Sending… ({_fmt(now)})",
+        kyc_form_sent_at=now,
+    )
+    db.add(rec)
+    await db.flush()
 
-    return {"message": "Onboarding initiated. KYC form will be sent to the lead shortly."}
+    token = make_kyc_token(str(rec.id))
+    rec.kyc_form_token = token
+    kyc_url = make_kyc_url(str(rec.id), token)
+    rec.kyc_status_display = f"KYC Form Sent ({_fmt(now)})"
+    await db.commit()
+
+    # Send KYC email + AI company detection in background
+    from app.workers.onboarding_tasks import send_kyc_email_task
+    send_kyc_email_task.delay(lead.email, lead.contact_name or lead.business_name, lead.business_name or "", kyc_url)
+
+    return {"message": "Onboarding started. KYC form is being sent to the lead.", "onboarding_id": str(rec.id)}
 
 
 # ---------------------------------------------------------------------------

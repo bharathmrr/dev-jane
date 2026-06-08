@@ -9,7 +9,7 @@ from celery import shared_task
 from sqlalchemy.future import select
 from structlog import get_logger
 
-from app.db.models import LeadV2, LeadStatus, ZohoSlot, SlotStatus
+from app.db.models import LeadV2, LeadStatus, ZohoSlot, SlotStatus, OnboardingRecord
 from app.services.availability_v2 import get_slots_for_week
 from app.services.email_generator import (
     generate_outreach_body,
@@ -328,16 +328,25 @@ async def _process_new_leads(db):
     if not leads:
         return "No new leads."
 
+    # Skip leads already in onboarding — they get KYC/NDA/Agreement emails, not booking slots
+    ob_lead_ids = {
+        row[0] for row in (await db.execute(select(OnboardingRecord.lead_id))).all()
+    }
+
     sent = 0
     skipped = 0
     for lead in leads:
-        # ── Lead scoring: skip low-quality leads (score < 6 out of 10) ──────────
+        if lead.id in ob_lead_ids:
+            logger.info("lead_skipped_in_onboarding", email=lead.email)
+            skipped += 1
+            continue
+        # ── Lead scoring: skip only completely empty leads (score < 2) ──────────
         lead_score = score_lead(
             contact_name=lead.contact_name,
             business_name=lead.business_name,
             summary=lead.summary,
         )
-        if lead_score < 6:
+        if lead_score < 2:
             logger.info(
                 "lead_skipped_low_score",
                 email=lead.email,
@@ -412,9 +421,16 @@ async def _send_v2_reminders(db) -> str:
     if not leads:
         return "No leads needing reminders."
 
+    # Skip leads already in onboarding
+    ob_lead_ids = {
+        row[0] for row in (await db.execute(select(OnboardingRecord.lead_id))).all()
+    }
+
     sent_count = 0
     for lead in leads:
         if not lead.sent_at:
+            continue
+        if lead.id in ob_lead_ids:
             continue
 
         if lead.follow_up_count == 0 and lead.sent_at <= first_cutoff:
@@ -739,6 +755,14 @@ async def _process_reply_v2(db, reply: dict) -> str:
     if not lead:
         logger.info("no_matching_sent_lead", email=from_addr)
         return "No matching lead"
+
+    # Skip leads in onboarding — their emails are KYC/NDA replies, not booking replies
+    ob_exists = (await db.execute(
+        select(OnboardingRecord.lead_id).where(OnboardingRecord.lead_id == lead.id)
+    )).scalar_one_or_none()
+    if ob_exists:
+        logger.info("reply_skipped_lead_in_onboarding", email=from_addr)
+        return "Lead is in onboarding — reply ignored for booking"
 
     # Priority 1: If Stage 2 (has offered slots), try matching them simple-first
     selected_display = None
@@ -1065,3 +1089,141 @@ def check_inbox_replies_v2():
     logger.info("running_check_inbox_replies_v2")
     from app.workers.email_tasks import poll_imap
     return poll_imap()
+
+
+# ---------------------------------------------------------------------------
+# Master Pipeline Tracker → Google Sheets
+# Exports every lead (all statuses) + onboarding columns to "Pipeline" worksheet
+# Runs every 60 seconds automatically
+# ---------------------------------------------------------------------------
+
+_PIPELINE_HEADERS = [
+    "Email", "Contact Name", "Company", "Lead Status",
+    "Email Sent At", "Replied At", "Booked At", "Meeting Slot",
+    "Onboarding Started", "KYC Pending", "KYC Status", "KYC Detail",
+    "NDA Pending", "NDA Status", "NDA Detail",
+    "Agreement Pending", "Agreement Status", "Agreement Detail",
+    "Stage Score (0-11)", "Human Action Needed", "Last Updated",
+]
+
+
+def _yn(condition: bool) -> str:
+    return "YES" if condition else "NO"
+
+
+def _fmt_dt(dt_val) -> str:
+    if not dt_val:
+        return ""
+    try:
+        from zoneinfo import ZoneInfo
+        ist = ZoneInfo("Asia/Kolkata")
+        return dt_val.astimezone(ist).strftime("%d %b %Y %H:%M IST")
+    except Exception:
+        return str(dt_val)
+
+
+async def _export_pipeline_to_sheets(db) -> str:
+    from app.core.config import settings
+    if not settings.GOOGLE_SHEETS_SPREADSHEET_ID or not settings.GOOGLE_SHEETS_CREDENTIALS_JSON:
+        return "Google Sheets not configured"
+
+    from sqlalchemy.future import select as _select
+    from app.db.models import OnboardingRecord
+
+    # Fetch all leads
+    leads = (await db.execute(_select(LeadV2).order_by(LeadV2.created_at.desc()))).scalars().all()
+
+    # Fetch all onboarding records keyed by lead_id
+    ob_records = (await db.execute(_select(OnboardingRecord))).scalars().all()
+    ob_map = {str(r.lead_id): r for r in ob_records}
+
+    rows = []
+    for lead in leads:
+        ob = ob_map.get(str(lead.id))
+
+        # KYC
+        kyc_status = ob.kyc_status if ob else ""
+        kyc_pending = _yn(ob is not None and kyc_status not in ("APPROVED",) and kyc_status != "")
+        kyc_detail = (ob.kyc_status_display or "") if ob else ""
+
+        # NDA
+        nda_status = ob.nda_status if ob else ""
+        nda_pending = _yn(ob is not None and nda_status not in ("APPROVED", "PROCEED_NEXT", "") and nda_status != "")
+        nda_detail = (ob.nda_status_display or "") if ob else ""
+
+        # Agreement
+        ag_status = ob.agreement_status if ob else ""
+        ag_pending = _yn(ob is not None and ag_status not in ("APPROVED", "PROCEED_NEXT", "") and ag_status != "")
+        ag_detail = (ob.agreement_status_display or "") if ob else ""
+
+        # Stage score
+        stage_score = ""
+        human_action = ""
+        if ob:
+            from app.api.v1.onboarding_endpoints import _stage_score, _pending_action
+            stage_score = str(_stage_score(ob))
+            pa = _pending_action(ob)
+            if pa["type"] not in ("waiting", "complete"):
+                human_action = pa["label"]
+            elif pa["type"] == "complete":
+                human_action = "COMPLETE"
+
+        rows.append([
+            lead.email or "",
+            lead.contact_name or "",
+            lead.business_name or "",
+            (lead.status or "").upper(),
+            _fmt_dt(lead.sent_at),
+            _fmt_dt(lead.replied_at),
+            _fmt_dt(lead.booked_at) if hasattr(lead, "booked_at") else "",
+            lead.selected_slot or "",
+            _yn(ob is not None),
+            kyc_pending,
+            kyc_status or "",
+            kyc_detail,
+            nda_pending,
+            nda_status or "",
+            nda_detail,
+            ag_pending,
+            ag_status or "",
+            ag_detail,
+            stage_score,
+            human_action,
+            _fmt_dt(datetime.now(timezone.utc)),
+        ])
+
+    # Write to Google Sheets
+    try:
+        import json as _json
+        import gspread
+        from google.oauth2.service_account import Credentials
+
+        creds_dict = _json.loads(settings.GOOGLE_SHEETS_CREDENTIALS_JSON)
+        scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(settings.GOOGLE_SHEETS_SPREADSHEET_ID)
+
+        # Get or create Pipeline worksheet
+        try:
+            ws = sh.worksheet("Pipeline")
+        except Exception:
+            ws = sh.add_worksheet(title="Pipeline", rows=2000, cols=len(_PIPELINE_HEADERS))
+
+        # Full overwrite: clear + rewrite headers + all rows
+        ws.clear()
+        ws.append_row(_PIPELINE_HEADERS)
+        if rows:
+            ws.append_rows(rows)
+
+        logger.info("pipeline_sheet_exported", total_rows=len(rows))
+        return f"Pipeline exported: {len(rows)} leads"
+    except Exception as exc:
+        logger.warning("pipeline_sheet_export_failed", error=str(exc))
+        return f"Export failed: {exc}"
+
+
+@shared_task
+def export_pipeline_to_sheets():
+    logger.info("running_export_pipeline_to_sheets")
+    return run_async(_export_pipeline_to_sheets)
