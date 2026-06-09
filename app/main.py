@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-_DASHBOARD_FILE = pathlib.Path(__file__).parent / "static" / "dashboard.html"
+_WIDGET_FILE = pathlib.Path(__file__).parent.parent / "zoho_widget" / "index.html"
+_WIDGET_DASH_FILE = pathlib.Path(__file__).parent.parent / "zoho_widget" / "dashboard.html"
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -71,12 +72,28 @@ def create_app() -> FastAPI:
 
     _no_cache = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
 
-    def _dash_html():
-        return HTMLResponse(_DASHBOARD_FILE.read_text(encoding="utf-8"), headers=_no_cache)
+    def _widget_html():
+        return HTMLResponse(_WIDGET_FILE.read_text(encoding="utf-8"), headers=_no_cache)
 
-    app.add_api_route("/dashboard", _dash_html, response_class=HTMLResponse, include_in_schema=False)
-    app.add_api_route("/app", _dash_html, response_class=HTMLResponse, include_in_schema=False)
-    app.add_api_route("/pipeline", _dash_html, response_class=HTMLResponse, include_in_schema=False)
+    def _widget_dash_html():
+        return HTMLResponse(_WIDGET_DASH_FILE.read_text(encoding="utf-8"), headers=_no_cache)
+
+    app.add_api_route("/zoho-widget", _widget_html, response_class=HTMLResponse, include_in_schema=False)
+    app.add_api_route("/zoho-widget/dashboard", _widget_dash_html, response_class=HTMLResponse, include_in_schema=False)
+
+    @app.get("/auth/zoho/callback", response_class=HTMLResponse, include_in_schema=False)
+    async def zoho_oauth_callback_root(request: Request) -> HTMLResponse:
+        code = request.query_params.get("code", "")
+        error = request.query_params.get("error", "")
+        if error:
+            return HTMLResponse(f"<h2 style='color:red'>Error: {error}</h2>")
+        return HTMLResponse(f"""<html><body style="font-family:monospace;padding:40px;background:#111;color:#0f0">
+        <h2 style="color:#fff">Zoho OAuth Code</h2>
+        <p>Copy this code and paste it to Claude:</p>
+        <div id="code" style="background:#222;padding:20px;border-radius:8px;font-size:14px;word-break:break-all;color:#0f0">{code}</div>
+        <button onclick="navigator.clipboard.writeText(document.getElementById('code').innerText)"
+                style="margin-top:20px;padding:10px 20px;background:#0070f3;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">
+        Copy Code</button></body></html>""")
 
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception):  # pragma: no cover
@@ -86,7 +103,7 @@ def create_app() -> FastAPI:
     return app
 
 
-_DASHBOARD_HTML = """<!DOCTYPE html>
+_DEAD_START = """_placeholder_
 <html lang="en">
 <head>
 <meta charset="utf-8">

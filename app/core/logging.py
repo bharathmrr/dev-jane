@@ -3,10 +3,15 @@
 Emits JSON in production (LOG_JSON=true) and a colorized console renderer in
 dev. A contextvar carries a request/correlation id so every log line within a
 request or Celery task can be traced.
+
+Log files (all under logs/):
+  logs/backend.log   — general structured app logs (structlog)
+  logs/pipeline.log  — key pipeline events (see pipeline_logger.py)
 """
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from contextvars import ContextVar
 
@@ -25,6 +30,8 @@ def _add_request_id(_, __, event_dict: dict) -> dict:
 
 
 def configure_logging() -> None:
+    os.makedirs("logs", exist_ok=True)
+
     timestamper = structlog.processors.TimeStamper(fmt="iso")
     shared = [
         structlog.contextvars.merge_contextvars,
@@ -41,8 +48,8 @@ def configure_logging() -> None:
         else structlog.dev.ConsoleRenderer()
     )
 
-    # Set up standard logging handlers to write to both stdout and a backend.log file in the workspace root.
-    file_handler = logging.FileHandler("backend.log", encoding="utf-8")
+    # Write to both stdout and logs/backend.log
+    file_handler = logging.FileHandler("logs/backend.log", encoding="utf-8")
     stdout_handler = logging.StreamHandler(sys.stdout)
 
     logging.basicConfig(

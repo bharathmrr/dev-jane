@@ -8,6 +8,7 @@ import hashlib
 import hmac as _hmac
 import smtplib
 import ssl
+import time
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -18,6 +19,23 @@ from app.core.config import settings
 # ---------------------------------------------------------------------------
 # KYC form URL (HMAC-signed)
 # ---------------------------------------------------------------------------
+
+def make_action_url(record_id: str, action: str, expires_days: int = 7) -> str:
+    """Generate an HMAC-signed one-click action URL for team emails."""
+    expires = int(time.time()) + expires_days * 86400
+    msg = f"{record_id}:{action}:{expires}".encode()
+    token = _hmac.new(settings.ONBOARDING_HMAC_SECRET.encode(), msg, hashlib.sha256).hexdigest()
+    base = settings.APP_URL.rstrip("/")
+    return f"{base}/api/v1/onboarding/action?id={record_id}&action={action}&token={token}&expires={expires}"
+
+
+def _action_btn(url: str, label: str, color: str = "#1a56db") -> str:
+    return (
+        f'<a href="{url}" style="display:inline-block;background:{color};color:#fff;'
+        f'padding:10px 22px;border-radius:6px;text-decoration:none;font-size:14px;'
+        f'font-weight:bold;margin:4px 6px 4px 0;">{label}</a>'
+    )
+
 
 def make_kyc_url(onboarding_id: str, token: str) -> str:
     return f"{settings.APP_URL.rstrip('/')}/api/v1/onboarding/kyc/form/{onboarding_id}/{token}"
@@ -36,6 +54,15 @@ def verify_kyc_token(onboarding_id: str, token: str) -> bool:
 # ---------------------------------------------------------------------------
 # Email send helpers
 # ---------------------------------------------------------------------------
+
+def _send_to_reviewers(subject: str, html_content: str) -> bool:
+    """Send to ORGANIZER_EMAIL and ONBOARDING_REVIEWER_EMAIL (if set and different)."""
+    ok = _send_html_email(settings.ORGANIZER_EMAIL, subject, html_content)
+    reviewer = (settings.ONBOARDING_REVIEWER_EMAIL or "").strip()
+    if reviewer and reviewer != settings.ORGANIZER_EMAIL:
+        _send_html_email(reviewer, subject, html_content)
+    return ok
+
 
 def _send_html_email(
     to_email: str,
@@ -341,15 +368,38 @@ def notify_team_kyc_submitted(
     company_name: str,
     onboarding_id: str,
     attempt_number: int,
+    kyc_score: int = 0,
+    kyc_summary: str = "",
+    issues: str = "",
 ) -> bool:
-    review_url = f"{settings.APP_URL.rstrip('/')}/dashboard#onboarding-{onboarding_id}"
-    subject = f"KYC Submitted for Review — {company_name} (Attempt #{attempt_number})"
+    approve_url = make_action_url(onboarding_id, "approve_kyc")
+    reject_url = make_action_url(onboarding_id, "reject_kyc")
+    subject = f"KYC Manual Review Required — {company_name} (Attempt #{attempt_number})"
+
+    score_color = "#16a34a" if kyc_score >= 80 else "#d97706" if kyc_score >= 50 else "#dc2626"
+    score_html = (
+        f'<p style="margin:12px 0;"><strong>KYC Score: '
+        f'<span style="color:{score_color};font-size:20px;">{kyc_score}/100</span></strong></p>'
+    ) if kyc_score else ""
+
+    summary_html = f'<p style="color:#555;font-size:13px;">{kyc_summary}</p>' if kyc_summary else ""
+    issues_html = (
+        f'<p style="background:#fef2f2;border-left:4px solid #dc2626;padding:8px 12px;'
+        f'font-size:13px;color:#991b1b;">⚠️ Issues: {issues}</p>'
+    ) if issues else ""
+
     html = f"""
-        <p><strong>{lead_name}</strong> from <strong>{company_name}</strong> has submitted their KYC form
-        (Attempt #{attempt_number}).</p>
-        <p><a href="{review_url}">Click here to review on the dashboard</a></p>
+        <p><strong>{lead_name}</strong> from <strong>{company_name}</strong> submitted KYC
+        (Attempt #{attempt_number}) — requires manual review.</p>
+        {score_html}{summary_html}{issues_html}
+        <p>Review and take action:</p>
+        <p>
+            {_action_btn(approve_url, "✅ Approve KYC", "#16a34a")}
+            {_action_btn(reject_url, "❌ Reject KYC", "#dc2626")}
+        </p>
+        <p style="color:#888;font-size:12px;">Onboarding ID: {onboarding_id}</p>
     """
-    return _send_html_email(settings.ORGANIZER_EMAIL, subject, html)
+    return _send_to_reviewers(subject, html)
 
 
 def notify_team_signed_doc_received(
@@ -357,11 +407,154 @@ def notify_team_signed_doc_received(
     company_name: str,
     onboarding_id: str,
     doc_type: str,
+    contract_id: str = "",
 ) -> bool:
-    review_url = f"{settings.APP_URL.rstrip('/')}/dashboard#onboarding-{onboarding_id}"
-    subject = f"Signed {doc_type} Received — {company_name}"
+    doc_lower = doc_type.lower()
+    if doc_lower == "nda":
+        approve_url = make_action_url(onboarding_id, "approve_nda_sign")
+        reject_url = make_action_url(onboarding_id, "reject_nda_sign")
+    else:
+        approve_url = make_action_url(onboarding_id, "approve_agreement_sign")
+        reject_url = make_action_url(onboarding_id, "reject_agreement_sign")
+
+    zoho_link = ""
+    if contract_id:
+        url = f"https://contracts.zoho.in/janeaerospace#/contracts/{contract_id}"
+        zoho_link = (
+            f'<p><a href="{url}" style="color:#1a56db;">📄 View Signed {doc_type} in Zoho Contracts</a></p>'
+        )
+
+    subject = f"✍️ Signed {doc_type} Received — {company_name}"
     html = f"""
-        <p><strong>{lead_name}</strong> from <strong>{company_name}</strong> has sent back the signed {doc_type}.</p>
-        <p><a href="{review_url}">Click here to review on the dashboard</a></p>
+        <p><strong>{lead_name}</strong> from <strong>{company_name}</strong>
+        has signed the {doc_type} via Zoho Contracts.</p>
+        {zoho_link}
+        <p>Review and take action:</p>
+        <p>
+            {_action_btn(approve_url, f"✅ Approve Signed {doc_type}", "#16a34a")}
+            {_action_btn(reject_url, "❌ Reject Signature", "#dc2626")}
+        </p>
+        <p style="color:#888;font-size:12px;">Onboarding ID: {onboarding_id}</p>
+    """
+    return _send_to_reviewers(subject, html)
+
+
+def notify_team_nda_draft_ready(
+    lead_name: str,
+    company_name: str,
+    onboarding_id: str,
+    preview_url: str = "",
+    contract_id: str = "",
+) -> bool:
+    approve_url = make_action_url(onboarding_id, "approve_nda_draft")
+
+    preview_btn = ""
+    if preview_url:
+        preview_btn = (
+            f'<p><a href="{preview_url}" style="display:inline-block;background:#1e40af;color:#fff;'
+            f'padding:10px 22px;border-radius:6px;text-decoration:none;font-size:14px;'
+            f'font-weight:bold;margin:4px 6px 4px 0;">👁️ Preview NDA in Zoho Contracts</a></p>'
+        )
+
+    subject = f"📋 NDA Draft Ready — {company_name} (Review & Approve)"
+    html = f"""
+        <p>The NDA draft for <strong>{lead_name}</strong> from <strong>{company_name}</strong>
+        has been created in Zoho Contracts with all KYC data pre-filled.</p>
+        <p><strong>Step 1:</strong> Preview the NDA — review data, edit manual fields (term, security deposit, etc.)</p>
+        {preview_btn}
+        <p><strong>Step 2:</strong> Once satisfied, approve to send to lead for e-signature:</p>
+        <p>{_action_btn(approve_url, "✅ Approve NDA & Send to Lead", "#16a34a")}</p>
+        <p style="color:#888;font-size:12px;">Onboarding ID: {onboarding_id}
+        {f" | Contract: {contract_id}" if contract_id else ""}</p>
+    """
+    return _send_to_reviewers(subject, html)
+
+
+def notify_team_agreement_draft_ready(
+    lead_name: str,
+    company_name: str,
+    onboarding_id: str,
+    preview_url: str = "",
+    contract_id: str = "",
+) -> bool:
+    approve_url = make_action_url(onboarding_id, "approve_agreement_draft")
+
+    preview_btn = ""
+    if preview_url:
+        preview_btn = (
+            f'<p><a href="{preview_url}" style="display:inline-block;background:#1e40af;color:#fff;'
+            f'padding:10px 22px;border-radius:6px;text-decoration:none;font-size:14px;'
+            f'font-weight:bold;margin:4px 6px 4px 0;">👁️ Preview Agreement in Zoho Contracts</a></p>'
+        )
+
+    subject = f"📋 Agreement Draft Ready — {company_name} (Review & Approve)"
+    html = f"""
+        <p>The Customer Agreement draft for <strong>{lead_name}</strong> from
+        <strong>{company_name}</strong> has been created in Zoho Contracts with all KYC data pre-filled.</p>
+        <p><strong>Step 1:</strong> Preview the Agreement — review data, edit manual fields
+        (security deposit, contract term, etc.)</p>
+        {preview_btn}
+        <p><strong>Step 2:</strong> Once satisfied, approve to send to lead for e-signature:</p>
+        <p>{_action_btn(approve_url, "✅ Approve Agreement & Send to Lead", "#16a34a")}</p>
+        <p style="color:#888;font-size:12px;">Onboarding ID: {onboarding_id}
+        {f" | Contract: {contract_id}" if contract_id else ""}</p>
+    """
+    return _send_to_reviewers(subject, html)
+
+
+def notify_team_onboarding_started(
+    lead_name: str,
+    company_name: str,
+    lead_email: str,
+    onboarding_id: str,
+    company_type: str = "",
+) -> bool:
+    """Sent to team the moment onboarding is initiated — via CRM button, email link, or API."""
+    subject = f"Onboarding Started — {company_name}"
+    type_badge = f'<span style="background:#e0f2fe;color:#0369a1;padding:2px 8px;border-radius:4px;font-size:12px;">{company_type.upper()}</span>' if company_type else ""
+    html = f"""
+        <p>Onboarding has been initiated for the following lead:</p>
+        <table style="border-collapse:collapse;width:100%;max-width:480px;">
+            <tr><td style="padding:6px 0;color:#555;width:130px;">Company</td>
+                <td><strong>{company_name}</strong> {type_badge}</td></tr>
+            <tr><td style="padding:6px 0;color:#555;">Contact</td>
+                <td>{lead_name}</td></tr>
+            <tr><td style="padding:6px 0;color:#555;">Email</td>
+                <td>{lead_email}</td></tr>
+            <tr><td style="padding:6px 0;color:#555;">Onboarding ID</td>
+                <td style="font-family:monospace;font-size:12px;">{onboarding_id}</td></tr>
+        </table>
+        <br>
+        <p style="color:#555;">The KYC form has been sent to <strong>{lead_email}</strong>.
+        You will receive another email when the lead submits it.</p>
+        <p style="color:#aaa;font-size:12px;margin-top:24px;">
+            Pipeline: KYC → NDA → Agreement → Complete
+        </p>
+    """
+    return _send_html_email(settings.ORGANIZER_EMAIL, subject, html)
+
+
+def notify_team_booking_start_onboarding(
+    lead_name: str,
+    company_name: str,
+    lead_email: str,
+    lead_id: str,
+    slot_display: str,
+) -> bool:
+    start_url = make_action_url(lead_id, "start_onboarding", expires_days=30)
+    subject = f"New Meeting Booked — Start Onboarding for {company_name}"
+    html = f"""
+        <p>A new meeting has been booked:</p>
+        <ul>
+            <li><strong>Lead:</strong> {lead_name} from {company_name}</li>
+            <li><strong>Email:</strong> {lead_email}</li>
+            <li><strong>Meeting:</strong> {slot_display}</li>
+        </ul>
+        <p>Once the meeting is complete, click below to start the onboarding process.
+        This will automatically detect the company type and send the KYC form to the lead.</p>
+        <p>
+            {_action_btn(start_url, "▶ Start Onboarding", "#1a56db")}
+        </p>
+        <p style="color:#888;font-size:12px;">This link is valid for 30 days.</p>
     """
     return _send_html_email(settings.ORGANIZER_EMAIL, subject, html)

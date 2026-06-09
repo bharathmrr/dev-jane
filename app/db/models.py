@@ -384,6 +384,7 @@ class OnboardingRecord(UUIDMixin, TimestampMixin, Base):
     nda_last_followup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     nda_draft_revision: Mapped[int] = mapped_column(Integer, default=0)
     nda_team_notes: Mapped[str | None] = mapped_column(Text)
+    nda_zoho_contract_id: Mapped[str | None] = mapped_column(String(255))
 
     # --- Customer Agreement ---
     agreement_status: Mapped[str] = mapped_column(
@@ -401,6 +402,7 @@ class OnboardingRecord(UUIDMixin, TimestampMixin, Base):
     agreement_last_followup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     agreement_draft_revision: Mapped[int] = mapped_column(Integer, default=0)
     agreement_team_notes: Mapped[str | None] = mapped_column(Text)
+    agreement_zoho_contract_id: Mapped[str | None] = mapped_column(String(255))
 
     # relationships
     lead: Mapped["LeadV2"] = relationship("LeadV2", foreign_keys=[lead_id])
@@ -426,6 +428,15 @@ class KYCSubmission(UUIDMixin, TimestampMixin, Base):
     company_name: Mapped[str] = mapped_column(String(255), nullable=False)
     contact_name: Mapped[str] = mapped_column(String(255), nullable=False)
     contact_number: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    # Verification numbers (text inputs from the KYC form)
+    gstin_number: Mapped[str | None] = mapped_column(String(20))
+    pan_number: Mapped[str | None] = mapped_column(String(20))
+    cin_number: Mapped[str | None] = mapped_column(String(25))
+
+    # Auto-verification result stored as JSON
+    kyc_verification_result: Mapped[dict] = mapped_column(JSONB, default=dict)
+    auto_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # File references in Zoho WorkDrive (file IDs)
     gst_certificate_zoho_id: Mapped[str | None] = mapped_column(String(255))   # Indian only

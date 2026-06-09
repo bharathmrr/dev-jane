@@ -109,3 +109,50 @@ def get_download_url(file_id: str) -> Optional[str]:
         return None
     dc = settings.ZOHO_DC or "com"
     return f"https://workdrive.zoho.{dc}/file/{file_id}"
+
+
+def list_files(folder_id: str | None = None) -> list[dict]:
+    """List all files in a WorkDrive folder.
+
+    Returns list of dicts with: id, name, type, size, created_time, download_url
+    """
+    folder = folder_id or settings.ZOHO_WORKDRIVE_FOLDER_ID
+    url = f"{_base_url()}/files/{folder}/files"
+    resp = requests.get(url, headers=_headers(), timeout=20)
+    resp.raise_for_status()
+    data = resp.json()
+
+    files = []
+    for item in data.get("data", []):
+        attrs = item.get("attributes", {})
+        file_id = item.get("id") or attrs.get("resource_id", "")
+        files.append({
+            "id": file_id,
+            "name": attrs.get("name", ""),
+            "type": attrs.get("type", ""),
+            "size": attrs.get("storage_info", {}).get("size_in_bytes", 0),
+            "created_time": attrs.get("created_time", ""),
+            "modified_time": attrs.get("modified_time", ""),
+            "download_url": get_download_url(file_id),
+        })
+    return files
+
+
+def list_subfolders(folder_id: str | None = None) -> list[dict]:
+    """List all subfolders inside a WorkDrive folder."""
+    folder = folder_id or settings.ZOHO_WORKDRIVE_FOLDER_ID
+    url = f"{_base_url()}/files/{folder}/files"
+    params = {"filter[type]": "folder"}
+    resp = requests.get(url, headers=_headers(), params=params, timeout=20)
+    resp.raise_for_status()
+    data = resp.json()
+
+    folders = []
+    for item in data.get("data", []):
+        attrs = item.get("attributes", {})
+        folders.append({
+            "id": item.get("id", ""),
+            "name": attrs.get("name", ""),
+            "created_time": attrs.get("created_time", ""),
+        })
+    return folders

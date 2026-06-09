@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +16,28 @@ from app.schemas import LoginRequest, Token, UserOut
 from app.core.deps import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/zoho/callback", response_class=HTMLResponse)
+async def zoho_oauth_callback(request: Request) -> HTMLResponse:
+    """Temporary endpoint to capture Zoho OAuth authorization code."""
+    code = request.query_params.get("code", "")
+    error = request.query_params.get("error", "")
+    if error:
+        return HTMLResponse(f"<h2>Error: {error}</h2>")
+    return HTMLResponse(f"""
+    <html><body style="font-family:monospace;padding:40px;background:#111;color:#0f0">
+    <h2 style="color:#fff">Zoho OAuth Code</h2>
+    <p>Copy this code and paste it to Claude:</p>
+    <div style="background:#222;padding:20px;border-radius:8px;font-size:14px;word-break:break-all;color:#0f0">
+    {code}
+    </div>
+    <button onclick="navigator.clipboard.writeText('{code}')"
+            style="margin-top:20px;padding:10px 20px;background:#0070f3;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">
+    Copy Code
+    </button>
+    </body></html>
+    """)
 
 
 @router.post("/login", response_model=Token)

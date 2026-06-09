@@ -21,6 +21,8 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
     expose: ["8000"]
+    volumes:
+      - ./logs:/app/logs
     command: sh -c "alembic upgrade head && gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000 --access-logfile - --error-logfile -"
 
   worker:
@@ -32,6 +34,7 @@ services:
       redis: {condition: service_healthy}
     volumes:
       - ./leads.csv:/app/leads.csv:ro
+      - ./logs:/app/logs
     command: celery -A app.workers.celery_app:celery_app worker
              -Q email,reminders,maintenance,onboarding --concurrency=4 -l info
 
@@ -41,6 +44,8 @@ services:
     environment: *app-env
     depends_on:
       redis: {condition: service_healthy}
+    volumes:
+      - ./logs:/app/logs
     command: celery -A app.workers.celery_app:celery_app beat -l info
 
   postgres:

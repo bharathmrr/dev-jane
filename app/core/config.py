@@ -129,6 +129,38 @@ class Settings(BaseSettings):
     ONBOARDING_WORKSHEET_NAME: str = "Onboarding"
     LEADS_CSV_PATH: str = "/app/leads.csv"
 
+    # --- Zoho CRM (contact sync at every onboarding stage) ---
+    ZOHO_CRM_REFRESH_TOKEN: str = ""
+
+    # --- Third-party KYC Verification ---
+    KYC_PROVIDER: str = "free"           # "free" (current) | "setu" | "karza" | "cashfree"
+    SETU_CLIENT_ID: str = ""
+    SETU_CLIENT_SECRET: str = ""
+    SETU_BASE_URL: str = "https://dg-sandbox.setu.co"   # sandbox; prod: https://dg.setu.co
+    KARZA_API_KEY: str = ""
+    KARZA_BASE_URL: str = "https://testapi.karza.in"    # sandbox; prod: https://api.karza.in
+
+    # --- Zoho Contracts (e-sign for NDA & Customer Agreement) ---
+    ZOHO_CONTRACTS_CLIENT_ID: str = ""       # Self Client ID (has ZohoWriter scope)
+    ZOHO_CONTRACTS_CLIENT_SECRET: str = ""   # Self Client Secret
+    ZOHO_CONTRACTS_REFRESH_TOKEN: str = ""
+    ZOHO_CONTRACTS_ORG_ID: str = ""
+    ZOHO_CONTRACTS_NDA_TEMPLATE_INDIAN: str = ""
+    ZOHO_CONTRACTS_NDA_TEMPLATE_OVERSEAS: str = ""
+    ZOHO_CONTRACTS_AGREEMENT_TEMPLATE_INDIAN: str = ""
+    ZOHO_CONTRACTS_AGREEMENT_TEMPLATE_OVERSEAS: str = ""
+
+    # --- Zoho Sign (e-signature — requires paid-plan credentials for sending) ---
+    ZOHO_SIGN_CLIENT_ID: str = ""
+    ZOHO_SIGN_CLIENT_SECRET: str = ""
+    ZOHO_SIGN_REFRESH_TOKEN: str = ""
+    ZOHO_SIGN_NDA_TEMPLATE_ID: str = ""
+    ZOHO_SIGN_NDA_TEMPLATE_ACTION_JANE: str = ""
+    ZOHO_SIGN_NDA_TEMPLATE_ACTION_COUNTERPARTY: str = ""
+
+    # --- Onboarding reviewer (receives KYC/NDA/Agreement preview emails) ---
+    ONBOARDING_REVIEWER_EMAIL: str = ""
+
 
     @field_validator("CELERY_BROKER_URL", "CELERY_RESULT_BACKEND", mode="before")
     @classmethod

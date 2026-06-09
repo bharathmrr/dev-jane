@@ -29,6 +29,7 @@ from app.services.email_service import (
     send_booking_confirmation_to_lead,
     send_organizer_booking_notification,
 )
+from app.core.pipeline_logger import log_pipeline
 from app.workers.runtime import run_async
 
 logger = get_logger(__name__)
@@ -177,6 +178,22 @@ async def _sync_google_sheet(db):
             added += 1
         else:
             skipped_existing += 1
+            continue
+
+        # Push new lead to Zoho CRM
+        try:
+            from app.services.zoho_crm import sync_onboarding_stage
+            phone = (row.get("phone number") or row.get("Phone") or row.get("phone") or "").strip()
+            sync_onboarding_stage(
+                email=email,
+                contact_name=contact_name or business_name,
+                company_name=business_name,
+                stage="Lead Imported from Google Sheet",
+                detail=f"Designation: {designation}" if designation else "",
+                phone=phone,
+            )
+        except Exception as exc:
+            logger.warning("crm_sheet_sync_failed", email=email, error=str(exc))
 
     logger.info("sheet_sync_done", added=added, already_in_db=skipped_existing, missing_fields=skipped_missing)
     return f"Sync complete: +{added} new, {skipped_existing} existing, {skipped_missing} missing fields"
@@ -383,6 +400,8 @@ async def _process_new_leads(db):
         )
         if success:
             logger.info("week_selection_email_sent", email=lead.email, score=lead_score)
+            log_pipeline("EMAIL_SENT", company=lead.business_name, email=lead.email,
+                         detail="Outreach email #1 sent (week-selection)")
             sent += 1
         else:
             # Revert status so we retry on the next cycle
@@ -446,6 +465,8 @@ async def _send_v2_reminders(db) -> str:
                 lead.reminder_sent_at = now
                 sent_count += 1
                 logger.info("reminder_1_sent", email=lead.email)
+                log_pipeline("EMAIL_REMINDER", company=lead.business_name, email=lead.email,
+                             detail="Follow-up #1 sent")
 
         elif (
             lead.follow_up_count == 1
@@ -463,6 +484,8 @@ async def _send_v2_reminders(db) -> str:
                 lead.follow_up_count = 2
                 sent_count += 1
                 logger.info("reminder_2_sent", email=lead.email)
+                log_pipeline("EMAIL_REMINDER", company=lead.business_name, email=lead.email,
+                             detail="Follow-up #2 sent")
 
     return f"Reminders sent: {sent_count}"
 
@@ -575,6 +598,35 @@ async def _do_booking(db, lead, date_str: str, time_str: str, display_str: str) 
         lead.business_name, lead.email, display_str, meeting_link=meeting_link
     )
     logger.info("booking_complete", email=lead.email, booking_id=booking_id)
+    log_pipeline("BOOKING_COMPLETED", company=lead.business_name, email=lead.email,
+                 detail=f"Slot: {display_str} | Booking ID: {booking_id}")
+
+    # Email team with one-click "Start Onboarding" link (valid 30 days)
+    try:
+        from app.services.onboarding_email import notify_team_booking_start_onboarding
+        notify_team_booking_start_onboarding(
+            lead_name=lead.contact_name or lead.business_name,
+            company_name=lead.business_name,
+            lead_email=lead.email,
+            lead_id=str(lead.id),
+            slot_display=display_str,
+        )
+    except Exception as exc:
+        logger.warning("start_onboarding_email_failed", email=lead.email, error=str(exc))
+
+    # Sync booking to Zoho CRM
+    try:
+        from app.services.zoho_crm import sync_onboarding_stage
+        sync_onboarding_stage(
+            email=lead.email,
+            contact_name=lead.contact_name or lead.business_name,
+            company_name=lead.business_name,
+            stage="Meeting Booked",
+            detail=f"Slot: {display_str} | Booking ID: {booking_id} | Link: {meeting_link}",
+        )
+    except Exception as exc:
+        logger.warning("crm_booking_sync_failed", email=lead.email, error=str(exc))
+
     return f"Booked (ID: {booking_id})"
 
 
