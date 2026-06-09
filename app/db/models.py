@@ -318,6 +318,61 @@ class LeadV2(UUIDMixin, TimestampMixin, Base):
     reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     follow_up_count: Mapped[int] = mapped_column(Integer, default=0)
     summary: Mapped[str | None] = mapped_column(Text)
+    location: Mapped[str | None] = mapped_column(String(255))
+    designation: Mapped[str | None] = mapped_column(String(255))
+    ab_variant: Mapped[str | None] = mapped_column(String(2))        # A / B / C
+    ab_subject_variant: Mapped[str | None] = mapped_column(String(2)) # S1 / S2 / S3
+    opted_out: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    email_bounced: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    ooo_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reschedule_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Bounce tracking (#1, #2)
+    bounce_count: Mapped[int] = mapped_column(Integer, default=0)
+    soft_bounce_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_bounced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Email open tracking (#3)
+    email_open_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    open_nudge_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # A/B send-time variant (#A/B)
+    send_time_variant: Mapped[str | None] = mapped_column(String(16))  # morning/afternoon/evening
+
+    # Priority flagging (#38, #50)
+    priority_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    priority_deadline: Mapped[str | None] = mapped_column(String(255))
+    escalated_to_human: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Lead properties (#5 shared inbox, #4 forward, #6 language)
+    is_shared_inbox: Mapped[bool] = mapped_column(Boolean, default=False)
+    reply_language: Mapped[str | None] = mapped_column(String(32))
+    cc_emails: Mapped[str | None] = mapped_column(Text)      # JSON list of CC'd addresses
+    booked_via_forward: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Job change tracking (#16)
+    new_contact_from_job_change: Mapped[str | None] = mapped_column(String(512))
+
+    # Scheduled follow-up (#34)
+    scheduled_followup_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # No-show tracking (#27)
+    no_show_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Pending slot confirmation (#17 — slot clicked, awaiting user confirm)
+    pending_booking_slot_json: Mapped[str | None] = mapped_column(Text)
+    pending_booking_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pending_nudge_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # After-hours reply queue (#11)
+    pending_reply_json: Mapped[str | None] = mapped_column(Text)
+
+    # Phone number (#14 — extracted from "call me" replies)
+    phone_number: Mapped[str | None] = mapped_column(String(32))
+
+    # Re-engagement flag (#25, #37)
+    is_repeat_lead: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class ZohoSlot(UUIDMixin, TimestampMixin, Base):

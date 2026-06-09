@@ -7,7 +7,7 @@ import uuid
 from typing import Any, Dict
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -23,6 +23,7 @@ from app.services.email_service import (
     send_organizer_booking_notification,
     send_v2_slots_email,
 )
+from app.services.email_tracker import verify_open_sig as verify_open_pixel_sig, increment_open_count
 from app.services.zoho import ZohoBookingsService
 from app.workers.celery_app import celery_app
 
@@ -362,8 +363,7 @@ def _already_booked_page(slot: str, meeting_link: str | None) -> str:
 @router.get("/book/{lead_id}/{slot_idx}/{sig}", response_class=HTMLResponse)
 async def one_click_book(
     lead_id: str, slot_idx: int, sig: str,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     if not _verify_book_sig(lead_id, slot_idx, sig):
         raise HTTPException(status_code=400, detail="Invalid or expired booking link.")
@@ -408,19 +408,163 @@ async def one_click_book(
         except Exception:
             raise HTTPException(status_code=400, detail="Cannot parse slot date/time.")
 
-    # Check if slot is already booked locally
+    # Past-slot validation (#20): reject slots in the past
     from app.services.availability_v2 import _get_booked_slots, IST as _IST
-    booked_iso, booked_display = await _get_booked_slots(db)
+    slot_dt_ist = None
     try:
         hour = int(time_str.split(":")[0])
         slot_date = dt.datetime.strptime(date_str, "%d-%b-%Y").date()
         slot_dt_ist = dt.datetime(slot_date.year, slot_date.month, slot_date.day, hour, 0, tzinfo=_IST)
-        if slot_dt_ist.isoformat() in booked_iso or slot_dt_ist.strftime("%A, %b %d at %I:%M %p") in booked_display or selected_str in booked_display:
+        if slot_dt_ist < dt.datetime.now(_IST):
             return HTMLResponse(_slot_taken_page(selected_str))
     except Exception:
         pass
 
-    # Call Zoho to create the booking
+    # Check if slot is already booked locally
+    booked_iso, booked_display = await _get_booked_slots(db)
+    try:
+        if slot_dt_ist and (slot_dt_ist.isoformat() in booked_iso or selected_str in booked_display):
+            return HTMLResponse(_slot_taken_page(selected_str))
+    except Exception:
+        pass
+
+    # Store pending booking (#17): hold for 30 min, redirect to confirm page
+    lead.pending_booking_slot_json = json.dumps(slot_item if isinstance(slot_item, dict) else {
+        "display": selected_str, "date_str": date_str, "time_str": time_str,
+    })
+    lead.pending_booking_at = dt.datetime.now(dt.timezone.utc)
+    lead.pending_nudge_sent = False
+    await db.flush()
+
+    greeting_name = (lead.contact_name or lead.business_name).split()[0]
+    confirm_url = _make_confirm_url(lead_id, slot_idx)
+    return HTMLResponse(_pending_confirm_page(greeting_name, selected_str, confirm_url))
+
+
+# ---------------------------------------------------------------------------
+# Email open tracking pixel (#3, #40)
+# GET /api/v1/v2/track/open/{lead_id}/{sig}
+# ---------------------------------------------------------------------------
+
+# Minimal 1×1 transparent GIF
+_TRACKING_PIXEL = (
+    b"GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!"
+    b"\xf9\x04\x00\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+)
+
+
+@router.get("/track/open/{lead_id}/{sig}")
+async def track_open(lead_id: str, sig: str, db: AsyncSession = Depends(get_db)):
+    """Invisible tracking pixel — increments open count when email is viewed."""
+    if not verify_open_pixel_sig(lead_id, sig):
+        return Response(content=_TRACKING_PIXEL, media_type="image/gif")
+
+    try:
+        lid = uuid.UUID(lead_id)
+        lead = await db.get(LeadV2, lid)
+        if lead:
+            lead.email_open_count = (lead.email_open_count or 0) + 1
+            lead.last_opened_at = dt.datetime.now(dt.timezone.utc)
+            await db.flush()
+            increment_open_count(lead_id)
+    except Exception:
+        pass
+
+    return Response(content=_TRACKING_PIXEL, media_type="image/gif")
+
+
+# ---------------------------------------------------------------------------
+# Pending booking flow (#17)
+# /book → store pending → redirect to confirm page
+# /confirm-booking → read pending → call Zoho
+# ---------------------------------------------------------------------------
+
+def _pending_confirm_page(name: str, slot: str, confirm_url: str) -> str:
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:-apple-system,sans-serif;background:#eff6ff;
+             display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;">
+  <div style="background:#fff;border-radius:14px;padding:48px 40px;max-width:480px;
+              text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+    <div style="font-size:48px;margin-bottom:16px;">&#x1F4C5;</div>
+    <h1 style="color:#1e3a8a;font-size:22px;margin:0 0 12px;">Confirm Your Booking</h1>
+    <p style="color:#374151;font-size:15px;margin:0 0 4px;">Hi <strong>{name}</strong>,</p>
+    <p style="color:#374151;font-size:15px;">
+      You have selected:<br>
+      <strong style="color:#1e3a8a;font-size:16px;">{slot}</strong>
+    </p>
+    <a href="{confirm_url}" style="display:inline-block;margin-top:24px;padding:14px 32px;
+       background:#1d4ed8;color:#fff;text-decoration:none;border-radius:8px;
+       font-weight:700;font-size:15px;">Confirm Booking</a>
+    <p style="color:#9ca3af;font-size:12px;margin-top:16px;">
+      This slot is held for 30 minutes. Confirm to lock it in.
+    </p>
+  </div>
+</body></html>"""
+
+
+def _verify_confirm_sig(lead_id: str, slot_idx: int, sig: str) -> bool:
+    msg = f"{lead_id}:confirm:{slot_idx}".encode()
+    expected = _hmac.new(
+        settings.EMAIL_HMAC_SECRET.encode(), msg, hashlib.sha256
+    ).hexdigest()[:16]
+    return _hmac.compare_digest(sig, expected)
+
+
+def _make_confirm_url(lead_id: str, slot_idx: int) -> str:
+    msg = f"{lead_id}:confirm:{slot_idx}".encode()
+    sig = _hmac.new(
+        settings.EMAIL_HMAC_SECRET.encode(), msg, hashlib.sha256
+    ).hexdigest()[:16]
+    return f"{settings.APP_URL}/api/v1/v2/confirm-booking/{lead_id}/{slot_idx}/{sig}"
+
+
+@router.get("/confirm-booking/{lead_id}/{slot_idx}/{sig}", response_class=HTMLResponse)
+async def confirm_booking(
+    lead_id: str, slot_idx: int, sig: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Final step of pending booking flow: lead clicks Confirm → Zoho booking created."""
+    if not _verify_confirm_sig(lead_id, slot_idx, sig):
+        raise HTTPException(status_code=400, detail="Invalid or expired confirmation link.")
+
+    try:
+        lid = uuid.UUID(lead_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid link.")
+
+    lead = await db.get(LeadV2, lid)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found.")
+
+    if lead.status == LeadStatus.BOOKED:
+        return HTMLResponse(_already_booked_page(lead.selected_slot or "", lead.zoho_meeting_link))
+
+    if not lead.pending_booking_slot_json:
+        return HTMLResponse(_slot_taken_page("your selected slot"))
+
+    slot_data = json.loads(lead.pending_booking_slot_json)
+    selected_str = slot_data.get("display", "")
+    date_str = slot_data.get("date_str", "")
+    time_str = slot_data.get("time_str", "")
+
+    if not date_str or not time_str:
+        return HTMLResponse(_slot_taken_page(selected_str))
+
+    # Past-slot validation (#20)
+    try:
+        hour = int(time_str.split(":")[0])
+        slot_date = dt.datetime.strptime(date_str, "%d-%b-%Y").date()
+        slot_dt_ist = dt.datetime(slot_date.year, slot_date.month, slot_date.day, hour, 0, tzinfo=_IST)
+        if slot_dt_ist < dt.datetime.now(_IST):
+            lead.pending_booking_slot_json = None
+            lead.pending_booking_at = None
+            await db.flush()
+            return HTMLResponse(_slot_taken_page(selected_str))
+    except Exception:
+        pass
+
     zoho = ZohoBookingsService()
     booking_id, meeting_link = await asyncio.to_thread(
         zoho.create_booking,
@@ -431,6 +575,9 @@ async def one_click_book(
     )
 
     if booking_id is None:
+        lead.pending_booking_slot_json = None
+        lead.pending_booking_at = None
+        await db.flush()
         return HTMLResponse(_slot_taken_page(selected_str))
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -440,12 +587,15 @@ async def one_click_book(
     lead.selected_slot = selected_str
     lead.booking_id = booking_id
     lead.zoho_meeting_link = meeting_link
+    lead.pending_booking_slot_json = None
+    lead.pending_booking_at = None
+    lead.pending_nudge_sent = False
 
-    # Sync ZohoSlot status in DB
     try:
+        from app.services.availability_v2 import IST as _IST_AV
         hour = int(time_str.split(":")[0])
         slot_date = dt.datetime.strptime(date_str, "%d-%b-%Y").date()
-        slot_dt_ist = dt.datetime(slot_date.year, slot_date.month, slot_date.day, hour, 0, tzinfo=_IST)
+        slot_dt_ist = dt.datetime(slot_date.year, slot_date.month, slot_date.day, hour, 0, tzinfo=_IST_AV)
         slot_dt_utc = slot_dt_ist.astimezone(dt.timezone.utc)
         slot_row = (await db.execute(
             select(ZohoSlot).where(ZohoSlot.slot_time == slot_dt_utc)
@@ -458,11 +608,9 @@ async def one_click_book(
 
     await db.flush()
 
-    # Offload slow email dispatches to FastAPI background tasks so the web response returns immediately
     background_tasks.add_task(
         send_booking_confirmation_to_lead,
-        lead.email, lead.business_name, selected_str, meeting_link,
-        lead.contact_name,
+        lead.email, lead.business_name, selected_str, meeting_link, lead.contact_name,
     )
     background_tasks.add_task(
         send_organizer_booking_notification,
@@ -474,7 +622,7 @@ async def one_click_book(
 
 
 # ---------------------------------------------------------------------------
-# Webhooks (stubs)
+# Webhooks
 # ---------------------------------------------------------------------------
 
 @router.post("/webhook/email-reply")
@@ -482,6 +630,95 @@ def webhook_email_reply(_payload: Dict[str, Any]):
     return {"status": "received"}
 
 
+@router.post("/webhook/zoho")
+async def webhook_zoho(payload: Dict[str, Any], db: AsyncSession = Depends(get_db)):
+    """Zoho Bookings webhook — handles cancellations (#26) and no-shows (#27)."""
+    event_type = (payload.get("event_type") or payload.get("type") or "").lower()
+    booking_id = str(payload.get("booking_id") or payload.get("id") or "")
+    lead_email = str(payload.get("customer_email") or payload.get("email") or "")
+
+    lead = None
+    if booking_id:
+        lead = (await db.execute(
+            select(LeadV2).where(LeadV2.booking_id == booking_id)
+        )).scalar_one_or_none()
+    if not lead and lead_email:
+        lead = (await db.execute(
+            select(LeadV2).where(LeadV2.email == lead_email, LeadV2.status == LeadStatus.BOOKED)
+        )).scalar_one_or_none()
+
+    if not lead:
+        return {"status": "lead_not_found"}
+
+    if "cancel" in event_type:
+        cancelled_slot = lead.selected_slot or ""
+        lead.status = LeadStatus.SENT
+        lead.selected_slot = None
+        lead.booking_id = None
+        lead.booked_at = None
+        await db.flush()
+
+        from app.services.marketing_agent import generate_zoho_cancelled_reply
+        from app.services.email_service import _send_html_email, _signature
+        reply_text = generate_zoho_cancelled_reply(lead.contact_name, lead.business_name, cancelled_slot)
+        greeting_name = (lead.contact_name or lead.business_name or "").split()[0].capitalize()
+        paras_html = "".join(
+            f'<p style="margin:0 0 18px 0;font-family:Arial,sans-serif;font-size:15px;color:#111111;line-height:1.75;">{p}</p>'
+            for p in [f"Hi {greeting_name},", reply_text] if p
+        )
+        _send_html_email(lead.email, "Re: Your Meeting — Jane Aerospace",
+            f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#ffffff;">
+  <div style="max-width:600px;margin:40px auto;padding:0 24px 60px;">
+    {paras_html}{_signature()}
+  </div>
+</body></html>""")
+        return {"status": "cancellation_handled"}
+
+    if "no_show" in event_type or "no-show" in event_type:
+        lead.no_show_count = (lead.no_show_count or 0) + 1
+        lead.status = LeadStatus.SENT
+        lead.selected_slot = None
+        lead.booking_id = None
+        lead.booked_at = None
+        await db.flush()
+        return {"status": "no_show_handled"}
+
+    return {"status": "event_ignored", "event_type": event_type}
+
+
 @router.post("/webhook/zoho-booking")
 def webhook_zoho_booking(_payload: Dict[str, Any]):
     return {"status": "received"}
+
+
+# ---------------------------------------------------------------------------
+# A/B Testing Stats — GET /api/v1/v2/ab-stats
+# ---------------------------------------------------------------------------
+
+@router.get("/ab-stats")
+def get_ab_stats():
+    """Return current A/B variant performance from Redis counters."""
+    try:
+        from app.services.slot_lock import _r
+        r = _r()
+
+        def _variant_stats(variant: str) -> dict:
+            sent = int(str(r.get(f"ab:body:{variant}:sent") or 0))
+            replied = int(str(r.get(f"ab:body:{variant}:replied") or 0))
+            rate = round(replied / max(sent, 1) * 100, 1)
+            return {"sent": sent, "replied": replied, "reply_rate_pct": rate}
+
+        from app.services.slot_lock import get_variant_weights
+        weights = get_variant_weights()
+
+        return {
+            "variants": {
+                "A": {**_variant_stats("A"), "current_weight": weights[0]},
+                "B": {**_variant_stats("B"), "current_weight": weights[1]},
+                "C": {**_variant_stats("C"), "current_weight": weights[2]},
+            },
+            "note": "Weights auto-adjust after 5+ sends per variant. Min weight: 5.",
+        }
+    except Exception as exc:
+        return {"error": str(exc), "note": "Redis may not be available"}

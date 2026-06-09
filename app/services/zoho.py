@@ -118,3 +118,23 @@ class ZohoBookingsService:
         except Exception as e:
             logger.error(f"Failed to create Zoho booking: {str(e)}")
             return None, None
+
+    def cancel_booking(self, booking_id: str) -> bool:
+        """Cancel an existing booking. Returns True on success."""
+        headers = self._get_headers()
+        if not headers or not booking_id:
+            return False
+        url = f"{self.base_url}/appointment"
+        params = {"booking_id": booking_id}
+        try:
+            response = requests.delete(url, headers=headers, params=params)
+            data = response.json()
+            success = data.get("response", {}).get("status") == "success"
+            if success:
+                logger.info("zoho_booking_cancelled", booking_id=booking_id)
+            else:
+                logger.warning("zoho_cancel_failed", booking_id=booking_id, response=data)
+            return success
+        except Exception as e:
+            logger.error(f"Failed to cancel Zoho booking {booking_id}: {str(e)}")
+            return False

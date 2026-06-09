@@ -71,6 +71,39 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.v2_tasks.export_pipeline_to_sheets",
         "schedule": 60.0,  # every 60 seconds
     },
+    "v2-resume-ooo-leads": {
+        "task": "app.workers.v2_tasks.resume_ooo_leads",
+        "schedule": crontab(hour="7", minute="30"),  # daily at 07:30 UTC (13:00 IST)
+    },
+    # ── New scenario tasks ────────────────────────────────────────────────────
+    "v2-process-delayed-replies": {
+        "task": "app.workers.v2_tasks.process_delayed_replies",
+        "schedule": 600.0,   # every 10 minutes — drains after-hours queue (#11)
+    },
+    "v2-check-open-nudges": {
+        "task": "app.workers.v2_tasks.check_open_nudges",
+        "schedule": 1800.0,  # every 30 minutes — open-but-no-click nudge (#3)
+    },
+    "v2-check-pending-bookings": {
+        "task": "app.workers.v2_tasks.check_pending_bookings",
+        "schedule": 300.0,   # every 5 minutes — 20-min nudge for unconfirmed clicks (#17)
+    },
+    "v2-send-scheduled-followups": {
+        "task": "app.workers.v2_tasks.send_scheduled_followups",
+        "schedule": crontab(minute="0"),   # every hour — honour promised call-back dates (#34)
+    },
+    "v2-check-no-shows": {
+        "task": "app.workers.v2_tasks.check_no_shows",
+        "schedule": 1800.0,  # every 30 minutes — detect missed meetings (#27)
+    },
+    "v2-retry-soft-bounces": {
+        "task": "app.workers.v2_tasks.retry_soft_bounces",
+        "schedule": crontab(minute="0", hour="*/6"),  # every 6 hours (#2)
+    },
+    "v2-sync-csv-leads": {
+        "task": "app.workers.v2_tasks.sync_csv_leads",
+        "schedule": crontab(minute="0", hour="*/4"),  # every 4 hours
+    },
 }
 
 # Ensure task modules are imported when the worker boots.

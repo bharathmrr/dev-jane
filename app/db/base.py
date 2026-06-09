@@ -82,6 +82,8 @@ class LeadStatus(str, enum.Enum):
     REPLIED = "REPLIED"
     BOOKED = "BOOKED"
     FAILED = "FAILED"
+    INVALID_EMAIL = "INVALID_EMAIL"   # hard bounce — stop all sends
+    JOB_CHANGED = "JOB_CHANGED"       # lead left company — new contact extracted
 
 
 class SlotStatus(str, enum.Enum):
