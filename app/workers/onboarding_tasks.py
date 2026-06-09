@@ -1223,8 +1223,25 @@ def poll_contract_statuses_task(self) -> int:
 # Google Sheets export
 # ---------------------------------------------------------------------------
 
+_SHEET_HEADERS = [
+    "Submission ID", "Submitted At", "Lead Email",
+    "Company Name", "Company Type", "Contact Name", "Contact Number",
+    # Indian fields
+    "GSTIN", "PAN", "CIN", "IFSC",
+    # Overseas fields
+    "Country of Incorporation", "Company Reg Number", "Tax ID / TIN", "LEI Number",
+    # Uploaded documents
+    "GST Certificate", "Incorporation Certificate",
+    # Verification result
+    "KYC Status", "KYC Issues",
+    "GSTIN Verified", "GSTIN Business Name (API)",
+    # OCR extracted text from certificates
+    "GST Certificate OCR Text", "Incorporation Certificate OCR Text",
+]
+
+
 async def _export_to_sheets(db: AsyncSession, onboarding_id: str) -> None:
-    """Append / update a row in the Onboarding worksheet."""
+    """Append / update a KYC row in the Onboarding worksheet."""
     if not settings.GOOGLE_SHEETS_SPREADSHEET_ID or not settings.GOOGLE_SHEETS_CREDENTIALS_JSON:
         return
 
@@ -1240,52 +1257,50 @@ async def _export_to_sheets(db: AsyncSession, onboarding_id: str) -> None:
     )
     kyc = kyc_result.scalars().first()
 
-    from app.api.v1.onboarding_endpoints import _stage_score
-    stage_score = _stage_score(rec)
-
-    # Extract KYC verification details for extra columns
     _vr: dict = (kyc.kyc_verification_result or {}) if kyc else {}
+    _extra = _vr.get("extra_fields") or {}
     _gstin_chk = _vr.get("gstin_check") or {}
-    _pan_chk = _vr.get("pan_check") or {}
-    _cin_chk = _vr.get("cin_check") or {}
     _ocr = _vr.get("ocr_result") or {}
-    _ocr_docs = ", ".join(
-        d.get("type", "") for d in _ocr.get("documents_processed", []) if d.get("type")
-    )
+
+    # Extract OCR text per document type
+    _gst_ocr_text = ""
+    _inc_ocr_text = ""
+    for doc in _ocr.get("documents_processed", []):
+        raw = doc.get("raw_text") or doc.get("extracted_text") or ""
+        if doc.get("label", "").lower().startswith("gst") or doc.get("type", "").lower() == "gst_certificate":
+            _gst_ocr_text = raw[:2000]
+        else:
+            _inc_ocr_text = raw[:2000]
 
     row = [
-        str(rec.id),
-        str(rec.lead_id),
+        str(kyc.id) if kyc else str(rec.id),
+        _fmt(kyc.created_at) if kyc else _fmt(rec.created_at),
         lead.email if lead else "",
-        lead.business_name if lead else "",
-        lead.contact_name if lead else "",
-        rec.company_type or "",
-        rec.kyc_status or "",
-        rec.kyc_status_display or "",
-        str(rec.kyc_followup_count),
         kyc.company_name if kyc else "",
+        kyc.company_type if kyc else (rec.company_type or ""),
         kyc.contact_name if kyc else "",
         kyc.contact_number if kyc else "",
-        rec.nda_status or "",
-        rec.nda_status_display or "",
-        str(rec.nda_followup_count),
-        rec.agreement_status or "",
-        rec.agreement_status_display or "",
-        str(rec.agreement_followup_count),
-        _fmt(rec.created_at),
-        _fmt(rec.updated_at),
-        str(stage_score),
-        # KYC verification detail columns (V–AD)
+        # Indian
+        kyc.gstin_number if kyc else "",
+        kyc.pan_number if kyc else "",
+        kyc.cin_number if kyc else "",
+        _extra.get("ifsc_code", ""),
+        # Overseas
+        _extra.get("country_of_incorporation", ""),
+        _extra.get("company_reg_number", ""),
+        _extra.get("tax_id_tin", ""),
+        _extra.get("lei_number", ""),
+        # Documents
+        kyc.gst_certificate_filename if kyc else "",
+        kyc.incorporation_filename if kyc else "",
+        # Verification
+        rec.kyc_status or "",
+        "; ".join(_vr.get("issues", []))[:500],
         str(_gstin_chk.get("valid", "")),
-        _gstin_chk.get("source", ""),
         _gstin_chk.get("business_name", ""),
-        str(_pan_chk.get("valid", "")),
-        str(_cin_chk.get("valid", "")),
-        str(_vr.get("overall_passed", "")),
-        str(_vr.get("auto_approvable", "")),
-        _ocr.get("company_name", ""),
-        _ocr_docs,
-        "; ".join(_vr.get("issues", []))[:300],
+        # OCR text
+        _gst_ocr_text,
+        _inc_ocr_text,
     ]
 
     try:
@@ -1299,32 +1314,19 @@ async def _export_to_sheets(db: AsyncSession, onboarding_id: str) -> None:
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(settings.GOOGLE_SHEETS_SPREADSHEET_ID)
 
-        # Get or create the worksheet
         try:
             ws = sh.worksheet(settings.ONBOARDING_WORKSHEET_NAME)
         except gspread.WorksheetNotFound:
-            ws = sh.add_worksheet(title=settings.ONBOARDING_WORKSHEET_NAME, rows=1000, cols=35)
-            headers = [
-                "Onboarding ID", "Lead ID", "Email", "Business Name", "Contact Name",
-                "Company Type", "KYC Status", "KYC Status Detail", "KYC Follow-ups",
-                "KYC Company Name", "KYC Contact Name", "KYC Contact Number",
-                "NDA Status", "NDA Status Detail", "NDA Follow-ups",
-                "Agreement Status", "Agreement Status Detail", "Agreement Follow-ups",
-                "Created At", "Updated At", "Stage Score (0-11)",
-                "GSTIN Valid", "GSTIN Source", "GSTIN API Name",
-                "PAN Valid", "CIN Valid",
-                "KYC Overall Passed", "KYC Auto Approvable",
-                "OCR Company Name", "OCR Doc Types", "KYC Issues",
-            ]
-            ws.append_row(headers)
+            ws = sh.add_worksheet(title=settings.ONBOARDING_WORKSHEET_NAME, rows=1000, cols=25)
+            ws.append_row(_SHEET_HEADERS)
 
         clean_row = [str(v) if v is not None else "" for v in row]
 
-        # Find existing row by onboarding_id and update, or append
+        # Update existing row or append new one
         all_rows = ws.get_all_values()
-        for i, r in enumerate(all_rows[1:], start=2):  # skip header
-            if r and r[0] == str(rec.id):
-                ws.update([clean_row], f"A{i}:AE{i}")
+        for i, r in enumerate(all_rows[1:], start=2):
+            if r and r[0] == clean_row[0]:
+                ws.update([clean_row], f"A{i}:W{i}")
                 return
 
         ws.append_row(clean_row)

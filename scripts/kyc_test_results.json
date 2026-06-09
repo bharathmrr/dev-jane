@@ -1,0 +1,83 @@
+{
+  "run_at": "2026-06-09T17:31:06.526841",
+  "results": [
+    {
+      "provider": "free",
+      "label": "Valid Indian Company \u2014 should AUTO-APPROVE",
+      "company_type": "indian",
+      "overall_passed": true,
+      "auto_approvable": false,
+      "issues": [],
+      "notes": [
+        "GSTIN note: GST portal unreachable. Format check passed \u2014 manual review."
+      ],
+      "gstin_source": "format_only"
+    },
+    {
+      "provider": "free",
+      "label": "Invalid GSTIN format \u2014 should FAIL",
+      "company_type": "indian",
+      "overall_passed": false,
+      "auto_approvable": false,
+      "issues": [
+        "GSTIN: Invalid GSTIN format (10 chars). Expected 15-char format like 22AAAAA0000A1Z5"
+      ],
+      "notes": [],
+      "gstin_source": "format_only"
+    },
+    {
+      "provider": "free",
+      "label": "PAN mismatch with GSTIN \u2014 should FAIL",
+      "company_type": "indian",
+      "overall_passed": false,
+      "auto_approvable": false,
+      "issues": [
+        "PAN: PAN ZZZZZ9999Z does not match PAN in GSTIN (AABCI1682H). Please verify."
+      ],
+      "notes": [
+        "GSTIN note: GST portal unreachable. Format check passed \u2014 manual review."
+      ],
+      "gstin_source": "format_only"
+    },
+    {
+      "provider": "free",
+      "label": "Valid GSTIN, IFSC verify",
+      "company_type": "indian",
+      "overall_passed": true,
+      "auto_approvable": false,
+      "issues": [],
+      "notes": [
+        "GSTIN note: GST portal unreachable. Format check passed \u2014 manual review.",
+        "IFSC verified: HDFC Bank \u2014 PARK STREET"
+      ],
+      "gstin_source": "format_only"
+    },
+    {
+      "provider": "free",
+      "label": "Overseas with LEI \u2014 should AUTO-APPROVE",
+      "company_type": "overseas",
+      "overall_passed": false,
+      "auto_approvable": false,
+      "issues": [
+        "LEI: LEI SPTQXBS3R6JWK6BVMC98 not found in GLEIF global database"
+      ],
+      "notes": [
+        "Overseas company \u2014 GST/PAN verification skipped"
+      ],
+      "gstin_source": null
+    },
+    {
+      "provider": "free",
+      "label": "Overseas without LEI \u2014 should go MANUAL REVIEW",
+      "company_type": "overseas",
+      "overall_passed": true,
+      "auto_approvable": false,
+      "issues": [],
+      "notes": [
+        "Overseas company \u2014 GST/PAN verification skipped",
+        "No LEI provided \u2014 overseas KYC requires manual document review by team"
+      ],
+      "gstin_source": null
+    }
+  ]
+}

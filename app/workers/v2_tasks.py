@@ -12,12 +12,41 @@ from structlog import get_logger
 from app.db.models import LeadV2, LeadStatus, ZohoSlot, SlotStatus, OnboardingRecord
 from app.services.availability_v2 import get_slots_for_week
 from app.services.email_generator import (
-    generate_outreach_body,
     score_lead,
-    detect_week_preference,
     extract_slot_from_reply,
     analyze_reply_intent,
 )
+from app.services.marketing_agent import (
+    generate_outreach,
+    generate_question_reply,
+    generate_pricing_reply,
+    generate_not_decision_maker_reply,
+    generate_case_study_reply,
+    generate_existing_vendor_reply,
+    generate_deadline_reply,
+    generate_assistant_reply,
+    generate_nda_reply,
+    generate_multilingual_reply,
+    generate_high_intent_nudge,
+    generate_pending_booking_nudge,
+    generate_no_show_reply,
+    generate_scheduled_followup_confirm,
+    generate_same_company_slot_reply,
+)
+from app.services.slot_lock import (
+    acquire_slot_lock,
+    release_slot_lock,
+    record_variant_sent,
+    record_variant_reply,
+    record_variant_sent_segment,
+    record_variant_reply_segment,
+    record_send_time_sent,
+    record_send_time_reply,
+    classify_segment,
+)
+from app.services.bounce_handler import classify_bounce, is_shared_inbox, is_senior_lead, soft_bounce_retry_delay
+from app.services.holiday_calendar import should_send_today
+from app.services.email_tracker import smtp_can_send
 from app.services.sheets import GoogleSheetsService
 from app.services.zoho import ZohoBookingsService
 from app.services.email_service import (
@@ -163,6 +192,8 @@ async def _sync_google_sheet(db):
             logger.warning("sheet_row_missing_fields", row_keys=list(row.keys()), email=email, business=business_name)
             skipped_missing += 1
             continue
+        location = (row.get("Location") or row.get("location") or row.get("City") or row.get("city") or "").strip() or None
+
         existing = (
             await db.execute(select(LeadV2).where(LeadV2.email == email))
         ).scalar_one_or_none()
@@ -172,6 +203,8 @@ async def _sync_google_sheet(db):
                 contact_name=contact_name,
                 email=email,
                 summary=summary,
+                designation=designation or None,
+                location=location,
                 status=LeadStatus.NEW,
             ))
             logger.info("added_lead_from_sheet", email=email, contact=contact_name, summary=summary)
@@ -258,6 +291,8 @@ async def _sync_csv_leads(db):
             skipped_missing += 1
             continue
 
+        location = (row.get("location") or row.get("Location") or row.get("City") or row.get("city") or "").strip() or None
+
         existing = (
             await db.execute(select(LeadV2).where(LeadV2.email == email))
         ).scalar_one_or_none()
@@ -267,6 +302,8 @@ async def _sync_csv_leads(db):
                 contact_name=contact_name,
                 email=email,
                 summary=summary,
+                designation=designation or None,
+                location=location,
                 status=LeadStatus.NEW,
             ))
             logger.info("added_lead_from_csv", email=email, contact=contact_name)
@@ -339,13 +376,22 @@ def sync_zoho_slots():
 # ---------------------------------------------------------------------------
 
 async def _process_new_leads(db):
+    # ── Holiday check (#35): don't send on holidays ───────────────────────────
+    if not should_send_today():
+        logger.info("process_new_leads_skipped_holiday")
+        return "Skipped — today is a holiday"
+
+    # ── SMTP throttle check (#40) ─────────────────────────────────────────────
+    if not smtp_can_send():
+        logger.warning("process_new_leads_smtp_limit_reached")
+        return "SMTP daily limit reached — deferred to tomorrow"
+
     leads = (
         await db.execute(select(LeadV2).where(LeadV2.status == LeadStatus.NEW))
     ).scalars().all()
     if not leads:
         return "No new leads."
 
-    # Skip leads already in onboarding — they get KYC/NDA/Agreement emails, not booking slots
     ob_lead_ids = {
         row[0] for row in (await db.execute(select(OnboardingRecord.lead_id))).all()
     }
@@ -357,38 +403,72 @@ async def _process_new_leads(db):
             logger.info("lead_skipped_in_onboarding", email=lead.email)
             skipped += 1
             continue
-        # ── Lead scoring: skip only completely empty leads (score < 2) ──────────
+
+        # ── Shared inbox detection (#5) ───────────────────────────────────────
+        if is_shared_inbox(lead.email):
+            lead.is_shared_inbox = True
+            lead.contact_name = None   # personalise with company name only
+
+        # ── Lead scoring ──────────────────────────────────────────────────────
         lead_score = score_lead(
             contact_name=lead.contact_name,
             business_name=lead.business_name,
             summary=lead.summary,
         )
         if lead_score < 2:
-            logger.info(
-                "lead_skipped_low_score",
-                email=lead.email,
-                score=lead_score,
-                contact=lead.contact_name,
-            )
+            logger.info("lead_skipped_low_score", email=lead.email, score=lead_score)
             skipped += 1
             continue
 
         logger.info("lead_qualified", email=lead.email, score=lead_score)
 
-        # Mark SENT immediately and flush to prevent double-processing by concurrent task
+        # ── Repeat lead detection (#25): personalise if they've booked before ──
+        if lead.booked_at is not None and not lead.is_repeat_lead:
+            lead.is_repeat_lead = True
+
+        # ── Senior lead escalation (#38) ──────────────────────────────────────
+        if is_senior_lead(lead.designation):
+            lead.priority_flag = True
+            lead.escalated_to_human = True
+            from app.services.email_service import send_escalation_alert
+            send_escalation_alert(
+                lead_name=lead.contact_name or lead.business_name,
+                lead_email=lead.email,
+                designation=lead.designation,
+                reason=f"Senior lead detected ({lead.designation}) — ready to receive initial email",
+            )
+            logger.info("senior_lead_escalated", email=lead.email, designation=lead.designation)
+
+        # ── Send-time variant assignment (#A/B) ───────────────────────────────
+        import random as _random
+        time_variant = _random.choice(["morning", "afternoon", "evening"])
+        lead.send_time_variant = time_variant
+
+        # Mark SENT before sending to prevent double-processing
         lead.status = LeadStatus.SENT
         lead.sent_at = datetime.now(timezone.utc)
         lead.follow_up_count = 0
         lead.reminder_sent_at = None
         await db.flush()
 
-        display_name = lead.contact_name or lead.business_name
-        body_text = generate_outreach_body(
+        outreach = generate_outreach(
             business_name=lead.business_name,
-            recipient_name=display_name,
-            summary=lead.summary,
             contact_name=lead.contact_name,
+            designation=getattr(lead, "designation", None),
+            location=getattr(lead, "location", None),
+            summary=lead.summary,
+            is_repeat_lead=getattr(lead, "is_repeat_lead", False),
         )
+        body_text = outreach["body"]
+        subject = outreach["subject"]
+        lead.ab_variant = outreach["variant"]
+        lead.ab_subject_variant = outreach["subject_variant"]
+
+        # ── Segment-aware A/B tracking (#A/B Step 5) ─────────────────────────
+        seg = classify_segment(lead.designation, lead.location)
+        record_variant_sent_segment(outreach["variant"], seg)
+        record_send_time_sent(time_variant)
+
         this_url = make_week_url(str(lead.id), "this")
         next_url = make_week_url(str(lead.id), "next")
         success = send_week_selection_email(
@@ -397,19 +477,20 @@ async def _process_new_leads(db):
             next_week_url=next_url,
             body_text=body_text,
             contact_name=lead.contact_name,
+            subject_override=subject,
+            lead_id=str(lead.id),
         )
         if success:
-            logger.info("week_selection_email_sent", email=lead.email, score=lead_score)
-            log_pipeline("EMAIL_SENT", company=lead.business_name, email=lead.email,
-                         detail="Outreach email #1 sent (week-selection)")
+            logger.info("week_selection_email_sent", email=lead.email, score=lead_score,
+                        variant=outreach["variant"], subject_variant=outreach["subject_variant"],
+                        time_variant=time_variant, segment=seg)
             sent += 1
         else:
-            # Revert status so we retry on the next cycle
             lead.status = LeadStatus.NEW
             lead.sent_at = None
             logger.warning("week_selection_email_failed_reverted", email=lead.email)
 
-    return f"Stage 1 emails sent to {sent}/{len(leads)} leads. Skipped (low score): {skipped}."
+    return f"Stage 1 emails sent to {sent}/{len(leads)} leads. Skipped: {skipped}."
 
 
 @shared_task
@@ -505,7 +586,7 @@ async def _do_booking(db, lead, date_str: str, time_str: str, display_str: str) 
     from app.services.availability_v2 import _get_booked_slots, _get_held_slots
     IST = ZoneInfo("Asia/Kolkata")
 
-    async def _send_alternatives(reason: str) -> str:
+    async def _send_alternatives(reason: str, apology_text: str | None = None) -> str:
         logger.warning(reason, email=lead.email, slot=display_str)
         from app.services.availability_v2 import get_available_slots
         # Try this week → next week → broader 14-day search
@@ -519,10 +600,12 @@ async def _do_booking(db, lead, date_str: str, time_str: str, display_str: str) 
             book_urls = [make_book_url(str(lead.id), i) for i in range(len(alt_slots))]
             lead.offered_slots_json = json.dumps(alt_slots)
             lead.replied_at = datetime.now(timezone.utc)
+            # Use apology text for staff-on-leave (#22), generic body otherwise
+            body_text = apology_text
             send_v2_slots_email(
                 lead.email, lead.business_name, slot_strings,
                 book_urls=book_urls,
-                body_text=None,
+                body_text=body_text,
                 contact_name=lead.contact_name,
             )
         else:
@@ -555,17 +638,67 @@ async def _do_booking(db, lead, date_str: str, time_str: str, display_str: str) 
     except Exception as exc:
         logger.warning("booking_held_check_error", error=str(exc))
 
-    # ── Check 3: Zoho real-time booking (source of truth) ──────────────────────
+    # ── Check 3: Same-company colleague already has this slot (#24) ────────────
+    try:
+        lead_domain = lead.email.split("@")[1].lower() if "@" in lead.email else ""
+        if lead_domain and lead_domain not in ("gmail.com", "yahoo.com", "hotmail.com",
+                                                "outlook.com", "rediffmail.com"):
+            colleague = (await db.execute(
+                select(LeadV2).where(
+                    LeadV2.status == LeadStatus.BOOKED,
+                    LeadV2.selected_slot == display_str,
+                    LeadV2.email.like(f"%@{lead_domain}"),
+                    LeadV2.email != lead.email,
+                )
+            )).scalar_one_or_none()
+            if colleague:
+                colleague_name = (colleague.contact_name or colleague.email).split()[0]
+                reply_text = generate_same_company_slot_reply(
+                    lead.contact_name, lead.business_name,
+                    colleague_name, display_str,
+                )
+                from app.services.availability_v2 import get_available_slots
+                alt_slots = await get_slots_for_week(db, "this", 6) or await get_slots_for_week(db, "next", 6)
+                if alt_slots:
+                    slot_strings = [s["display"] for s in alt_slots]
+                    book_urls = [make_book_url(str(lead.id), i) for i in range(len(alt_slots))]
+                    lead.offered_slots_json = json.dumps(alt_slots)
+                    lead.replied_at = datetime.now(timezone.utc)
+                    send_v2_slots_email(
+                        lead.email, lead.business_name, slot_strings,
+                        book_urls=book_urls, body_text=reply_text,
+                        contact_name=lead.contact_name,
+                    )
+                logger.info("same_company_slot_conflict", email=lead.email, colleague=colleague.email)
+                return f"Same company slot conflict — sent different options (colleague: {colleague_name})"
+    except Exception as exc:
+        logger.warning("same_company_check_error", error=str(exc))
+
+    # ── Check 4: Redis atomic slot lock (prevents 100-concurrent-click race) ──
+    slot_locked = acquire_slot_lock(date_str, time_str, lead.email)
+    if not slot_locked:
+        return await _send_alternatives("redis_slot_lock_taken_concurrent_booking")
+
+    # ── Check 5: Zoho real-time booking (source of truth) ──────────────────────
     zoho = ZohoBookingsService()
-    booking_id, meeting_link = await asyncio.to_thread(
-        zoho.create_booking,
-        name=lead.contact_name or lead.business_name,
-        email=lead.email,
-        date_str=date_str,
-        time_str=time_str,
-    )
+    try:
+        booking_id, meeting_link = await asyncio.to_thread(
+            zoho.create_booking,
+            name=lead.contact_name or lead.business_name,
+            email=lead.email,
+            date_str=date_str,
+            time_str=time_str,
+        )
+    except Exception as zoho_exc:
+        # Zoho API completely unreachable (#19)
+        release_slot_lock(date_str, time_str)
+        from app.services.email_service import send_zoho_down_alert
+        send_zoho_down_alert(lead.contact_name or lead.business_name, lead.email)
+        logger.error("zoho_api_down", email=lead.email, error=str(zoho_exc))
+        return "Zoho API down — lead notified to reply with preferred time"
 
     if booking_id is None:
+        release_slot_lock(date_str, time_str)
         return await _send_alternatives("zoho_booking_rejected_slot_taken")
 
     lead.status = LeadStatus.BOOKED
@@ -816,6 +949,137 @@ async def _process_reply_v2(db, reply: dict) -> str:
         logger.info("reply_skipped_lead_in_onboarding", email=from_addr)
         return "Lead is in onboarding — reply ignored for booking"
 
+    # Skip opted-out leads silently
+    if getattr(lead, "opted_out", False):
+        logger.info("reply_skipped_opted_out", email=from_addr)
+        return "Lead opted out — reply ignored"
+
+    # ── Opted-out domain check (#36): same company, new email address ─────────
+    try:
+        lead_domain = from_addr.split("@")[1].lower() if "@" in from_addr else ""
+        if lead_domain and lead_domain not in ("gmail.com", "yahoo.com", "hotmail.com",
+                                                "outlook.com", "rediffmail.com"):
+            opted_out_same_domain = (await db.execute(
+                select(LeadV2).where(
+                    LeadV2.opted_out == True,
+                    LeadV2.email.like(f"%@{lead_domain}"),
+                    LeadV2.email != from_addr,
+                )
+            )).scalar_one_or_none()
+            if opted_out_same_domain:
+                lead.escalated_to_human = True
+                logger.warning("opted_out_domain_re_engagement",
+                               email=from_addr, domain=lead_domain,
+                               opted_out_email=opted_out_same_domain.email)
+                return "Same domain as opted-out lead — flagged for human decision"
+    except Exception:
+        pass
+
+    # ── Re-engagement personalisation (#37): reply after 2+ months ───────────
+    if lead.replied_at is not None:
+        months_silent = (datetime.now(timezone.utc) - lead.replied_at).days / 30
+        if months_silent >= 2:
+            lead.is_repeat_lead = True
+            logger.info("re_engagement_detected", email=from_addr, months_silent=round(months_silent, 1))
+
+    # ── After-hours queuing (#11): queue reply if outside 9am-9pm IST ────────
+    from app.services.email_service import is_after_hours
+    if is_after_hours():
+        existing_pending = lead.pending_reply_json
+        pending_list = json.loads(existing_pending) if existing_pending else []
+        pending_list.append({"body": body, "received_at": datetime.now(timezone.utc).isoformat()})
+        lead.pending_reply_json = json.dumps(pending_list)
+        await db.flush()
+        logger.info("reply_queued_after_hours", email=from_addr)
+        return "Reply queued — after business hours"
+
+    # ── CC detection (#9): extract CC'd addresses ─────────────────────────────
+    cc_raw = reply.get("cc", "")
+    if cc_raw:
+        existing_cc = lead.cc_emails or ""
+        all_cc = set(filter(None, [e.strip() for e in existing_cc.split(",")]))
+        new_cc = set(filter(None, [e.strip() for e in cc_raw.split(",")]))
+        all_cc.update(new_cc)
+        lead.cc_emails = ",".join(all_cc)
+
+    # ── Forward detection (#4): detect "on behalf of" forwarded replies ───────
+    forward_keywords = ["---------- forwarded", "begin forwarded", "fwd:", "fw:", "forwarded message"]
+    if any(kw in body.lower() for kw in forward_keywords):
+        lead.booked_via_forward = True
+
+    # ── Bounce / DSN detection (#1, #2, #16) ─────────────────────────────────
+    subject_hint = reply.get("subject", "")
+    bounce_info = classify_bounce(subject_hint, body)
+    if bounce_info["type"] == "hard_bounce":
+        lead.status = LeadStatus.INVALID_EMAIL
+        lead.bounce_count = (lead.bounce_count or 0) + 1
+        lead.last_bounced_at = datetime.now(timezone.utc)
+        logger.warning("hard_bounce_detected", email=from_addr)
+        return "Hard bounce — lead marked INVALID_EMAIL, all sends stopped"
+
+    if bounce_info["type"] == "soft_bounce":
+        lead.soft_bounce_count = (lead.soft_bounce_count or 0) + 1
+        lead.last_bounced_at = datetime.now(timezone.utc)
+        delay_hours = soft_bounce_retry_delay(lead.soft_bounce_count)
+        logger.info("soft_bounce_detected", email=from_addr, retry_in_hours=delay_hours)
+        return f"Soft bounce #{lead.soft_bounce_count} — will retry in {delay_hours}h"
+
+    if bounce_info["type"] == "job_change":
+        lead.status = LeadStatus.JOB_CHANGED
+        lead.new_contact_from_job_change = (
+            f"{bounce_info.get('new_contact_name', '')} <{bounce_info.get('new_contact_email', '')}>"
+        )
+        new_email = bounce_info.get("new_contact_email")
+        new_name = bounce_info.get("new_contact_name")
+        if new_email:
+            existing_new = (
+                await db.execute(select(LeadV2).where(LeadV2.email == new_email))
+            ).scalar_one_or_none()
+            if not existing_new:
+                db.add(LeadV2(
+                    email=new_email,
+                    contact_name=new_name or lead.contact_name,
+                    business_name=lead.business_name,
+                    summary=lead.summary,
+                    designation=lead.designation,
+                    location=lead.location,
+                    status=LeadStatus.NEW,
+                ))
+                logger.info("job_change_new_lead_created", old_email=from_addr, new_email=new_email)
+        return f"Job change — new lead created for {new_email}"
+
+    # ── Emoji-only reply detection (#15): flag for human ─────────────────────
+    stripped_body = body.strip()
+    non_emoji_chars = re.sub(r'[\U00010000-\U0010ffff\U00002600-\U000027BF⌀-⏿⭐❤]', '', stripped_body, flags=re.UNICODE)
+    if stripped_body and not non_emoji_chars.strip():
+        lead.escalated_to_human = True
+        logger.info("emoji_only_reply_flagged_human", email=from_addr)
+        return "Emoji-only reply — flagged for human review"
+
+    # ── Invalid email guard ───────────────────────────────────────────────────
+    if lead.status == LeadStatus.INVALID_EMAIL:
+        logger.info("reply_skipped_invalid_email", email=from_addr)
+        return "Lead has INVALID_EMAIL status — ignoring reply"
+
+    # ── Thread summarization (#45): build context for AI every 5 messages ────
+    from app.services.thread_summarizer import build_context_for_ai, should_summarize, summarize_thread
+    reply_count = getattr(lead, "reply_count", None) or 0
+    reply_count += 1
+    thread_summary = getattr(lead, "thread_summary", None)
+    if should_summarize(reply_count):
+        thread_messages = json.loads(lead.pending_reply_json or "[]")
+        thread_summary = summarize_thread(thread_messages, thread_summary)
+        if hasattr(lead, "thread_summary"):
+            lead.thread_summary = thread_summary
+    enriched_body = build_context_for_ai(body, json.loads(lead.pending_reply_json or "[]"), thread_summary)
+
+    # ── A/B reply tracking — record segment + send-time reply ────────────────
+    if lead.ab_variant:
+        seg = classify_segment(lead.designation, lead.location)
+        record_variant_reply_segment(lead.ab_variant, seg)
+    if lead.send_time_variant:
+        record_send_time_reply(lead.send_time_variant)
+
     # Priority 1: If Stage 2 (has offered slots), try matching them simple-first
     selected_display = None
     if lead.offered_slots_json:
@@ -840,41 +1104,343 @@ async def _process_reply_v2(db, reply: dict) -> str:
 
     # Priority 2: Use unified AI analysis for intent classification and extraction
     today_str = datetime.now(timezone.utc).strftime("%A, %d %B %Y")
-    analysis = analyze_reply_intent(body, today_str)
+    analysis = analyze_reply_intent(enriched_body, today_str)
     logger.info("reply_analysis_result", email=from_addr, analysis=analysis, reply_body=body)
 
-    if analysis["intent"] == "decline":
-        # Don't give up — send a warm "when works for you?" reply
-        from app.services.email_service import _send_html_email, _signature
-        greeting_name = (lead.contact_name or lead.business_name or "").split()[0].capitalize()
-        subject = "Re: Partnership Opportunity — Jane Aerospace"
-        body_lines = [
-            f"Hi {greeting_name},",
-            "",
-            "Thank you for letting me know — I completely understand, schedules can get very busy and I appreciate you taking a moment to respond.",
-            "I would not want to miss the opportunity to connect with you entirely. Would it be possible for you to let me know when a better time might be? Even a rough window — whether it is a particular week, day of the week, or time of day — would be very helpful for me to plan around.",
-            "There is absolutely no pressure at all. If now is simply not the right time, I am more than happy to follow up at a later date that suits you better.",
-            "Please feel free to reply to this email whenever it is convenient and I will make sure to find a slot that works perfectly for you.",
-            "Thank you again for your time and I hope to speak with you soon.",
-        ]
+    from app.services.email_service import _send_html_email, _signature
+
+    def _simple_reply(subject: str, paragraphs: list[str]) -> None:
         paras_html = "".join(
             f'<p style="margin:0 0 18px 0;font-family:Arial,sans-serif;font-size:15px;color:#111111;line-height:1.75;">{p}</p>'
-            for p in body_lines if p != ""
+            for p in paragraphs if p
         )
-        html = f"""<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+        _send_html_email(lead.email, subject, f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#ffffff;">
   <div style="max-width:600px;margin:40px auto;padding:0 24px 60px;">
-    {paras_html}
-    {_signature()}
+    {paras_html}{_signature()}
   </div>
-</body>
-</html>"""
-        _send_html_email(lead.email, subject, html)
+</body></html>""")
+
+    greeting_name = (lead.contact_name or lead.business_name or "").split()[0].capitalize()
+
+    # ── angry_negative (#12): escalate, no AI reply ────────────────────────────
+    if analysis["intent"] == "angry_negative":
+        lead.escalated_to_human = True
+        lead.priority_flag = True
+        from app.services.email_service import send_escalation_alert
+        send_escalation_alert(
+            lead_name=lead.contact_name or lead.business_name,
+            lead_email=lead.email,
+            designation=lead.designation,
+            reason="Angry/negative reply received — human intervention required",
+            reply_body=body[:500],
+        )
+        lead.replied_at = datetime.now(timezone.utc)
+        logger.info("angry_reply_escalated", email=from_addr)
+        return "Angry reply — escalated to human, no AI response sent"
+
+    # ── assistant_reply (#10): reply on behalf of the actual decision maker ───
+    if analysis["intent"] == "assistant_reply":
+        on_behalf_of = analysis.get("on_behalf_of") or "your manager"
+        reply_body = generate_assistant_reply(lead.contact_name, lead.business_name, on_behalf_of)
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
+            f"Hi {greeting_name},", reply_body,
+        ])
         lead.status = LeadStatus.REPLIED
         lead.replied_at = datetime.now(timezone.utc)
-        logger.info("reply_handled_decline_sent_when_available_email", email=from_addr)
+        logger.info("assistant_reply_sent", email=from_addr, on_behalf_of=on_behalf_of)
+        return "Assistant reply sent"
+
+    # ── job_change (#16): mark old lead, extract new contact, create new lead ─
+    if analysis["intent"] == "job_change":
+        new_name = analysis.get("new_contact_name")
+        new_email = analysis.get("new_contact_email")
+        lead.status = LeadStatus.JOB_CHANGED
+        lead.new_contact_from_job_change = f"{new_name or ''} <{new_email or ''}>"
+        if new_email:
+            existing_new = (
+                await db.execute(select(LeadV2).where(LeadV2.email == new_email))
+            ).scalar_one_or_none()
+            if not existing_new:
+                db.add(LeadV2(
+                    email=new_email,
+                    contact_name=new_name or lead.contact_name,
+                    business_name=lead.business_name,
+                    summary=lead.summary,
+                    designation=lead.designation,
+                    location=lead.location,
+                    status=LeadStatus.NEW,
+                ))
+                logger.info("job_change_intent_new_lead", old_email=from_addr, new_email=new_email)
+        return f"Job change noted — new lead queued for {new_email}"
+
+    # ── nda_request (#46): send NDA info, flag for human follow-up ────────────
+    if analysis["intent"] == "nda_request":
+        reply_body = generate_nda_reply(lead.contact_name, lead.business_name)
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
+            f"Hi {greeting_name},", reply_body,
+        ])
+        lead.escalated_to_human = True
+        lead.status = LeadStatus.REPLIED
+        lead.replied_at = datetime.now(timezone.utc)
+        logger.info("nda_request_handled", email=from_addr)
+        return "NDA reply sent, flagged for human"
+
+    # ── case_study_request (#47): send case study template email ──────────────
+    if analysis["intent"] == "case_study_request":
+        reply_body = generate_case_study_reply(lead.contact_name, lead.business_name)
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
+            f"Hi {greeting_name},", reply_body,
+        ])
+        lead.status = LeadStatus.REPLIED
+        lead.replied_at = datetime.now(timezone.utc)
+        if lead.ab_variant:
+            record_variant_reply(lead.ab_variant)
+        logger.info("case_study_reply_sent", email=from_addr)
+        return "Case study reply sent"
+
+    # ── existing_vendor (#48): complement, don't compete ─────────────────────
+    if analysis["intent"] == "existing_vendor":
+        reply_body = generate_existing_vendor_reply(lead.contact_name, lead.business_name)
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
+            f"Hi {greeting_name},", reply_body,
+        ])
+        lead.status = LeadStatus.REPLIED
+        lead.replied_at = datetime.now(timezone.utc)
+        if lead.ab_variant:
+            record_variant_reply(lead.ab_variant)
+        logger.info("existing_vendor_reply_sent", email=from_addr)
+        return "Existing vendor reply sent"
+
+    # ── deadline_mention (#50): high priority + deadline reply ────────────────
+    if analysis["intent"] == "deadline_mention":
+        deadline_text = analysis.get("deadline_text") or ""
+        lead.priority_flag = True
+        lead.priority_deadline = deadline_text
+        reply_body = generate_deadline_reply(lead.contact_name, lead.business_name, deadline_text)
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
+            f"Hi {greeting_name},", reply_body,
+        ])
+        lead.status = LeadStatus.REPLIED
+        lead.replied_at = datetime.now(timezone.utc)
+        if lead.ab_variant:
+            record_variant_reply(lead.ab_variant)
+        logger.info("deadline_reply_sent", email=from_addr, deadline=deadline_text)
+        return f"Deadline reply sent — priority flagged ({deadline_text})"
+
+    # ── non-English reply (#6): detect language, reply in same language ───────
+    reply_language = analysis.get("language")
+    if reply_language and reply_language.lower() not in ("english", "en", "", None):
+        lead.reply_language = reply_language
+        question_text = analysis.get("question_text") or body[:300]
+        reply_body = generate_multilingual_reply(
+            lead.contact_name, lead.business_name, question_text, reply_language
+        )
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [reply_body])
+        lead.status = LeadStatus.REPLIED
+        lead.replied_at = datetime.now(timezone.utc)
+        logger.info("multilingual_reply_sent", email=from_addr, language=reply_language)
+        return f"Multilingual reply sent ({reply_language})"
+
+    # ── high_intent nudge (#3): send follow-up nudge for very positive replies ─
+    if analysis["intent"] == "high_intent":
+        reply_body = generate_high_intent_nudge(lead.contact_name, lead.business_name)
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
+            f"Hi {greeting_name},", reply_body,
+        ])
+        lead.status = LeadStatus.REPLIED
+        lead.replied_at = datetime.now(timezone.utc)
+        if lead.ab_variant:
+            record_variant_reply(lead.ab_variant)
+        logger.info("high_intent_nudge_sent", email=from_addr)
+        return "High-intent nudge sent"
+
+    # ── scheduled_followup (#34): confirm a specific follow-up date ───────────
+    if analysis["intent"] == "scheduled_followup":
+        followup_date = analysis.get("followup_date") or ""
+        if followup_date:
+            try:
+                lead.scheduled_followup_at = datetime.strptime(followup_date, "%Y-%m-%d").replace(
+                    tzinfo=timezone.utc
+                )
+            except ValueError:
+                pass
+        reply_body = generate_scheduled_followup_confirm(
+            lead.contact_name, lead.business_name, followup_date
+        )
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
+            f"Hi {greeting_name},", reply_body,
+        ])
+        lead.status = LeadStatus.REPLIED
+        lead.replied_at = datetime.now(timezone.utc)
+        logger.info("scheduled_followup_confirmed", email=from_addr, date=followup_date)
+        return f"Scheduled follow-up confirmed for {followup_date}"
+
+    # ── reschedule: 30-min undo window ─────────────────────────────────────────
+    if analysis["intent"] == "reschedule":
+        now_utc = datetime.now(timezone.utc)
+        booked_within_30_min = (
+            lead.status == LeadStatus.BOOKED
+            and lead.booked_at is not None
+            and (now_utc - lead.booked_at).total_seconds() <= 1800
+        )
+        if booked_within_30_min and lead.booking_id:
+            zoho_cancel = ZohoBookingsService()
+            cancelled = await asyncio.to_thread(zoho_cancel.cancel_booking, lead.booking_id)
+            if cancelled:
+                # Best-effort Redis lock release — parse date/time from stored slot display
+                try:
+                    import dateutil.parser as _dup
+                    from zoneinfo import ZoneInfo as _ZI
+                    _IST = _ZI("Asia/Kolkata")
+                    _slot_dt = _dup.parse(lead.selected_slot or "").replace(tzinfo=_IST)
+                    release_slot_lock(_slot_dt.strftime("%d-%b-%Y"), _slot_dt.strftime("%H:%M"))
+                except Exception:
+                    pass  # lock auto-expires in 10 min — acceptable
+                lead.status = LeadStatus.SENT
+                lead.booking_id = None
+                lead.selected_slot = None
+                lead.booked_at = None
+                lead.offered_slots_json = None
+                lead.reschedule_count = getattr(lead, "reschedule_count", 0) + 1
+                lead.replied_at = now_utc
+                _simple_reply("Re: Your Booking — Jane Aerospace", [
+                    f"Hi {greeting_name},",
+                    "No worries at all — I've cancelled that booking for you.",
+                    "Here are fresh slots. Click any to lock in the right time:",
+                ])
+                from app.services.availability_v2 import get_slots_for_week
+                alt = await get_slots_for_week(db, "this", 6) or await get_slots_for_week(db, "next", 6)
+                if alt:
+                    book_urls = [make_book_url(str(lead.id), i) for i in range(len(alt))]
+                    lead.offered_slots_json = json.dumps(alt)
+                    send_v2_slots_email(lead.email, lead.business_name,
+                                        [s["display"] for s in alt],
+                                        book_urls=book_urls, body_text=None,
+                                        contact_name=lead.contact_name)
+                logger.info("reschedule_undo_done", email=from_addr, cancelled=cancelled)
+                return "Reschedule: booking cancelled within 30 min, new slots sent"
+            else:
+                _simple_reply("Re: Your Booking — Jane Aerospace", [
+                    f"Hi {greeting_name},",
+                    "I tried to cancel the booking but it looks like it may have already been processed on our end.",
+                    "Let me sort this out manually and get back to you within the hour.",
+                ])
+                logger.warning("reschedule_cancel_failed", email=from_addr)
+                return "Reschedule: Zoho cancel failed — manual intervention needed"
+        else:
+            # Beyond 30-min window
+            _simple_reply("Re: Your Booking — Jane Aerospace", [
+                f"Hi {greeting_name},",
+                "I'm afraid I can no longer cancel the booking automatically as more than 30 minutes have passed.",
+                "Please reply and I'll personally sort this out — just let me know and I'll make it happen.",
+            ])
+            lead.replied_at = datetime.now(timezone.utc)
+            logger.info("reschedule_beyond_window", email=from_addr)
+            return "Reschedule: beyond 30-min window — manual intervention email sent"
+
+    # ── out_of_office ──────────────────────────────────────────────────────────
+    if analysis["intent"] == "out_of_office":
+        return_date_str = analysis.get("return_date")
+        if return_date_str:
+            try:
+                from datetime import date as _date_type
+                ooo_date = datetime.strptime(return_date_str, "%Y-%m-%d")
+                lead.ooo_until = ooo_date.replace(tzinfo=timezone.utc)
+            except ValueError:
+                pass
+        lead.replied_at = datetime.now(timezone.utc)
+        logger.info("reply_ooo", email=from_addr, return_date=return_date_str)
+        return f"OOO noted — will resume after {return_date_str or 'return'}"
+
+    # ── question ───────────────────────────────────────────────────────────────
+    if analysis["intent"] == "question":
+        question_text = analysis.get("question_text") or body[:300]
+        reply_body = generate_question_reply(lead.contact_name, lead.business_name, question_text)
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
+            f"Hi {greeting_name},", reply_body,
+        ])
+        lead.status = LeadStatus.REPLIED
+        lead.replied_at = datetime.now(timezone.utc)
+        if lead.ab_variant:
+            record_variant_reply(lead.ab_variant)
+        logger.info("reply_question_answered", email=from_addr)
+        return "Question replied"
+
+    # ── callback_request (#14) ─────────────────────────────────────────────────
+    if analysis["intent"] == "callback_request":
+        phone = analysis.get("phone_number")
+        # Extract phone from body if AI didn't parse it
+        if not phone:
+            phone_match = re.search(r'[\+\d][\d\s\-\(\)]{7,14}\d', body)
+            if phone_match:
+                phone = phone_match.group(0).strip()
+        if phone:
+            lead.phone_number = phone
+        display_phone = phone or "the number you provided"
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
+            f"Hi {greeting_name},",
+            f"Got it — I'll give you a call at {display_phone} shortly.",
+            "If there's a better time for the call, just reply and let me know.",
+        ])
+        lead.status = LeadStatus.REPLIED
+        lead.replied_at = datetime.now(timezone.utc)
+        if lead.ab_variant:
+            record_variant_reply(lead.ab_variant)
+        logger.info("reply_callback_ack", email=from_addr, phone=display_phone)
+        return "Callback acknowledged"
+
+    # ── pricing ────────────────────────────────────────────────────────────────
+    if analysis["intent"] == "pricing":
+        reply_body = generate_pricing_reply(lead.contact_name, lead.business_name)
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
+            f"Hi {greeting_name},", reply_body,
+        ])
+        lead.status = LeadStatus.REPLIED
+        lead.replied_at = datetime.now(timezone.utc)
+        if lead.ab_variant:
+            record_variant_reply(lead.ab_variant)
+        logger.info("reply_pricing", email=from_addr)
+        return "Pricing reply sent"
+
+    # ── not_decision_maker ─────────────────────────────────────────────────────
+    if analysis["intent"] == "not_decision_maker":
+        referred_to = analysis.get("referred_to")
+        reply_body = generate_not_decision_maker_reply(lead.contact_name, lead.business_name, referred_to)
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
+            f"Hi {greeting_name},", reply_body,
+        ])
+        lead.status = LeadStatus.REPLIED
+        lead.replied_at = datetime.now(timezone.utc)
+        logger.info("reply_not_dm", email=from_addr, referred_to=referred_to)
+        return "Not-DM reply sent"
+
+    # ── decline ────────────────────────────────────────────────────────────────
+    if analysis["intent"] == "decline":
+        # Check for hard unsubscribe keywords — mark opted_out
+        hard_unsub = any(w in body.lower() for w in ["unsubscribe", "remove me", "do not contact"])
+        if hard_unsub:
+            lead.opted_out = True
+            lead.status = LeadStatus.REPLIED
+            lead.replied_at = datetime.now(timezone.utc)
+            _simple_reply("Re: Jane Aerospace", [
+                f"Hi {greeting_name},",
+                "Understood — I've removed you from our outreach list immediately.",
+                "Apologies for any inconvenience, and all the best.",
+            ])
+            logger.info("reply_opted_out", email=from_addr)
+            return "Lead opted out — unsubscribed"
+        # Soft decline — send warm "when works?" reply
+        _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
+            f"Hi {greeting_name},",
+            "Thank you for letting me know — I completely understand, schedules get busy.",
+            "Would it be possible to let me know when a better time might be? Even a rough window would help.",
+            "No pressure at all — happy to follow up whenever suits you.",
+        ])
+        lead.status = LeadStatus.REPLIED
+        lead.replied_at = datetime.now(timezone.utc)
+        logger.info("reply_handled_decline", email=from_addr)
         return "Lead declined — sent 'when are you available?' reply"
 
     if analysis["intent"] == "book" and analysis["date"] and analysis["time"]:
@@ -1272,10 +1838,403 @@ async def _export_pipeline_to_sheets(db) -> str:
         return f"Pipeline exported: {len(rows)} leads"
     except Exception as exc:
         logger.warning("pipeline_sheet_export_failed", error=str(exc))
-        return f"Export failed: {exc}"
+        # ── CSV fallback (#44): write locally so data is never lost ──────────
+        try:
+            fallback_path = "/tmp/pipeline_fallback.csv"
+            with open(fallback_path, "w", newline="", encoding="utf-8") as f:
+                import csv as _csv
+                writer = _csv.writer(f)
+                writer.writerow(_PIPELINE_HEADERS)
+                writer.writerows(rows)
+            logger.info("pipeline_csv_fallback_written", path=fallback_path, rows=len(rows))
+            return f"Sheets failed ({exc}) — written to {fallback_path}"
+        except Exception as csv_exc:
+            logger.error("pipeline_csv_fallback_failed", error=str(csv_exc))
+            return f"Export failed: {exc}"
 
 
 @shared_task
 def export_pipeline_to_sheets():
     logger.info("running_export_pipeline_to_sheets")
     return run_async(_export_pipeline_to_sheets)
+
+
+# ---------------------------------------------------------------------------
+# OOO resumption — re-activate leads whose ooo_until has passed
+# Runs daily (configured in celery beat schedule)
+# ---------------------------------------------------------------------------
+
+async def _resume_ooo_leads(db) -> str:
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(LeadV2).where(
+            LeadV2.ooo_until.isnot(None),
+            LeadV2.ooo_until <= now,
+            LeadV2.status == LeadStatus.SENT,
+        )
+    )
+    leads = result.scalars().all()
+    if not leads:
+        return "No OOO leads to resume"
+
+    resumed = 0
+    for lead in leads:
+        lead.ooo_until = None
+        # Send fresh week-selection email
+        outreach = generate_outreach(
+            business_name=lead.business_name,
+            contact_name=lead.contact_name,
+            designation=getattr(lead, "designation", None),
+            location=getattr(lead, "location", None),
+            summary=lead.summary,
+        )
+        this_url = make_week_url(str(lead.id), "this")
+        next_url = make_week_url(str(lead.id), "next")
+        ok = send_week_selection_email(
+            lead.email, lead.business_name,
+            this_week_url=this_url,
+            next_week_url=next_url,
+            body_text=outreach["body"],
+            contact_name=lead.contact_name,
+            subject_override=outreach["subject"],
+        )
+        if ok:
+            lead.ab_variant = outreach["variant"]
+            lead.ab_subject_variant = outreach["subject_variant"]
+            record_variant_sent(outreach["variant"])
+            resumed += 1
+            logger.info("ooo_lead_resumed", email=lead.email)
+        else:
+            logger.warning("ooo_resume_email_failed", email=lead.email)
+
+    return f"OOO resumed: {resumed}/{len(leads)}"
+
+
+@shared_task
+def resume_ooo_leads():
+    logger.info("running_resume_ooo_leads")
+    return run_async(_resume_ooo_leads)
+
+
+# ---------------------------------------------------------------------------
+# Process after-hours queued replies (#11)
+# Runs every 10 minutes — during business hours only
+# ---------------------------------------------------------------------------
+
+async def _process_delayed_replies(db) -> str:
+    from app.services.email_service import is_after_hours
+    if is_after_hours():
+        return "Still after hours — deferred"
+
+    result = await db.execute(
+        select(LeadV2).where(
+            LeadV2.pending_reply_json.isnot(None),
+            LeadV2.status.in_([LeadStatus.SENT, LeadStatus.REPLIED]),
+        )
+    )
+    leads = result.scalars().all()
+    processed = 0
+    for lead in leads:
+        pending = json.loads(lead.pending_reply_json or "[]")
+        if not pending:
+            lead.pending_reply_json = None
+            continue
+        for queued in pending:
+            reply_dict = {
+                "from_addr": lead.email,
+                "body": queued.get("body", ""),
+                "subject": "",
+                "cc": lead.cc_emails or "",
+            }
+            await _process_reply_v2(db, reply_dict)
+            processed += 1
+        lead.pending_reply_json = None
+    return f"Processed {processed} queued after-hours replies"
+
+
+@shared_task
+def process_delayed_replies():
+    logger.info("running_process_delayed_replies")
+    return run_async(_process_delayed_replies)
+
+
+# ---------------------------------------------------------------------------
+# Email open nudge (#3): nudge leads who opened but haven't replied
+# Runs every 30 minutes
+# ---------------------------------------------------------------------------
+
+async def _check_open_nudges(db) -> str:
+    from app.services.email_tracker import get_open_count
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+
+    result = await db.execute(
+        select(LeadV2).where(
+            LeadV2.status == LeadStatus.SENT,
+            LeadV2.email_open_count > 0,
+            LeadV2.open_nudge_sent == False,
+            LeadV2.last_opened_at <= cutoff,
+        )
+    )
+    leads = result.scalars().all()
+    nudged = 0
+    from app.services.email_service import _send_html_email, _signature
+    for lead in leads:
+        greeting_name = (lead.contact_name or lead.business_name or "").split()[0].capitalize()
+        body_text = generate_high_intent_nudge(lead.contact_name, lead.business_name)
+        paras_html = "".join(
+            f'<p style="margin:0 0 18px 0;font-family:Arial,sans-serif;font-size:15px;color:#111111;line-height:1.75;">{p}</p>'
+            for p in [f"Hi {greeting_name},", body_text] if p
+        )
+        html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#ffffff;">
+  <div style="max-width:600px;margin:40px auto;padding:0 24px 60px;">
+    {paras_html}{_signature()}
+  </div>
+</body></html>"""
+        ok = _send_html_email(lead.email, "Re: Partnership Opportunity — Jane Aerospace", html)
+        if ok:
+            lead.open_nudge_sent = True
+            nudged += 1
+            logger.info("open_nudge_sent", email=lead.email)
+    return f"Open nudges sent: {nudged}"
+
+
+@shared_task
+def check_open_nudges():
+    logger.info("running_check_open_nudges")
+    return run_async(_check_open_nudges)
+
+
+# ---------------------------------------------------------------------------
+# Pending booking nudge (#17): nudge leads who clicked but didn't confirm
+# Runs every 5 minutes
+# ---------------------------------------------------------------------------
+
+async def _check_pending_bookings(db) -> str:
+    nudge_cutoff = datetime.now(timezone.utc) - timedelta(minutes=20)
+    expire_cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+
+    result = await db.execute(
+        select(LeadV2).where(
+            LeadV2.pending_booking_slot_json.isnot(None),
+            LeadV2.status.in_([LeadStatus.SENT, LeadStatus.REPLIED]),
+        )
+    )
+    leads = result.scalars().all()
+    nudged = expired = 0
+
+    for lead in leads:
+        if not lead.pending_booking_at:
+            continue
+
+        if lead.pending_booking_at <= expire_cutoff:
+            # Lock expired — clear pending state
+            lead.pending_booking_slot_json = None
+            lead.pending_booking_at = None
+            lead.pending_nudge_sent = False
+            expired += 1
+            logger.info("pending_booking_expired", email=lead.email)
+            continue
+
+        if not lead.pending_nudge_sent and lead.pending_booking_at <= nudge_cutoff:
+            slot_data = json.loads(lead.pending_booking_slot_json or "{}")
+            slot_display = slot_data.get("display", "your selected slot")
+            nudge_text = generate_pending_booking_nudge(
+                lead.contact_name, lead.business_name, slot_display
+            )
+            from app.services.email_service import _send_html_email, _signature
+            greeting_name = (lead.contact_name or lead.business_name or "").split()[0].capitalize()
+            paras_html = "".join(
+                f'<p style="margin:0 0 18px 0;font-family:Arial,sans-serif;font-size:15px;color:#111111;line-height:1.75;">{p}</p>'
+                for p in [f"Hi {greeting_name},", nudge_text] if p
+            )
+            html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#ffffff;">
+  <div style="max-width:600px;margin:40px auto;padding:0 24px 60px;">
+    {paras_html}{_signature()}
+  </div>
+</body></html>"""
+            ok = _send_html_email(lead.email, "Re: Your Booking — Jane Aerospace", html)
+            if ok:
+                lead.pending_nudge_sent = True
+                nudged += 1
+                logger.info("pending_booking_nudge_sent", email=lead.email, slot=slot_display)
+
+    return f"Pending booking nudges: {nudged} sent, {expired} expired"
+
+
+@shared_task
+def check_pending_bookings():
+    logger.info("running_check_pending_bookings")
+    return run_async(_check_pending_bookings)
+
+
+# ---------------------------------------------------------------------------
+# Scheduled follow-ups (#34): send emails to leads on their chosen date
+# Runs every hour
+# ---------------------------------------------------------------------------
+
+async def _send_scheduled_followups(db) -> str:
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(LeadV2).where(
+            LeadV2.scheduled_followup_at.isnot(None),
+            LeadV2.scheduled_followup_at <= now,
+            LeadV2.status.in_([LeadStatus.SENT, LeadStatus.REPLIED]),
+        )
+    )
+    leads = result.scalars().all()
+    sent = 0
+    for lead in leads:
+        outreach = generate_outreach(
+            business_name=lead.business_name,
+            contact_name=lead.contact_name,
+            designation=getattr(lead, "designation", None),
+            location=getattr(lead, "location", None),
+            summary=lead.summary,
+        )
+        this_url = make_week_url(str(lead.id), "this")
+        next_url = make_week_url(str(lead.id), "next")
+        ok = send_week_selection_email(
+            lead.email, lead.business_name,
+            this_week_url=this_url,
+            next_week_url=next_url,
+            body_text=outreach["body"],
+            contact_name=lead.contact_name,
+            subject_override=outreach["subject"],
+            lead_id=str(lead.id),
+        )
+        if ok:
+            lead.scheduled_followup_at = None
+            lead.ab_variant = outreach["variant"]
+            record_variant_sent(outreach["variant"])
+            sent += 1
+            logger.info("scheduled_followup_sent", email=lead.email)
+    return f"Scheduled follow-ups sent: {sent}"
+
+
+@shared_task
+def send_scheduled_followups():
+    logger.info("running_send_scheduled_followups")
+    return run_async(_send_scheduled_followups)
+
+
+# ---------------------------------------------------------------------------
+# No-show checker (#27): detect missed meetings, send re-engage email
+# Runs every 30 minutes
+# ---------------------------------------------------------------------------
+
+async def _check_no_shows(db) -> str:
+    from zoneinfo import ZoneInfo
+    IST = ZoneInfo("Asia/Kolkata")
+
+    now_ist = datetime.now(IST)
+    result = await db.execute(
+        select(LeadV2).where(
+            LeadV2.status == LeadStatus.BOOKED,
+            LeadV2.selected_slot.isnot(None),
+        )
+    )
+    leads = result.scalars().all()
+    no_shows = 0
+
+    for lead in leads:
+        try:
+            import dateutil.parser
+            slot_dt = dateutil.parser.parse(lead.selected_slot)
+            if slot_dt.tzinfo is None:
+                slot_dt = slot_dt.replace(tzinfo=IST)
+            # 30 minutes after meeting start = no-show window
+            if slot_dt + timedelta(minutes=30) > now_ist:
+                continue
+        except Exception:
+            continue
+
+        lead.no_show_count = (lead.no_show_count or 0) + 1
+        lead.status = LeadStatus.SENT
+        lead.selected_slot = None
+        lead.booking_id = None
+        lead.booked_at = None
+
+        reply_text = generate_no_show_reply(lead.contact_name, lead.business_name, lead.selected_slot or "")
+        from app.services.email_service import _send_html_email, _signature
+        greeting_name = (lead.contact_name or lead.business_name or "").split()[0].capitalize()
+        paras_html = "".join(
+            f'<p style="margin:0 0 18px 0;font-family:Arial,sans-serif;font-size:15px;color:#111111;line-height:1.75;">{p}</p>'
+            for p in [f"Hi {greeting_name},", reply_text] if p
+        )
+        html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#ffffff;">
+  <div style="max-width:600px;margin:40px auto;padding:0 24px 60px;">
+    {paras_html}{_signature()}
+  </div>
+</body></html>"""
+        _send_html_email(lead.email, "Re: Missed Meeting — Jane Aerospace", html)
+        no_shows += 1
+        logger.info("no_show_handled", email=lead.email, count=lead.no_show_count)
+
+    return f"No-shows handled: {no_shows}"
+
+
+@shared_task
+def check_no_shows():
+    logger.info("running_check_no_shows")
+    return run_async(_check_no_shows)
+
+
+# ---------------------------------------------------------------------------
+# Soft bounce retrier (#2): retry sending to soft-bounced leads after delay
+# Runs every 6 hours
+# ---------------------------------------------------------------------------
+
+async def _retry_soft_bounces(db) -> str:
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(LeadV2).where(
+            LeadV2.soft_bounce_count > 0,
+            LeadV2.soft_bounce_count < 3,
+            LeadV2.last_bounced_at.isnot(None),
+            LeadV2.status == LeadStatus.SENT,
+        )
+    )
+    leads = result.scalars().all()
+    retried = 0
+
+    for lead in leads:
+        delay_hours = soft_bounce_retry_delay(lead.soft_bounce_count)
+        retry_after = lead.last_bounced_at + timedelta(hours=delay_hours)
+        if now < retry_after:
+            continue
+
+        outreach = generate_outreach(
+            business_name=lead.business_name,
+            contact_name=lead.contact_name,
+            designation=getattr(lead, "designation", None),
+            location=getattr(lead, "location", None),
+            summary=lead.summary,
+        )
+        this_url = make_week_url(str(lead.id), "this")
+        next_url = make_week_url(str(lead.id), "next")
+        ok = send_week_selection_email(
+            lead.email, lead.business_name,
+            this_week_url=this_url,
+            next_week_url=next_url,
+            body_text=outreach["body"],
+            contact_name=lead.contact_name,
+            subject_override=outreach["subject"],
+            lead_id=str(lead.id),
+        )
+        if ok:
+            retried += 1
+            logger.info("soft_bounce_retried", email=lead.email, bounce_count=lead.soft_bounce_count)
+
+    return f"Soft bounce retries sent: {retried}"
+
+
+@shared_task
+def retry_soft_bounces():
+    logger.info("running_retry_soft_bounces")
+    return run_async(_retry_soft_bounces)

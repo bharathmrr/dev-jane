@@ -21,7 +21,9 @@ _db_url = str(settings.DATABASE_URL)
 
 # Neon (and PgBouncer) poolers require statement_cache_size=0 with asyncpg.
 # We detect pooler endpoints by the "-pooler." hostname pattern.
-_connect_args: dict = {}
+_connect_args: dict = {
+    "timeout": 30,  # Neon serverless can take up to 5s to wake; 30s gives headroom
+}
 if "-pooler." in _db_url or "pgbouncer" in _db_url.lower():
     _connect_args["statement_cache_size"] = 0
 
@@ -30,6 +32,7 @@ engine = create_async_engine(
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_timeout=settings.DB_POOL_TIMEOUT,
+    pool_recycle=300,   # recycle connections every 5 min to avoid stale SSL
     pool_pre_ping=True,
     echo=settings.DEBUG,
     connect_args=_connect_args,

@@ -12,10 +12,131 @@ import hashlib
 import hmac as _hmac
 import smtplib
 import ssl
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from zoneinfo import ZoneInfo
 
 from app.core.config import settings
+
+_IST = ZoneInfo("Asia/Kolkata")
+
+# ---------------------------------------------------------------------------
+# After-hours detection (#11)
+# Business hours: 9:00 AM – 9:00 PM IST  Mon–Sat
+# Replies arriving outside these hours are queued for 9am IST next business day
+# ---------------------------------------------------------------------------
+
+_BUSINESS_START_HOUR = 9    # 9:00 AM IST
+_BUSINESS_END_HOUR   = 21   # 9:00 PM IST
+
+
+def is_after_hours() -> bool:
+    """Return True if current IST time is outside business hours or it's Sunday."""
+    now_ist = datetime.now(_IST)
+    if now_ist.weekday() == 6:   # Sunday
+        return True
+    return not (_BUSINESS_START_HOUR <= now_ist.hour < _BUSINESS_END_HOUR)
+
+
+def make_confirm_booking_url(lead_id: str, slot_idx: int) -> str:
+    """Signed URL for confirming a pending slot booking (#17)."""
+    msg = f"confirm:{lead_id}:{slot_idx}".encode()
+    sig = _hmac.new(settings.EMAIL_HMAC_SECRET.encode(), msg, hashlib.sha256).hexdigest()[:16]
+    return f"{settings.APP_URL.rstrip('/')}/api/v1/v2/confirm-booking/{lead_id}/{slot_idx}/{sig}"
+
+
+# ---------------------------------------------------------------------------
+# Location → UTC offset mapping for dual-timezone display (#21)
+# ---------------------------------------------------------------------------
+
+_LOCATION_TZ: dict[str, str] = {
+    # Indian cities → IST (+05:30) — all map to same display offset
+    "mumbai": "IST (UTC+5:30)", "delhi": "IST (UTC+5:30)", "bangalore": "IST (UTC+5:30)",
+    "bengaluru": "IST (UTC+5:30)", "chennai": "IST (UTC+5:30)", "hyderabad": "IST (UTC+5:30)",
+    "pune": "IST (UTC+5:30)", "kolkata": "IST (UTC+5:30)", "ahmedabad": "IST (UTC+5:30)",
+    "jaipur": "IST (UTC+5:30)", "surat": "IST (UTC+5:30)", "lucknow": "IST (UTC+5:30)",
+    "kanpur": "IST (UTC+5:30)", "nagpur": "IST (UTC+5:30)", "indore": "IST (UTC+5:30)",
+    "thane": "IST (UTC+5:30)", "bhopal": "IST (UTC+5:30)", "visakhapatnam": "IST (UTC+5:30)",
+    "pimpri": "IST (UTC+5:30)", "patna": "IST (UTC+5:30)", "coimbatore": "IST (UTC+5:30)",
+    "gurugram": "IST (UTC+5:30)", "gurgaon": "IST (UTC+5:30)", "noida": "IST (UTC+5:30)",
+    "kochi": "IST (UTC+5:30)", "chandigarh": "IST (UTC+5:30)",
+    # International
+    "london": "GMT (UTC+0)", "uk": "GMT (UTC+0)", "dubai": "GST (UTC+4)",
+    "singapore": "SGT (UTC+8)", "new york": "EST (UTC-5)", "usa": "EST (UTC-5)",
+    "sydney": "AEST (UTC+10)", "tokyo": "JST (UTC+9)", "berlin": "CET (UTC+1)",
+    "paris": "CET (UTC+1)", "toronto": "EST (UTC-5)", "hong kong": "HKT (UTC+8)",
+}
+
+_IST_OFFSET_MINS = 330   # 5h 30m
+
+_TZ_OFFSET_MINS: dict[str, int] = {
+    "IST (UTC+5:30)": 330,
+    "GMT (UTC+0)": 0,
+    "GST (UTC+4)": 240,
+    "SGT (UTC+8)": 480,
+    "EST (UTC-5)": -300,
+    "AEST (UTC+10)": 600,
+    "JST (UTC+9)": 540,
+    "CET (UTC+1)": 60,
+    "HKT (UTC+8)": 480,
+}
+
+
+def _local_tz_label(location: str | None) -> str | None:
+    """Return a TZ label for the lead's location, or None if unknown."""
+    if not location:
+        return None
+    loc = location.lower().strip()
+    for key, label in _LOCATION_TZ.items():
+        if key in loc:
+            return label
+    return None
+
+
+def _convert_slot_to_local(slot_display: str, local_tz_label: str) -> str | None:
+    """Convert 'Monday, Jun 10 at 09:00 AM' (IST) to local time string."""
+    try:
+        import dateutil.parser as _dup
+        dt = _dup.parse(slot_display)
+        offset_mins = _TZ_OFFSET_MINS.get(local_tz_label, _IST_OFFSET_MINS)
+        delta_mins = offset_mins - _IST_OFFSET_MINS
+        from datetime import timedelta
+        local_dt = dt + timedelta(minutes=delta_mins)
+        return local_dt.strftime("%I:%M %p") + f" {local_tz_label.split(' ')[0]}"
+    except Exception:
+        return None
+
+
+def _slot_cards_dual_tz(slots: list[str], book_urls: list[str], lead_location: str | None) -> str:
+    """Render slot cards with dual timezone (IST + lead's local time) (#21)."""
+    local_label = _local_tz_label(lead_location)
+    cards = ""
+    for slot, url in zip(slots, book_urls):
+        local_time_str = ""
+        if local_label and local_label != "IST (UTC+5:30)":
+            converted = _convert_slot_to_local(slot, local_label)
+            if converted:
+                local_time_str = f'<span style="color:#6b7280;font-size:13px;"> / {converted}</span>'
+
+        cards += f"""
+  <tr>
+    <td style="padding-bottom:10px;">
+      <a href="{url}" style="text-decoration:none;display:block;">
+        <table cellpadding="0" cellspacing="0" style="width:100%;border:1px solid #d1d5db;border-radius:8px;background:#f9fafb;">
+          <tr>
+            <td style="padding:16px 20px;font-family:Arial,sans-serif;font-size:15px;font-weight:600;color:#111111;">
+              &#128336;&nbsp; {slot} IST{local_time_str}
+            </td>
+            <td style="padding:16px 20px;text-align:right;font-family:Arial,sans-serif;font-size:15px;color:#1155cc;font-weight:600;white-space:nowrap;">
+              Confirm &rarr;
+            </td>
+          </tr>
+        </table>
+      </a>
+    </td>
+  </tr>"""
+    return f'<table cellpadding="0" cellspacing="0" style="margin:24px 0 8px 0;width:100%;max-width:480px;">{cards}</table>'
 
 
 # ---------------------------------------------------------------------------
@@ -38,13 +159,44 @@ def make_week_url(lead_id: str, week: str) -> str:
 # Internal send helper
 # ---------------------------------------------------------------------------
 
-def _send_html_email(to_email: str, subject: str, html_content: str) -> bool:
+def _send_html_email(
+    to_email: str,
+    subject: str,
+    html_content: str,
+    lead_id: str | None = None,
+    check_throttle: bool = True,
+) -> bool:
+    # SMTP daily throttle check (#40)
+    if check_throttle:
+        try:
+            from app.services.email_tracker import smtp_can_send, smtp_record_send
+            if not smtp_can_send():
+                print(f"[EMAIL] SMTP daily limit reached — queuing '{subject}' for tomorrow")
+                return False
+        except Exception:
+            pass  # if tracker unavailable, allow send
+
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"] = f"{settings.ORGANIZER_NAME} <{settings.SMTP_FROM_EMAIL}>"
         msg["To"] = to_email
-        msg.attach(MIMEText(html_content, "html"))
+
+        # Inject tracking pixel if lead_id provided (#3)
+        final_html = html_content
+        if lead_id:
+            try:
+                from app.services.email_tracker import pixel_html
+                px = pixel_html(lead_id)
+                # Insert just before </body>
+                if "</body>" in final_html:
+                    final_html = final_html.replace("</body>", f"{px}</body>")
+                else:
+                    final_html += px
+            except Exception:
+                pass
+
+        msg.attach(MIMEText(final_html, "html"))
 
         context = ssl.create_default_context()
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=20) as server:
@@ -55,6 +207,13 @@ def _send_html_email(to_email: str, subject: str, html_content: str) -> bool:
             if settings.SMTP_USERNAME:
                 server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
             server.send_message(msg)
+
+        # Record send for throttle counter
+        try:
+            from app.services.email_tracker import smtp_record_send
+            smtp_record_send()
+        except Exception:
+            pass
 
         print(f"[EMAIL] Sent '{subject}' -> {to_email}")
         return True
@@ -178,10 +337,12 @@ def send_week_selection_email(
     next_week_url: str,
     body_text: str | None = None,
     contact_name: str | None = None,
+    subject_override: str | None = None,
+    lead_id: str | None = None,
 ) -> bool:
     greeting_name = (contact_name or recipient_name).split()[0].capitalize()
     company_name = recipient_name
-    subject = f"Partnership Opportunity — Jane Aerospace × {company_name}"
+    subject = subject_override or f"Partnership Opportunity — Jane Aerospace × {company_name}"
 
     # AI-generated intro paragraph (personalized) or default
     if body_text:
@@ -207,7 +368,8 @@ def send_week_selection_email(
     print(f"[EMAIL] Sending week-selection email -> {to_email}")
     return _send_html_email(
         to_email, subject,
-        _body_wrap(body_paras, _week_cards(this_week_url, next_week_url), closing)
+        _body_wrap(body_paras, _week_cards(this_week_url, next_week_url), closing),
+        lead_id=lead_id,
     )
 
 
@@ -222,6 +384,8 @@ def send_v2_slots_email(
     book_urls: list[str] | None = None,
     body_text: str | None = None,
     contact_name: str | None = None,
+    lead_id: str | None = None,
+    lead_location: str | None = None,
 ) -> bool:
     greeting_name = (contact_name or recipient_name).split()[0].capitalize()
     subject = f"Available Times — Jane Aerospace"
@@ -242,16 +406,17 @@ def send_v2_slots_email(
     ]
 
     if book_urls:
-        cards_html = _slot_cards(slots, book_urls)
+        # Use dual-timezone cards (#21)
+        cards_html = _slot_cards_dual_tz(slots, book_urls, lead_location)
     else:
-        # Fallback: plain list if no URLs provided
         items = "".join(f"<li style='margin-bottom:8px;font-family:Arial,sans-serif;font-size:15px;'>{s}</li>" for s in slots)
         cards_html = f'<ul style="margin:20px 0;padding-left:20px;">{items}</ul>'
 
     print(f"[EMAIL] Sending slots email -> {to_email}")
     return _send_html_email(
         to_email, subject,
-        _body_wrap(body_paras, cards_html, closing)
+        _body_wrap(body_paras, cards_html, closing),
+        lead_id=lead_id,
     )
 
 
@@ -385,6 +550,48 @@ def send_organizer_booking_notification(
 # ---------------------------------------------------------------------------
 # Legacy admin notification (used by old v1 flow)
 # ---------------------------------------------------------------------------
+
+def send_escalation_alert(
+    lead_name: str,
+    lead_email: str,
+    designation: str | None,
+    reason: str,
+    reply_body: str | None = None,
+) -> bool:
+    """Alert organizer that a senior lead or flagged reply needs human attention (#38, #12)."""
+    subject = f"[ACTION NEEDED] {reason} — {lead_name}"
+    snippet = (reply_body or "")[:400].replace("\n", "<br>")
+    html = f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:32px auto;border:2px solid #dc2626;
+                border-radius:10px;padding:32px;background:#fff;">
+      <h2 style="color:#dc2626;margin:0 0 16px;">&#9888; Human Action Required</h2>
+      <p><strong>Reason:</strong> {reason}</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+        <tr><td style="padding:8px;background:#f8fafc;font-weight:600;width:30%;">Lead</td>
+            <td style="padding:8px;">{lead_name}</td></tr>
+        <tr><td style="padding:8px;background:#f8fafc;font-weight:600;">Email</td>
+            <td style="padding:8px;">{lead_email}</td></tr>
+        <tr><td style="padding:8px;background:#f8fafc;font-weight:600;">Designation</td>
+            <td style="padding:8px;">{designation or '—'}</td></tr>
+      </table>
+      {"<p><strong>Their reply:</strong></p><blockquote style='border-left:3px solid #dc2626;padding-left:12px;color:#374151;'>" + snippet + "</blockquote>" if snippet else ""}
+      <p style="color:#6b7280;font-size:12px;margin-top:24px;">Do NOT send an AI reply. Review and respond manually.</p>
+    </div>"""
+    return _send_html_email(settings.ORGANIZER_EMAIL, subject, html, check_throttle=False)
+
+
+def send_zoho_down_alert(lead_name: str, lead_email: str) -> bool:
+    """Alert organizer that Zoho API is down and a lead needs manual confirmation (#19)."""
+    subject = f"[ZOHO DOWN] Manual booking needed — {lead_name}"
+    html = f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:32px auto;border:2px solid #f59e0b;
+                border-radius:10px;padding:32px;">
+      <h2 style="color:#f59e0b;">&#9888; Zoho Booking System Offline</h2>
+      <p>Lead <strong>{lead_name}</strong> ({lead_email}) tried to book a slot but Zoho API is unavailable.</p>
+      <p>Please book manually and send them a confirmation email.</p>
+    </div>"""
+    return _send_html_email(settings.ORGANIZER_EMAIL, subject, html, check_throttle=False)
+
 
 def send_admin_notification(lead_name: str, lead_email: str, lead_timezone: str) -> bool:
     subject = f"New Lead: {lead_name} submitted details"

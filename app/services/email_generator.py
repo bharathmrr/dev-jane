@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json as _json
 import random
+import time as _time
 from structlog import get_logger
 
 from app.core.config import settings
@@ -45,21 +46,33 @@ def _get_client():
 
 
 def _ask(system: str, user: str, model: str, max_tokens: int = 256) -> str:
-    """Call Claude and return the text response. Returns '' on any error."""
+    """Call Claude with exponential backoff on rate-limit errors (#43).
+
+    Retries: 5 s → 15 s → 45 s. After 3 failures returns '' so callers use fallback templates.
+    """
     if not settings.ANTHROPIC_API_KEY:
         return ""
-    try:
-        client = _get_client()
-        msg = client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-        )
-        return msg.content[0].text.strip()
-    except Exception as exc:
-        logger.warning("claude_api_error", model=model, error=str(exc))
-        return ""
+    delays = [5, 15, 45]
+    for attempt, delay in enumerate(delays + [None], start=1):
+        try:
+            client = _get_client()
+            msg = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+            return msg.content[0].text.strip()
+        except Exception as exc:
+            err = str(exc).lower()
+            is_rate_limit = any(k in err for k in ("rate_limit", "ratelimit", "429", "overloaded", "too many"))
+            if is_rate_limit and delay is not None:
+                logger.warning("claude_rate_limit_retry", model=model, attempt=attempt, retry_in=delay)
+                _time.sleep(delay)
+            else:
+                logger.warning("claude_api_error", model=model, attempt=attempt, error=str(exc))
+                return ""
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -204,17 +217,28 @@ def generate_outreach_body(
 # ---------------------------------------------------------------------------
 
 def analyze_reply_intent(reply_body: str, today_str: str) -> dict:
-    """Analyze the lead's reply using Claude Haiku to detect booking intent and date constraints.
+    """Analyze a lead's reply using Claude Haiku. Returns classified intent + extracted fields.
 
-    Returns:
-      {
-        "intent": "book" | "list_slots" | "decline" | "unclear",
-        "date": "YYYY-MM-DD" or None,
-        "time": "HH:MM" or None,
-        "after_date": "YYYY-MM-DD" or None,
-        "week": "this" | "next" or None,
-        "specific_date": "YYYY-MM-DD" or None
-      }
+    Intent values (17 total):
+      book                — specific date + time mentioned, ready to book
+      list_slots          — wants to see available slots (with optional filters)
+      decline             — not interested / unsubscribe
+      reschedule          — "wrong slot", "by mistake", "want to change"
+      out_of_office       — OOO auto-reply (return_date extracted if present)
+      question            — asking something about Jane Aerospace / supply chain
+      callback_request    — "call me", phone number provided
+      pricing             — asking about cost / pricing
+      not_decision_maker  — "please contact my boss / colleague / manager"
+      angry_negative      — hostile / angry tone → flag for human, NO AI reply
+      assistant_reply     — "on behalf of X" → adjust tone, ask assistant to confirm
+      job_change          — "I no longer work here, contact X" → new lead
+      nda_request         — asking for NDA/legal docs before meeting → flag human
+      case_study_request  — asking for case studies / references → template email
+      existing_vendor     — "we already have a vendor" → complement reply
+      deadline_mention    — mentions specific deadline / urgency → HIGH PRIORITY
+      unclear             — positive but vague ("yes", "sure", "ok")
+
+    Returns dict with all possible fields (None if not applicable).
     """
     default_res = {
         "intent": "unclear",
@@ -223,83 +247,194 @@ def analyze_reply_intent(reply_body: str, today_str: str) -> dict:
         "after_date": None,
         "week": None,
         "specific_date": None,
+        "phone_number": None,
+        "return_date": None,
+        "question_text": None,
+        "referred_to": None,
+        "language": "english",          # detected reply language
+        "deadline_text": None,          # extracted deadline string (#50)
+        "on_behalf_of": None,           # name of actual decision maker (#10)
+        "new_contact_name": None,       # from job_change (#16)
+        "new_contact_email": None,      # from job_change (#16)
+        "followup_date": None,          # "contact me next month" (#34)
     }
     body_lower = reply_body.lower()
 
-    # Fast-path: hard decline keywords
-    decline_kws = ["not interested", "unsubscribe", "remove me", "no thanks", "no thank you", "stop emailing"]
+    # ── Fast-path heuristics (pre-AI, catches obvious cases cheaply) ───────────
+
+    # Angry / hostile — must be first to prevent AI from replying
+    angry_kws = [
+        "stop spamming", "spam", "harassment", "harassing", "leave me alone",
+        "threatening", "report you", "block you", "scam", "fraud", "fake",
+        "how dare", "disgusting", "pathetic", "waste of time", "stupid email",
+        "delete my email", "never contact",
+    ]
+    if any(w in body_lower for w in angry_kws):
+        default_res["intent"] = "angry_negative"
+        return default_res
+
+    # Hard decline
+    decline_kws = ["not interested", "unsubscribe", "remove me", "no thanks",
+                   "no thank you", "stop emailing", "do not contact", "don't contact"]
     if any(w in body_lower for w in decline_kws):
         default_res["intent"] = "decline"
         return default_res
 
-    # Heuristic week fallback (used even when Claude is available, as a safety net)
-    this_kws = ["this week", "this one", "sooner", "asap", "as soon", "now", "current week", "today", "tomorrow"]
-    next_kws = ["next week", "next one", "later", "after this", "following week", "week after"]
-    if any(k in body_lower for k in this_kws):
-        default_res["intent"] = "list_slots"
-        default_res["week"] = "this"
-    elif any(k in body_lower for k in next_kws):
-        default_res["intent"] = "list_slots"
-        default_res["week"] = "next"
+    # OOO
+    ooo_kws = ["out of office", "out of the office", "on leave", "on vacation",
+               "will be back", "returning on", "back on", "away until", "i am currently away"]
+    if any(w in body_lower for w in ooo_kws):
+        default_res["intent"] = "out_of_office"
+
+    # Reschedule
+    reschedule_kws = ["wrong slot", "by mistake", "booked by mistake", "wrong time",
+                      "accidentally", "can we change", "cancel and", "want to reschedule",
+                      "need to reschedule", "clicked wrong"]
+    if any(w in body_lower for w in reschedule_kws):
+        default_res["intent"] = "reschedule"
+
+    # Pricing
+    pricing_kws = ["how much", "what is the cost", "pricing", "price",
+                   "cost per", "fees", "charges", "budget"]
+    if any(w in body_lower for w in pricing_kws):
+        default_res["intent"] = "pricing"
+
+    # Callback
+    callback_kws = ["call me", "give me a call", "my number", "contact number",
+                    "phone", "whatsapp", "mobile"]
+    if any(w in body_lower for w in callback_kws):
+        default_res["intent"] = "callback_request"
+
+    # Job change
+    job_kws = ["no longer work", "i have left", "left the company", "no longer employed",
+               "has left the company", "my replacement", "new point of contact",
+               "please update your records", "i resigned", "i departed"]
+    if any(w in body_lower for w in job_kws):
+        default_res["intent"] = "job_change"
+
+    # On behalf of (assistant replies)
+    behalf_kws = ["on behalf of", "dr.", "mr.", "ms.", "mrs.", "asked me to",
+                  "instructed me to", "writing on behalf", "reaching out on behalf"]
+    if any(w in body_lower for w in behalf_kws):
+        default_res["intent"] = "assistant_reply"
+
+    # NDA / legal docs
+    nda_kws = ["nda", "non-disclosure", "confidentiality agreement", "legal",
+               "sign something first", "paperwork first", "documentation first"]
+    if any(w in body_lower for w in nda_kws):
+        default_res["intent"] = "nda_request"
+
+    # Case studies / references
+    case_kws = ["case study", "case studies", "references", "past work", "portfolio",
+                "examples", "who have you worked with", "clients", "customers"]
+    if any(w in body_lower for w in case_kws):
+        default_res["intent"] = "case_study_request"
+
+    # Existing vendor
+    vendor_kws = ["already have a vendor", "existing vendor", "currently use",
+                  "already working with", "have a supplier", "using someone else",
+                  "have a partner", "already contracted"]
+    if any(w in body_lower for w in vendor_kws):
+        default_res["intent"] = "existing_vendor"
+
+    # Deadline / urgency (#50)
+    deadline_kws = ["deadline", "expansion", "q1", "q2", "q3", "q4", "by march",
+                    "by june", "by december", "this quarter", "next quarter",
+                    "end of year", "urgent", "asap", "immediately", "launching"]
+    if any(w in body_lower for w in deadline_kws) and default_res["intent"] == "unclear":
+        default_res["intent"] = "deadline_mention"
+
+    # Scheduled follow-up (#34) — "contact me next month", "reach out in July"
+    followup_kws = ["contact me next", "reach out next", "email me in", "follow up in",
+                    "try me in", "get back to me in", "after next month"]
+    if any(w in body_lower for w in followup_kws) and default_res["intent"] == "unclear":
+        default_res["intent"] = "list_slots"   # will be overridden by AI with followup_date
+
+    # Week heuristics (fallback for list_slots)
+    this_kws = ["this week", "sooner", "asap", "as soon", "current week", "today", "tomorrow"]
+    next_kws = ["next week", "later", "after this", "following week", "week after"]
+    if default_res["intent"] == "unclear":
+        if any(k in body_lower for k in this_kws):
+            default_res["intent"] = "list_slots"
+            default_res["week"] = "this"
+        elif any(k in body_lower for k in next_kws):
+            default_res["intent"] = "list_slots"
+            default_res["week"] = "next"
 
     if not settings.ANTHROPIC_API_KEY:
         return default_res
 
     system_prompt = (
         f"Today is {today_str}.\n"
-        "Analyze a lead's email reply to a meeting scheduling invitation.\n"
-        "Return ONLY valid JSON (no markdown) with exactly these keys:\n"
+        "Classify a lead's reply to a Jane Aerospace meeting invite. Return ONLY valid JSON with these exact keys:\n"
         "{\n"
-        "  \"intent\": \"book\" | \"list_slots\" | \"decline\" | \"unclear\",\n"
+        "  \"intent\": string,\n"
         "  \"date\": \"YYYY-MM-DD\" or null,\n"
         "  \"time\": \"HH:MM\" or null,\n"
         "  \"after_date\": \"YYYY-MM-DD\" or null,\n"
         "  \"week\": \"this\" | \"next\" or null,\n"
-        "  \"specific_date\": \"YYYY-MM-DD\" or null\n"
+        "  \"specific_date\": \"YYYY-MM-DD\" or null,\n"
+        "  \"phone_number\": string or null,\n"
+        "  \"return_date\": \"YYYY-MM-DD\" or null,\n"
+        "  \"question_text\": string or null,\n"
+        "  \"referred_to\": string or null,\n"
+        "  \"language\": string (e.g. \"english\", \"hindi\", \"tamil\", \"telugu\", \"kannada\"),\n"
+        "  \"deadline_text\": string or null (e.g. 'Q3 expansion', 'by December'),\n"
+        "  \"on_behalf_of\": string or null (actual decision maker's name),\n"
+        "  \"new_contact_name\": string or null,\n"
+        "  \"new_contact_email\": string or null,\n"
+        "  \"followup_date\": \"YYYY-MM-DD\" or null\n"
         "}\n\n"
-        "Rules:\n"
+        "Intent values:\n"
+        "- \"book\": specific date AND time given. Set date + time (24h). morning=09:00, afternoon=14:00, evening=17:00.\n"
+        "- \"list_slots\": wants available slots. Set specific_date (single day), after_date (range), or week (this/next).\n"
         "- \"decline\": not interested / unsubscribe / stop emailing / no thank you.\n"
-        "- \"book\": lead mentions a specific date AND time (e.g. 'Tuesday at 2pm', 'Monday 10am'). "
-        "  Set date (YYYY-MM-DD) + time (HH:MM, 24h). Use: morning=09:00, afternoon=14:00, evening=17:00.\n"
-        "- \"list_slots\": lead wants to SEE available options. Sub-cases:\n"
-        "    a) Specific day mentioned but NO time (e.g. 'free on Monday', 'Monday works for me', "
-        "       'what about Tuesday?', 'I can do Wednesday', 'Monday is good'): "
-        "       set specific_date = that day's date (resolve relative to today). Leave after_date null.\n"
-        "    b) Date range (e.g. 'after Jan 8', 'from next Wednesday onwards'): set after_date.\n"
-        "    c) Week preference ('next week', 'this week'): set week.\n"
-        "- \"unclear\": positive/vague reply with no date/time info ('sounds good', 'yes', 'sure', 'great').\n"
-        "- Always resolve relative day names (Monday, Tuesday…) to the next upcoming occurrence from today.\n"
-        "- Do NOT set both specific_date and after_date. Prefer specific_date for single-day mentions."
+        "- \"reschedule\": 'wrong slot', 'by mistake', 'booked accidentally', 'cancel and rebook'.\n"
+        "- \"out_of_office\": OOO auto-reply. Extract return_date if mentioned.\n"
+        "- \"question\": asking about Jane Aerospace, supply chain, services. Set question_text.\n"
+        "- \"callback_request\": asking for a phone call, giving phone number. Extract phone_number.\n"
+        "- \"pricing\": asking about cost, pricing, fees.\n"
+        "- \"not_decision_maker\": 'contact my boss', 'speak to our manager'. Extract referred_to.\n"
+        "- \"angry_negative\": hostile, angry, threatening, calling it spam/scam.\n"
+        "- \"assistant_reply\": 'on behalf of X', 'Dr. X asked me'. Extract on_behalf_of.\n"
+        "- \"job_change\": 'I no longer work here', 'left the company'. Extract new_contact_name and new_contact_email if present.\n"
+        "- \"nda_request\": asking for NDA/confidentiality agreement before meeting.\n"
+        "- \"case_study_request\": asking for case studies, references, examples.\n"
+        "- \"existing_vendor\": 'we already have a vendor/supplier/partner'.\n"
+        "- \"deadline_mention\": mentions specific deadline or urgency (Q3, expansion, launching). Extract deadline_text.\n"
+        "- \"unclear\": positive but vague ('yes', 'ok', 'sure', 'sounds good', 'interested').\n"
+        "Rules: resolve relative days to next occurrence. Do NOT set both specific_date and after_date.\n"
+        "Detect language accurately — many leads write in Hindi, Tamil, or other Indian languages."
     )
 
-    text = _ask(system_prompt, f"Reply: {reply_body[:600]}", model=_HAIKU, max_tokens=150)
+    text = _ask(system_prompt, f"Reply:\n{reply_body[:800]}", model=_HAIKU, max_tokens=350)
     if not text:
         return default_res
 
     try:
-        # Strip markdown code fences if present
-        clean = text
-        if clean.startswith("```json"):
-            clean = clean[7:]
-        if clean.startswith("```"):
-            clean = clean[3:]
+        clean = text.strip()
+        for fence in ("```json", "```"):
+            if clean.startswith(fence):
+                clean = clean[len(fence):]
         if clean.endswith("```"):
             clean = clean[:-3]
 
         data = _json.loads(clean.strip())
         if isinstance(data, dict) and "intent" in data:
-            for key in ["date", "time", "after_date", "week", "specific_date"]:
+            all_keys = [
+                "date", "time", "after_date", "week", "specific_date",
+                "phone_number", "return_date", "question_text", "referred_to",
+                "language", "deadline_text", "on_behalf_of",
+                "new_contact_name", "new_contact_email", "followup_date",
+            ]
+            for key in all_keys:
                 if key not in data or data[key] == "null":
-                    data[key] = None
-            logger.info(
-                "reply_intent_parsed",
-                intent=data["intent"],
-                specific_date=data.get("specific_date"),
-                after_date=data.get("after_date"),
-                week=data.get("week"),
-                date=data.get("date"),
-                time=data.get("time"),
-            )
+                    data[key] = default_res.get(key)
+            if not data.get("language"):
+                data["language"] = "english"
+            logger.info("reply_intent_parsed", intent=data["intent"],
+                        lang=data.get("language"),
+                        week=data.get("week"), specific_date=data.get("specific_date"))
             return data
     except Exception as exc:
         logger.warning("claude_reply_intent_parse_failed", error=str(exc), raw=text)
