@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jane Aerospace — Command Center</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --b900:#0c2344; --b800:#13315e; --b700:#1a3a6b; --b600:#1a56db; --b500:#2f6bf0;
+  --b100:#dbeafe; --b50:#eff6ff; --ink:#0f172a; --mut:#64748b; --line:#e2e8f0;
+  --ok:#16a34a; --warn:#d97706; --bad:#dc2626; --bg:#f4f7fc; --card:#ffffff;
+  --r:14px; --sh:0 1px 3px rgba(12,35,68,.08),0 4px 16px rgba(12,35,68,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;}
+svg.ic{width:17px;height:17px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px;flex:none;}
+button{font-family:inherit;}
+a{color:var(--b600);}
+.logo{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.05em;}
+/* ---------------- login ---------------- */
+#login-screen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:100;
+  background:radial-gradient(1100px 600px at 80% -10%,#2f6bf0 0%,transparent 60%),
+             linear-gradient(135deg,var(--b900) 0%,var(--b600) 130%);}
+.login-card{background:#fff;border-radius:20px;padding:44px;width:400px;max-width:92vw;box-shadow:0 24px 80px rgba(0,0,0,.4);}
+.login-card h1{font-size:20px;color:var(--b700);margin:20px 0 6px;}
+.login-card .sub{font-size:13px;color:var(--mut);margin-bottom:24px;line-height:1.5;}
+.fld{margin-bottom:14px;}
+.fld label{display:block;font-size:12px;font-weight:600;color:#334155;margin-bottom:5px;}
+.fld input,.fld select,.fld textarea{width:100%;padding:11px 13px;border:1.5px solid #cbd5e1;border-radius:9px;font-size:14px;background:#fff;}
+.fld input:focus,.fld select:focus,.fld textarea:focus{outline:none;border-color:var(--b600);box-shadow:0 0 0 3px rgba(26,86,219,.12);}
+.btn{display:inline-flex;align-items:center;gap:7px;border:none;border-radius:9px;font-weight:700;cursor:pointer;
+  padding:10px 18px;font-size:13px;transition:filter .12s;}
+.btn:hover{filter:brightness(1.08);}
+.btn-p{background:var(--b600);color:#fff;}
+.btn-g{background:var(--ok);color:#fff;}
+.btn-r{background:#fff;color:var(--bad);border:1.5px solid #fecaca;}
+.btn-o{background:#fff;color:var(--b700);border:1.5px solid #c7d4ee;}
+.btn-w{background:#fff;color:var(--warn);border:1.5px solid #fde68a;}
+.btn-block{width:100%;justify-content:center;padding:13px;font-size:15px;}
+#login-err{display:none;background:#fee2e2;color:#991b1b;font-size:12.5px;padding:10px 13px;border-radius:8px;margin:6px 0 12px;}
+/* ---------------- shell ---------------- */
+#app{display:none;}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:232px;background:linear-gradient(180deg,var(--b900),var(--b800));
+  color:#c5d4ec;display:flex;flex-direction:column;z-index:20;}
+.sidebar .logo{padding:22px 20px 18px;color:#fff;font-size:13px;border-bottom:1px solid rgba(255,255,255,.1);}
+.nav{flex:1;padding:12px 10px;overflow-y:auto;}
+.nav a{display:flex;align-items:center;gap:11px;padding:10px 13px;color:#aebfdd;font-size:13.5px;border-radius:9px;
+  text-decoration:none;cursor:pointer;margin-bottom:2px;}
+.nav a:hover{background:rgba(255,255,255,.07);color:#fff;}
+.nav a.active{background:var(--b600);color:#fff;font-weight:600;box-shadow:0 4px 14px rgba(26,86,219,.4);}
+.nav .badge{margin-left:auto;background:var(--bad);color:#fff;font-size:10px;font-weight:800;border-radius:99px;padding:1px 7px;}
+.who{padding:14px 18px;border-top:1px solid rgba(255,255,255,.1);font-size:12px;display:flex;align-items:center;gap:10px;}
+.who .av{width:34px;height:34px;border-radius:50%;background:var(--b600);color:#fff;display:flex;align-items:center;
+  justify-content:center;font-weight:800;font-size:14px;flex:none;}
+.who b{color:#fff;display:block;font-size:12.5px;}
+.who button{background:none;border:none;color:#8fa6cc;cursor:pointer;margin-left:auto;padding:6px;}
+.who button:hover{color:#fff;}
+/* topbar */
+.topbar{position:fixed;left:232px;right:0;top:0;height:60px;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 26px;z-index:15;}
+.topbar h2{font-size:16.5px;color:var(--b700);margin-right:auto;display:flex;align-items:center;gap:9px;}
+.gsearch{display:flex;align-items:center;gap:8px;background:#f1f5f9;border:1.5px solid transparent;border-radius:9px;
+  padding:8px 13px;width:300px;color:var(--mut);}
+.gsearch:focus-within{border-color:var(--b600);background:#fff;}
+.gsearch input{border:none;background:none;outline:none;font-size:13px;width:100%;}
+.main{margin-left:232px;padding:84px 26px 40px;}
+/* cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:14px;margin-bottom:20px;}
+.card{background:var(--card);border-radius:var(--r);padding:16px 18px;box-shadow:var(--sh);display:flex;gap:13px;align-items:center;}
+.card .ico{width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex:none;}
+.card .num{font-size:23px;font-weight:800;color:var(--b700);line-height:1.1;}
+.card .lbl{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;font-weight:600;}
+.panel{background:var(--card);border-radius:var(--r);padding:20px 22px;box-shadow:var(--sh);margin-bottom:20px;}
+.panel h3{font-size:12.5px;color:var(--b700);text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px;
+  display:flex;align-items:center;gap:8px;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.grid3{display:grid;grid-template-columns:2fr 1fr;gap:20px;}
+@media(max-width:1100px){.grid2,.grid3{grid-template-columns:1fr;}}
+/* tables */
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;padding:9px 10px;
+  border-bottom:2px solid var(--line);white-space:nowrap;}
+td{padding:10px;border-bottom:1px solid #f1f5f9;vertical-align:middle;}
+tbody tr{transition:background .1s;}
+tbody tr:hover{background:var(--b50);}
+.chip{display:inline-block;padding:3px 10px;border-radius:99px;font-size:10.5px;font-weight:700;white-space:nowrap;letter-spacing:.02em;}
+.c-gray{background:#f1f5f9;color:#475569;} .c-blue{background:var(--b100);color:#1e40af;}
+.c-green{background:#dcfce7;color:#15803d;} .c-amber{background:#fef3c7;color:#b45309;}
+.c-purple{background:#ede9fe;color:#6d28d9;} .c-red{background:#fee2e2;color:#b91c1c;}
+.ibtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;border:1.5px solid var(--line);
+  background:#fff;color:var(--b700);cursor:pointer;margin:0 2px;transition:all .12s;}
+.ibtn:hover{border-color:var(--b600);color:var(--b600);background:var(--b50);}
+.steps{display:flex;gap:3px;margin-top:5px;}
+.step{width:13px;height:5px;border-radius:3px;background:#e2e8f0;}
+.step.done{background:var(--b600);}
+.bar-row{display:flex;align-items:center;gap:10px;margin-bottom:7px;}
+.bar-row .bl{width:128px;font-size:12px;color:#334155;text-align:right;flex:none;}
+.bar-row .bar{flex:1;background:#edf2fa;border-radius:6px;height:22px;overflow:hidden;}
+.bar-row .fill{height:100%;background:linear-gradient(90deg,var(--b600),#4f86f7);border-radius:6px;display:flex;
+  align-items:center;justify-content:flex-end;padding-right:8px;color:#fff;font-size:11px;font-weight:700;min-width:22px;transition:width .5s;}
+.intg{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;}
+.intg .it{display:flex;align-items:center;gap:10px;background:var(--b50);border-radius:10px;padding:11px 14px;
+  font-size:12.5px;font-weight:600;color:#1e3a8a;}
+.dot{width:9px;height:9px;border-radius:50%;margin-left:auto;flex:none;}
+.dot.on{background:var(--ok);box-shadow:0 0 7px rgba(22,163,74,.7);} .dot.off{background:var(--bad);}
+/* kanban */
+.kanban{display:flex;gap:12px;overflow-x:auto;align-items:stretch;height:calc(100vh - 108px);padding-bottom:4px;}
+.kcol{flex:1 0 218px;min-width:218px;background:#f0f4fa;border-radius:12px;padding:9px;
+  display:flex;flex-direction:column;}
+.khead{border-radius:9px;padding:11px 13px;font-size:12.5px;font-weight:700;display:flex;
+  justify-content:space-between;align-items:center;margin-bottom:9px;flex:none;border-top:3px solid rgba(0,0,0,.18);}
+.khead .cnt{background:rgba(255,255,255,.75);border-radius:99px;padding:1px 9px;font-size:11px;font-weight:800;}
+.kbody{flex:1;overflow-y:auto;min-height:0;}
+.kcard{background:#fff;border-radius:9px;padding:11px 13px;margin-bottom:8px;box-shadow:0 1px 3px rgba(12,35,68,.1);
+  cursor:pointer;transition:transform .1s;position:relative;}
+.kcard:hover{transform:translateY(-1px);box-shadow:0 5px 14px rgba(12,35,68,.16);}
+.kcard b{font-size:12.5px;display:block;color:var(--ink);margin-bottom:1px;}
+.kcard span{font-size:11px;color:var(--mut);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kact{display:none;gap:4px;margin-top:8px;border-top:1px solid #f1f5f9;padding-top:7px;}
+.kcard:hover .kact{display:flex;}
+.kact button{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;border-radius:7px;
+  border:1.5px solid var(--line);background:#fff;cursor:pointer;color:var(--b700);}
+.kact button:hover{border-color:currentColor;}
+.kmeta{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;}
+/* calendar */
+.calhead{display:flex;align-items:center;gap:14px;margin-bottom:14px;}
+.calhead h4{font-size:16px;color:var(--b700);min-width:170px;text-align:center;}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:7px;}
+.cal .dow{text-align:center;font-size:10.5px;font-weight:700;color:var(--mut);text-transform:uppercase;padding:5px 0;}
+.day{background:#fff;border:1.5px solid var(--line);border-radius:10px;min-height:86px;padding:7px 8px;font-size:11px;position:relative;}
+.day .dn{font-weight:700;color:#334155;font-size:12px;}
+.day.out{opacity:.35;}
+.day.today{border-color:var(--b600);box-shadow:0 0 0 2px rgba(26,86,219,.15);}
+.day.wkd{background:#f8fafc;}
+.day.hol{background:#fff7ed;border-color:#fdba74;}
+.day.blk{background:#fef2f2;border-color:#fca5a5;}
+.day .tag{display:block;font-size:9.5px;color:#b45309;font-weight:700;margin-top:1px;}
+.day .bk{display:block;background:var(--b600);color:#fff;border-radius:5px;padding:2px 5px;margin-top:3px;font-size:10px;
+  cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.day .sl{display:inline-block;background:#dcfce7;color:#15803d;border-radius:5px;padding:1px 5px;margin-top:3px;font-size:9.5px;font-weight:700;}
+.day .blkbtn{position:absolute;top:5px;right:6px;border:none;background:none;color:#cbd5e1;cursor:pointer;padding:1px;}
+.day .blkbtn:hover{color:var(--bad);}
+/* drawer */
+#drawer-wrap{position:fixed;inset:0;background:rgba(12,35,68,.45);z-index:50;display:none;}
+#drawer{position:absolute;right:0;top:0;bottom:0;width:560px;max-width:96vw;background:#fff;box-shadow:-12px 0 40px rgba(0,0,0,.25);
+  overflow-y:auto;padding:26px 28px;animation:slidein .22s ease;}
+@keyframes slidein{from{transform:translateX(60px);opacity:0;}to{transform:none;opacity:1;}}
+#drawer h2{font-size:18px;color:var(--b700);}
+.dsec{font-size:11px;font-weight:800;color:var(--b700);text-transform:uppercase;letter-spacing:.07em;
+  border-bottom:2px solid var(--b100);padding-bottom:6px;margin:22px 0 10px;display:flex;align-items:center;gap:7px;}
+.kv{display:grid;grid-template-columns:170px 1fr;gap:0;font-size:12.5px;border:1px solid var(--line);border-radius:9px;overflow:hidden;}
+.kv div{padding:7px 11px;border-bottom:1px solid #f1f5f9;}
+.kv div:nth-child(4n+1),.kv div:nth-child(4n+2){background:#f8fafc;}
+.kv .k{color:var(--mut);font-weight:600;}
+.tl{position:relative;padding-left:22px;}
+.tl::before{content:'';position:absolute;left:6px;top:6px;bottom:6px;width:2px;background:var(--b100);}
+.tl .ev{position:relative;padding:5px 0 11px;}
+.tl .ev::before{content:'';position:absolute;left:-20px;top:9px;width:10px;height:10px;border-radius:50%;
+  background:var(--b600);border:2px solid #fff;box-shadow:0 0 0 2px var(--b100);}
+.tl .ev b{font-size:12.5px;display:block;}
+.tl .ev span{font-size:11px;color:var(--mut);}
+/* modal */
+.modal-wrap{position:fixed;inset:0;background:rgba(12,35,68,.5);z-index:60;display:none;align-items:center;justify-content:center;}
+.modal{background:#fff;border-radius:16px;padding:28px 30px;width:460px;max-width:94vw;box-shadow:0 24px 60px rgba(0,0,0,.35);}
+.modal h3{font-size:16px;color:var(--b700);margin-bottom:16px;display:flex;align-items:center;gap:9px;}
+.msg{display:none;padding:10px 14px;border-radius:8px;font-size:12.5px;margin:12px 0;font-weight:600;}
+.msg.ok{background:#dcfce7;color:#15803d;display:block;} .msg.err{background:#fee2e2;color:#b91c1c;display:block;}
+.seg{display:inline-flex;background:#edf2fa;border-radius:9px;padding:3px;}
+.seg button{border:none;background:none;padding:7px 16px;border-radius:7px;font-size:12.5px;font-weight:700;color:var(--mut);cursor:pointer;}
+.seg button.on{background:#fff;color:var(--b700);box-shadow:0 1px 4px rgba(12,35,68,.15);}
+.toast{position:fixed;bottom:24px;right:24px;background:var(--b900);color:#fff;padding:13px 20px;border-radius:11px;
+  font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.35);z-index:90;display:none;max-width:380px;}
+/* google-sheet style grid */
+.gs-wrap{overflow:auto;border:1px solid #dadce0;border-radius:10px;background:#fff;max-height:calc(100vh - 220px);}
+.gs{border-collapse:collapse;font-size:12.5px;min-width:100%;}
+.gs th{position:sticky;top:0;background:#f8f9fa;border:1px solid #dadce0;padding:7px 10px;font-size:11px;
+  color:#3c4043;font-weight:700;text-transform:none;letter-spacing:0;white-space:nowrap;z-index:2;}
+.gs td{border:1px solid #e0e3e7;padding:0;min-width:120px;}
+.gs td.rn{background:#f8f9fa;color:#5f6368;text-align:center;font-size:11px;min-width:36px;width:36px;
+  position:sticky;left:0;z-index:1;border-right:2px solid #dadce0;}
+.gs td input{width:100%;border:none;outline:none;padding:7px 10px;font-size:12.5px;background:transparent;font-family:inherit;}
+.gs td input:focus{box-shadow:inset 0 0 0 2px var(--b600);border-radius:2px;}
+.gs tr.dirty td{background:#fffbeb;}
+.gs td.act{min-width:84px;width:84px;text-align:center;background:#fafbfc;}
+@media(max-width:900px){.sidebar{width:62px;}.sidebar .logo span,.nav a span,.who div,.nav .badge{display:none;}
+  .topbar{left:62px;}.main{margin-left:62px;padding:80px 12px 30px;}.gsearch{width:160px;}}
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="logo" style="color:var(--b700);font-size:15px;">
+      <svg width="44" height="44" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#1a56db"/>
+      <path d="M10 30 L38 14 L30 26 L36 30 L26 30 L20 36 L22 28 Z" fill="#fff"/></svg>
+      <span>JANE AEROSPACE</span>
+    </div>
+    <h1>Command Center</h1>
+    <p class="sub">Outreach · Bookings · KYC · NDA · Agreements — live tracking, approvals and analytics in one place.</p>
+    <div class="fld"><label>Email</label>
+      <input type="email" id="li-email" placeholder="admin@janeaerospace.co.in" autocomplete="username"></div>
+    <div class="fld"><label>Password</label>
+      <input type="password" id="li-pass" placeholder="••••••••" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <div id="login-err"></div>
+    <button class="btn btn-p btn-block" onclick="doLogin()">Sign In</button>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app">
+  <div class="sidebar">
+    <div class="logo">
+      <svg width="34" height="34" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#1a56db"/>
+      <path d="M10 30 L38 14 L30 26 L36 30 L26 30 L20 36 L22 28 Z" fill="#fff"/></svg>
+      <span>JANE AEROSPACE</span>
+    </div>
+    <div class="nav" id="nav"></div>
+    <div class="who">
+      <div class="av" id="who-av">A</div>
+      <div><b id="who-name">—</b><span id="who-role" style="font-size:11px;">—</span></div>
+      <button onclick="logout()" title="Sign out"><svg class="ic" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
+    </div>
+  </div>
+
+  <div class="topbar">
+    <h2 id="page-title">Overview</h2>
+    <div class="gsearch"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="g-q" placeholder="Search leads, companies…" oninput="globalSearch()"></div>
+    <button class="btn btn-p" id="btn-add" onclick="openModal('add')"><svg class="ic" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add Lead</button>
+    <button class="btn btn-o" onclick="refreshAll()" title="Refresh"><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg></button>
+  </div>
+
+  <div class="main">
+    <div id="view-overview"></div>
+    <div id="view-kanban" style="display:none;"></div>
+    <div id="view-leads" style="display:none;"></div>
+    <div id="view-sheet" style="display:none;"></div>
+    <div id="view-bookings" style="display:none;"></div>
+    <div id="view-docs" style="display:none;"></div>
+    <div id="view-approvals" style="display:none;"></div>
+    <div id="view-bulk" style="display:none;"></div>
+    <div id="view-logs" style="display:none;"></div>
+    <div id="view-users" style="display:none;"></div>
+  </div>
+</div>
+
+<!-- drawer -->
+<div id="drawer-wrap" onclick="if(event.target===this)closeDrawer()"><div id="drawer"></div></div>
+<!-- modal -->
+<div class="modal-wrap" id="modal-wrap" onclick="if(event.target===this)closeModal()"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================ core ============================ */
+const API = '/api/v1/dashboard/api';
+let TOKEN = localStorage.getItem('ja_token')||'', ROLE = localStorage.getItem('ja_role')||'',
+    NAME = localStorage.getItem('ja_name')||'';
+let LEADS=[], OV=null, CAL={y:0,m:0}, CHARTS={};
+
+const I = {
+  home:'<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+  kanban:'<rect x="3" y="3" width="7" height="14" rx="1.5"/><rect x="14" y="3" width="7" height="9" rx="1.5"/>',
+  users2:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  cal:'<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
+  doc:'<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+  check2:'<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  send:'<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+  clock:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  shield:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  edit:'<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
+  link:'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  play:'<polygon points="6 3 20 12 6 21 6 3"/>',
+  x:'<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  drop:'<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  mail:'<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
+  phone:'<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>',
+  chart:'<line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>',
+  plus:'<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  chevL:'<polyline points="15 18 9 12 15 6"/>', chevR:'<polyline points="9 18 15 12 9 6"/>',
+  ban:'<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  copy:'<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  inbox:'<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  zap:'<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  user:'<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  building:'<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M16 6h.01M8 10h.01M16 10h.01M8 14h.01M16 14h.01"/>',
+  table:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M12 3v18"/>',
+  save:'<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
+  ext:'<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+};
+function ic(n,s){return `<svg class="ic" ${s?`style="${s}"`:''} viewBox="0 0 24 24">${I[n]||''}</svg>`;}
+function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+function toast(t,ok=true){const e=document.getElementById('toast');e.textContent=t;
+  e.style.background=ok?'#0c2344':'#b91c1c';e.style.display='block';setTimeout(()=>e.style.display='none',3500);}
+
+async function api(path,opts={}){
+  opts.headers=Object.assign({'Content-Type':'application/json','ngrok-skip-browser-warning':'1',
+    'Authorization':'Bearer '+TOKEN},opts.headers||{});
+  const r=await fetch(API+path,opts);
+  if(r.status===401){logout();throw new Error('Session expired');}
+  if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||('HTTP '+r.status));}
+  return r.json();
+}
+
+/* ============================ auth ============================ */
+async function doLogin(){
+  const err=document.getElementById('login-err');err.style.display='none';
+  try{
+    const r=await fetch(API+'/login',{method:'POST',
+      headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},
+      body:JSON.stringify({email:document.getElementById('li-email').value.trim(),
+        password:document.getElementById('li-pass').value})});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||'Login failed');
+    TOKEN=d.access_token;ROLE=d.role;NAME=d.full_name;
+    localStorage.setItem('ja_token',TOKEN);localStorage.setItem('ja_role',ROLE);localStorage.setItem('ja_name',NAME);
+    enterApp();
+  }catch(e){err.textContent=e.message;err.style.display='block';}
+}
+function logout(){localStorage.clear();TOKEN='';location.reload();}
+const canAct = ()=> ROLE==='admin'||ROLE==='approver';
+
+function enterApp(){
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('app').style.display='block';
+  document.getElementById('who-name').textContent=NAME;
+  document.getElementById('who-av').textContent=(NAME||'U')[0].toUpperCase();
+  document.getElementById('who-role').textContent={admin:'Administrator',approver:'Approver',viewer:'Viewer'}[ROLE]||ROLE;
+  if(!canAct())document.getElementById('btn-add').style.display='none';
+  buildNav();nav('overview');loadLeads();
+}
+
+const NAVS=[
+  ['overview','Overview','home'],['kanban','Pipeline Board','kanban'],['leads','Leads','users2'],
+  ['sheet','Sheet','table'],['bookings','Bookings','cal'],['docs','Documents','doc'],
+  ['approvals','Approvals','check2'],['bulk','Bulk Send','send'],['logs','Activity','clock'],
+  ['users','Users','shield'],
+];
+function buildNav(){
+  document.getElementById('nav').innerHTML=NAVS
+    .filter(([v])=>!(v==='users'&&ROLE!=='admin')&&!(v==='bulk'&&!canAct()))
+    .map(([v,l,i])=>`<a data-view="${v}" onclick="nav('${v}')">${ic(i)}<span>${l}</span>${v==='approvals'?'<span class="badge" id="apr-badge" style="display:none;"></span>':''}</a>`).join('');
+}
+function nav(v){
+  document.querySelectorAll('.nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===v));
+  NAVS.forEach(([x])=>{const el=document.getElementById('view-'+x);if(el)el.style.display=x===v?'block':'none';});
+  document.getElementById('page-title').innerHTML=ic(NAVS.find(([x])=>x===v)[2])+' '+NAVS.find(([x])=>x===v)[1];
+  ({overview:loadOverview,kanban:renderKanban,leads:renderLeadsView,sheet:loadSheet,bookings:loadBookings,
+    docs:renderDocs,approvals:loadApprovals,bulk:renderBulk,logs:loadLogs,users:loadUsers}[v]||(()=>{}))();
+}
+function refreshAll(){loadLeads().then(()=>{const v=document.querySelector('.nav a.active');if(v)nav(v.dataset.view);});}
+function globalSearch(){const a=document.querySelector('.nav a.active');
+  if(a&&a.dataset.view!=='leads')nav('leads');renderLeadsView();}
+
+/* ============================ overview ============================ */
+async function loadOverview(){
+  try{OV=await api('/overview');}catch(e){return;}
+  const t=OV.totals;
+  const cardDefs=[
+    ['Total Leads',t.leads,'users2','#dbeafe','#1e40af'],['Emails Sent',t.emails_sent,'mail','#e0e7ff','#4338ca'],
+    ['Replied',t.replied,'inbox','#dcfce7','#15803d'],['Booked',t.booked,'cal','#fef3c7','#b45309'],
+    ['Onboarding',t.onboarding,'zap','#ede9fe','#6d28d9'],['NDA Signed',t.nda_signed,'doc','#dcfce7','#15803d'],
+    ['Agreements',t.agreement_signed,'check2','#dcfce7','#15803d'],['Approvals Due',t.pending_approvals,'clock','#fee2e2','#b91c1c'],
+  ];
+  document.getElementById('view-overview').innerHTML=`
+    <div class="cards">${cardDefs.map(c=>`<div class="card">
+      <div class="ico" style="background:${c[3]};color:${c[4]};">${ic(c[2])}</div>
+      <div><div class="num">${c[1]}</div><div class="lbl">${c[0]}</div></div></div>`).join('')}</div>
+    <div class="grid3">
+      <div class="panel"><h3>${ic('chart')} 14-Day Activity</h3><canvas id="ch-bar" height="105"></canvas></div>
+      <div class="panel"><h3>${ic('chart')} Lead Status Split</h3><canvas id="ch-pie" height="105"></canvas></div>
+    </div>
+    <div class="grid2">
+      <div class="panel"><h3>${ic('zap')} Stage Funnel</h3><div id="ov-funnel"></div></div>
+      <div class="panel"><h3>${ic('link')} Integrations</h3><div class="intg" id="ov-intg"></div>
+        <p style="font-size:11px;color:var(--mut);margin-top:12px;">Sheet: <b>${esc(OV.sheet_name)}</b> · Updated ${esc(OV.generated_at)}</p></div>
+    </div>`;
+  const max=Math.max(...OV.funnel,1);
+  document.getElementById('ov-funnel').innerHTML=OV.stages.map((s,i)=>
+    `<div class="bar-row"><div class="bl">${esc(s)}</div><div class="bar">
+     <div class="fill" style="width:${Math.max(OV.funnel[i]/max*100,OV.funnel[i]?8:0)}%">${OV.funnel[i]||''}</div></div></div>`).join('');
+  document.getElementById('ov-intg').innerHTML=Object.entries(OV.integrations).map(([k,v])=>
+    `<div class="it">${ic('link','width:14px;height:14px;')}<span>${esc(k)}</span><span class="dot ${v?'on':'off'}"></span></div>`).join('');
+  const badge=document.getElementById('apr-badge');
+  if(badge){badge.style.display=t.pending_approvals?'inline-block':'none';badge.textContent=t.pending_approvals;}
+  drawCharts();
+}
+function drawCharts(){
+  if(typeof Chart==='undefined'||!OV)return;
+  Object.values(CHARTS).forEach(c=>c.destroy());CHARTS={};
+  const days=Object.keys(OV.daily), lbl=days.map(d=>d.slice(5));
+  CHARTS.bar=new Chart(document.getElementById('ch-bar'),{type:'bar',
+    data:{labels:lbl,datasets:[
+      {label:'Emails',data:days.map(d=>OV.daily[d].sent),backgroundColor:'#1a56db',borderRadius:4},
+      {label:'Replies',data:days.map(d=>OV.daily[d].replied),backgroundColor:'#16a34a',borderRadius:4},
+      {label:'Bookings',data:days.map(d=>OV.daily[d].booked),backgroundColor:'#d97706',borderRadius:4}]},
+    options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:11,font:{size:11}}}},
+      scales:{x:{grid:{display:false},ticks:{font:{size:10}}},y:{beginAtZero:true,ticks:{precision:0,font:{size:10}}}}}});
+  const st=OV.by_status, keys=Object.keys(st);
+  const colors={NEW:'#94a3b8',SENT:'#1a56db',REPLIED:'#16a34a',BOOKED:'#d97706',FAILED:'#dc2626',
+    INVALID_EMAIL:'#7c3aed',JOB_CHANGED:'#0891b2'};
+  CHARTS.pie=new Chart(document.getElementById('ch-pie'),{type:'doughnut',
+    data:{labels:keys,datasets:[{data:keys.map(k=>st[k]),backgroundColor:keys.map(k=>colors[k]||'#64748b'),borderWidth:2}]},
+    options:{responsive:true,cutout:'62%',plugins:{legend:{position:'bottom',labels:{boxWidth:11,font:{size:11}}}}}});
+}
+
+/* ============================ leads ============================ */
+async function loadLeads(){try{LEADS=await api('/leads');}catch(e){LEADS=[];}return LEADS;}
+function chip(s){const m={NEW:'c-gray',SENT:'c-blue',REPLIED:'c-green',BOOKED:'c-green',FAILED:'c-red',
+  PENDING:'c-gray',FORM_SENT:'c-amber',SUBMITTED:'c-amber',UNDER_REVIEW:'c-amber',APPROVED:'c-green',
+  REJECTED:'c-red',TEAM_REVIEW:'c-amber',DRAFT_GENERATED:'c-amber',SENT_TO_LEAD:'c-blue',
+  SIGNED_RECEIVED:'c-purple',SIGN_UNDER_REVIEW:'c-purple',PROCEED_NEXT:'c-green',SIGN_REJECTED:'c-red',
+  DRAFT_REJECTED:'c-red'};return `<span class="chip ${m[s]||'c-gray'}">${esc(s||'—')}</span>`;}
+function steps(i){let h='<div class="steps">';for(let k=0;k<10;k++)h+=`<div class="step ${k<=i&&i>0?'done':''}"></div>`;return h+'</div>';}
+
+function renderLeadsView(){
+  const q=(document.getElementById('g-q').value||'').toLowerCase();
+  const rows=LEADS.filter(l=>!q||l.email.toLowerCase().includes(q)||(l.company||'').toLowerCase().includes(q));
+  document.getElementById('view-leads').innerHTML=`<div class="panel" style="overflow-x:auto;">
+    <table><thead><tr><th></th><th>Lead</th><th>Stage</th><th>Sent</th><th>Replied</th><th>Booked</th><th>Actions</th></tr></thead>
+    <tbody>${rows.map(l=>`<tr ${l.dropped?'style="opacity:.5;"':''}>
+      <td><button class="ibtn" title="View full details" onclick="openDrawer('${l.lead_id}')">${ic('eye')}</button></td>
+      <td><b>${esc(l.company)}</b>${l.dropped?' <span class="chip c-red">DROPPED</span>':''}<br>
+        <span style="color:var(--mut);font-size:12px;">${ic('mail','width:12px;height:12px;')} ${esc(l.email)}</span>
+        ${l.phone?`<span style="color:var(--mut);font-size:12px;margin-left:8px;">${ic('phone','width:12px;height:12px;')} ${esc(l.phone)}</span>`:''}</td>
+      <td><span class="chip c-blue">${esc(l.stage)}</span>${steps(l.stage_index)}</td>
+      <td style="font-size:12px;">${esc(l.sent_at)||'—'}${l.followups?`<br><span style="font-size:10.5px;color:var(--mut);">+${l.followups} follow-ups</span>`:''}</td>
+      <td style="font-size:12px;">${esc(l.replied_at)||'—'}</td>
+      <td style="font-size:12px;">${esc(l.booked_at)||'—'}${l.selected_slot?`<br><span style="font-size:10.5px;color:var(--mut);">${esc(l.selected_slot)}</span>`:''}</td>
+      <td>${leadActionBtns(l)}</td></tr>`).join('')||
+      '<tr><td colspan="7" style="text-align:center;color:var(--mut);padding:28px;">No leads found</td></tr>'}</tbody></table></div>`;
+}
+function leadActionBtns(l){
+  if(!canAct())return '<span style="font-size:11px;color:var(--mut);">view only</span>';
+  let h='';
+  if(!l.onboarding)h+=`<button class="ibtn" title="Start onboarding (send KYC)" onclick="leadAction('${l.lead_id}','start_onboarding')" style="color:var(--ok);border-color:#bbf7d0;">${ic('play')}</button>`;
+  else h+=`<button class="ibtn" title="Cancel onboarding" onclick="leadAction('${l.lead_id}','cancel_onboarding')" style="color:var(--warn);border-color:#fde68a;">${ic('x')}</button>`;
+  if(!l.dropped)h+=`<button class="ibtn" title="Drop lead (stop all emails)" onclick="leadAction('${l.lead_id}','drop')" style="color:var(--bad);border-color:#fecaca;">${ic('drop')}</button>`;
+  else h+=`<button class="ibtn" title="Restore lead" onclick="leadAction('${l.lead_id}','restore')">${ic('play')}</button>`;
+  return h;
+}
+async function leadAction(id,action){
+  const labels={start_onboarding:'Start onboarding (sends KYC form)?',cancel_onboarding:'Cancel onboarding for this lead?',
+    drop:'Drop this lead? No further emails will be sent.',restore:'Restore this lead?'};
+  if(!confirm(labels[action]))return;
+  try{const d=await api(`/lead/${id}/action`,{method:'POST',body:JSON.stringify({action})});
+    toast(d.message);await loadLeads();refreshAll();}catch(e){toast(e.message,false);}
+}
+
+/* ============================ drawer (lead detail) ============================ */
+async function openDrawer(id){
+  document.getElementById('drawer-wrap').style.display='block';
+  document.getElementById('drawer').innerHTML='<p style="color:var(--mut);">Loading…</p>';
+  let d;try{d=await api('/lead/'+id);}catch(e){document.getElementById('drawer').innerHTML=esc(e.message);return;}
+  const o=d.onboarding;
+  let h=`<div style="display:flex;gap:14px;align-items:flex-start;">
+    <div style="width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,var(--b600),var(--b800));
+      color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;flex:none;">
+      ${esc((d.company||'?')[0].toUpperCase())}</div>
+    <div style="flex:1;min-width:0;"><h2>${esc(d.company)}</h2>
+      <p style="font-size:12.5px;color:var(--mut);margin-top:4px;">${ic('mail','width:13px;height:13px;')} ${esc(d.email)}
+      ${d.phone?` · ${ic('phone','width:13px;height:13px;')} ${esc(d.phone)}`:''}
+      ${d.contact?` · ${ic('user','width:13px;height:13px;')} ${esc(d.contact)}`:''}</p>
+      <p style="margin-top:8px;"><span class="chip c-blue">${esc(d.stage)}</span> ${chip(d.status)}
+      ${d.dropped?'<span class="chip c-red">DROPPED</span>':''}</p>
+      <div style="margin-top:6px;">${steps(d.stage_index)}</div></div>
+    <button class="ibtn" onclick="closeDrawer()">${ic('x')}</button></div>`;
+  if(canAct()){h+=`<div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:9px;">`;
+    if(!o)h+=`<button class="btn btn-g" style="justify-content:center;" onclick="leadAction('${d.lead_id}','start_onboarding');closeDrawer()">${ic('play')} Start Onboarding</button>`;
+    else h+=`<button class="btn btn-w" style="justify-content:center;" onclick="leadAction('${d.lead_id}','cancel_onboarding');closeDrawer()">${ic('x')} Cancel Onboarding</button>`;
+    if(!d.dropped)h+=`<button class="btn btn-r" style="justify-content:center;" onclick="leadAction('${d.lead_id}','drop');closeDrawer()">${ic('drop')} Drop Lead</button>`;
+    else h+=`<button class="btn btn-o" style="justify-content:center;" onclick="leadAction('${d.lead_id}','restore');closeDrawer()">${ic('play')} Restore</button>`;
+    h+=`</div>`;}
+  h+=`<div class="dsec">${ic('clock')} Journey Timeline</div><div class="tl">${
+    (d.timeline||[]).map(t=>`<div class="ev"><b>${esc(t.label)}</b><span>${esc(t.at)}</span></div>`).join('')||
+    '<p style="font-size:12px;color:var(--mut);">No events yet</p>'}</div>`;
+  if(d.booked_at){h+=`<div class="dsec">${ic('cal')} Booking</div><div class="kv">
+    <div class="k">Booked At</div><div>${esc(d.booked_at)}</div>
+    <div class="k">Slot</div><div>${esc(d.selected_slot)||'—'}</div>
+    ${d.meeting_link?`<div class="k">Meeting Link</div><div><a href="${esc(d.meeting_link)}" target="_blank">Join ↗</a></div>`:''}
+    ${d.booking_id?`<div class="k">Booking ID</div><div style="font-family:monospace;font-size:11px;">${esc(d.booking_id)}</div>`:''}</div>`;}
+  if(d.kyc_data){h+=`<div class="dsec">${ic('shield')} KYC Data (as submitted)</div><div class="kv">${
+    Object.entries(d.kyc_data).map(([k,v])=>`<div class="k">${esc(k)}</div><div>${esc(v)}</div>`).join('')}</div>
+    <p style="font-size:11.5px;color:var(--mut);margin-top:6px;">Files: GST ${d.kyc_files&&d.kyc_files.gst?'✓ uploaded':'—'} ·
+    Incorporation ${d.kyc_files&&d.kyc_files.incorporation?'✓ uploaded':'—'}</p>`;}
+  if(o){h+=`<div class="dsec">${ic('doc')} Documents</div>
+    <div class="kv">
+      <div class="k">KYC</div><div>${chip(o.kyc_status)} <a href="${o.kyc_view_url}" target="_blank" style="font-size:11.5px;">view data ↗</a></div>
+      <div class="k">NDA</div><div>${chip(o.nda_status)}${o.nda_signed?' <span class="chip c-green">✓ SIGNED</span>':''}<br>
+        <a href="${o.nda_edit_url}" target="_blank" style="font-size:11.5px;">${canAct()?'edit & preview':'preview'} ↗</a> ·
+        <a onclick="navigator.clipboard.writeText('${o.nda_sign_url}');toast('NDA signing link copied')" style="font-size:11.5px;cursor:pointer;">copy sign link</a></div>
+      <div class="k">Agreement</div><div>${chip(o.agreement_status)}${o.agreement_signed?' <span class="chip c-green">✓ SIGNED</span>':''}<br>
+        <a href="${o.agreement_edit_url}" target="_blank" style="font-size:11.5px;">${canAct()?'edit & preview':'preview'} ↗</a> ·
+        <a onclick="navigator.clipboard.writeText('${o.agreement_sign_url}');toast('Agreement signing link copied')" style="font-size:11.5px;cursor:pointer;">copy sign link</a></div>
+    </div>`;
+    if(d.nda_signature)h+=`<p style="font-size:11.5px;color:var(--mut);margin-top:8px;">NDA signed by <b>${esc(d.nda_signature.signed_name)}</b> (${esc(d.nda_signature.designation||'—')}) at ${esc(d.nda_signature.signed_at)}</p>`;
+    if(d.agreement_signature)h+=`<p style="font-size:11.5px;color:var(--mut);">Agreement signed by <b>${esc(d.agreement_signature.signed_name)}</b> at ${esc(d.agreement_signature.signed_at)}</p>`;}
+  if(d.summary)h+=`<div class="dsec">${ic('doc')} Summary</div><p style="font-size:12.5px;color:#334155;line-height:1.6;">${esc(d.summary)}</p>`;
+  document.getElementById('drawer').innerHTML=h;
+}
+function closeDrawer(){document.getElementById('drawer-wrap').style.display='none';}
+
+/* ============================ kanban ============================ */
+const KPAL=[['#dbe3ee','#334155'],['#a8cdf7','#0b3a8c'],['#a9e8c4','#14532d'],['#8fe3ab','#14532d'],
+  ['#fbdf8f','#7c4a03'],['#f9d06b','#713f12'],['#d4c7fb','#4c1d95'],['#bfa8f9','#3b0b8c'],
+  ['#a5dcf6','#0c4a6e'],['#9ef0c0','#065f46']];
+function renderKanban(){
+  const stages=OV?OV.stages:['New Lead','Email Sent','Replied','Meeting Booked','KYC Form Sent','KYC Approved','NDA Sent','NDA Signed','Agreement Sent','Completed'];
+  document.getElementById('view-kanban').innerHTML=`<div class="kanban">${stages.map((s,i)=>{
+    const cards=LEADS.filter(l=>l.stage_index===i&&!l.dropped);
+    const [bg,fg]=KPAL[i]||KPAL[0];
+    return `<div class="kcol">
+      <div class="khead" style="background:${bg};color:${fg};">${esc(s)}<span class="cnt">${cards.length}</span></div>
+      <div class="kbody">${cards.map(l=>`<div class="kcard" onclick="openDrawer('${l.lead_id}')">
+        <b>${esc(l.company)}</b><span>${esc(l.contact||'')}</span><span>${esc(l.email)}</span>
+        <div class="kmeta">${l.booked_at?`<span class="chip c-green" style="font-size:9.5px;">${ic('cal','width:11px;height:11px;')} booked</span>`:''}
+          ${l.onboarding&&l.onboarding.nda_signed?'<span class="chip c-purple" style="font-size:9.5px;">NDA ✓</span>':''}
+          ${l.followups?`<span class="chip c-gray" style="font-size:9.5px;">+${l.followups} fup</span>`:''}</div>
+        ${kcardActions(l)}</div>`).join('')||
+      '<p style="font-size:11px;color:#94a3b8;text-align:center;padding:10px;">No leads</p>'}</div></div>`;}).join('')}</div>`;
+}
+function kcardActions(l){
+  let h=`<div class="kact" onclick="event.stopPropagation()">`;
+  h+=`<button title="View details" onclick="openDrawer('${l.lead_id}')">${ic('eye','width:13px;height:13px;')}</button>`;
+  if(canAct()){
+    if(!l.onboarding)h+=`<button title="Start onboarding (send KYC)" style="color:var(--ok);" onclick="leadAction('${l.lead_id}','start_onboarding')">${ic('play','width:13px;height:13px;')}</button>`;
+    else h+=`<button title="Cancel onboarding" style="color:var(--warn);" onclick="leadAction('${l.lead_id}','cancel_onboarding')">${ic('x','width:13px;height:13px;')}</button>`;
+    h+=`<button title="Drop lead" style="color:var(--bad);" onclick="leadAction('${l.lead_id}','drop')">${ic('drop','width:13px;height:13px;')}</button>`;
+  }
+  return h+'</div>';
+}
+
+/* ============================ sheet (google-sheet style) ============================ */
+let SHEET=null;
+async function loadSheet(){
+  document.getElementById('view-sheet').innerHTML='<div class="panel"><p style="color:var(--mut);">Loading sheet…</p></div>';
+  try{SHEET=await api('/sheet');}catch(e){
+    document.getElementById('view-sheet').innerHTML=`<div class="panel"><p style="color:var(--bad);">${esc(e.message)}</p></div>`;return;}
+  renderSheet();
+}
+function renderSheet(){
+  const ed=canAct();
+  const cell=(v,ri)=>`<td><input value="${esc(v)}" ${ed?'':'readonly'} oninput="sheetDirty(${ri})"></td>`;
+  let rows=SHEET.rows.map((r,ri)=>{
+    const full=[...r];while(full.length<SHEET.keys.length)full.push('');
+    return `<tr id="gsr-${ri}"><td class="rn">${ri+2}</td>${full.map(v=>cell(v,ri)).join('')}
+      <td class="act"><button class="btn btn-g" id="gss-${ri}" style="padding:4px 10px;font-size:10.5px;display:none;"
+        onclick="saveSheetRow(${ri})">${ic('save','width:12px;height:12px;')} Save</button></td></tr>`;
+  }).join('');
+  document.getElementById('view-sheet').innerHTML=`
+  <div class="panel" style="padding:14px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <h3 style="margin:0;">${ic('table')} ${esc(SHEET.worksheet)} — live Google Sheet</h3>
+    <span style="font-size:11.5px;color:var(--mut);">Edit a cell and press Save — it writes to the Google Sheet, the Leads database and Zoho CRM together. No duplicates (matched by email).</span>
+    <span style="margin-left:auto;display:flex;gap:8px;">
+      ${ed?`<button class="btn btn-p" onclick="sheetAddRow()">${ic('plus')} Add Row</button>`:''}
+      <a class="btn btn-o" href="${SHEET.sheet_url}" target="_blank">${ic('ext')} Open in Google Sheets</a>
+      <button class="btn btn-o" onclick="loadSheet()">↻</button></span></div>
+  <div class="gs-wrap"><table class="gs"><thead><tr><th style="min-width:36px;width:36px;"></th>${
+    SHEET.headers.map(h=>`<th>${esc(h)}</th>`).join('')}<th style="min-width:84px;"></th></tr></thead>
+    <tbody id="gs-body">${rows}</tbody></table></div>`;
+}
+function sheetDirty(ri){
+  const tr=document.getElementById('gsr-'+ri);if(!tr)return;
+  tr.classList.add('dirty');
+  const b=document.getElementById('gss-'+ri);if(b)b.style.display='inline-flex';
+}
+function sheetAddRow(){
+  const body=document.getElementById('gs-body');
+  const ri=body.querySelectorAll('tr').length;
+  const tr=document.createElement('tr');tr.id='gsr-'+ri;tr.className='dirty';
+  tr.innerHTML=`<td class="rn">＋</td>${SHEET.keys.map(()=>`<td><input oninput="sheetDirty(${ri})"></td>`).join('')}
+    <td class="act"><button class="btn btn-g" id="gss-${ri}" style="padding:4px 10px;font-size:10.5px;"
+      onclick="saveSheetRow(${ri})">${ic('save','width:12px;height:12px;')} Save</button></td>`;
+  body.appendChild(tr);
+  tr.scrollIntoView({behavior:'smooth',block:'center'});
+  tr.querySelector('input').focus();
+}
+async function saveSheetRow(ri){
+  const tr=document.getElementById('gsr-'+ri);if(!tr)return;
+  const inputs=tr.querySelectorAll('input');
+  const values={};SHEET.keys.forEach((k,i)=>{if(k)values[k]=inputs[i]?inputs[i].value:'';});
+  const btn=document.getElementById('gss-'+ri);btn.disabled=true;btn.textContent='Saving…';
+  try{const d=await api('/sheet',{method:'POST',body:JSON.stringify({values})});
+    toast(d.message);tr.classList.remove('dirty');btn.style.display='none';btn.disabled=false;
+    btn.innerHTML='Save';loadLeads();}
+  catch(e){toast(e.message,false);btn.disabled=false;btn.innerHTML='Save';}
+}
+
+/* ============================ bookings ============================ */
+let BOOK=null,BVIEW='calendar';
+async function loadBookings(){
+  const now=new Date();if(!CAL.y){CAL.y=now.getFullYear();CAL.m=now.getMonth()+1;}
+  try{BOOK=await api(`/bookings?year=${CAL.y}&month=${CAL.m}`);}catch(e){return;}
+  renderBookings();
+}
+function calMove(d){CAL.m+=d;if(CAL.m>12){CAL.m=1;CAL.y++;}if(CAL.m<1){CAL.m=12;CAL.y--;}renderBookings();}
+function renderBookings(){
+  if(!BOOK)return;
+  const mn=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  let h=`<div class="panel"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    <div class="calhead" style="margin:0;">
+      <button class="ibtn" onclick="calMove(-1)">${ic('chevL')}</button>
+      <h4>${mn[CAL.m-1]} ${CAL.y}</h4>
+      <button class="ibtn" onclick="calMove(1)">${ic('chevR')}</button></div>
+    <div class="seg"><button class="${BVIEW==='calendar'?'on':''}" onclick="BVIEW='calendar';renderBookings()">Calendar</button>
+      <button class="${BVIEW==='grid'?'on':''}" onclick="BVIEW='grid';renderBookings()">Grid</button></div></div>
+    <p style="font-size:11.5px;color:var(--mut);margin-top:8px;">Organizer: <b>${esc(BOOK.organizer)}</b> ·
+      <span class="chip c-blue">booking</span> <span class="chip c-green">open slots</span>
+      <span class="chip c-amber">holiday</span> <span class="chip c-red">blocked</span>
+      ${canAct()?' · click the ⊘ on a day to block/unblock it':''}</p></div>`;
+  if(BVIEW==='calendar'){
+    const first=new Date(CAL.y,CAL.m-1,1),start=(first.getDay()+6)%7,dim=new Date(CAL.y,CAL.m,0).getDate();
+    const today=new Date().toISOString().slice(0,10);
+    h+=`<div class="panel"><div class="cal">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<div class="dow">${d}</div>`).join('')}`;
+    for(let i=0;i<start;i++)h+=`<div class="day out"></div>`;
+    for(let d=1;d<=dim;d++){
+      const ds=`${CAL.y}-${String(CAL.m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const dow=new Date(CAL.y,CAL.m-1,d).getDay(),wkd=dow===0||dow===6;
+      const hol=BOOK.holidays[ds],blk=BOOK.blocked_days.includes(ds);
+      const bks=BOOK.bookings.filter(b=>b.date===ds),open=BOOK.open_slots[ds]||0;
+      h+=`<div class="day ${wkd?'wkd':''} ${hol?'hol':''} ${blk?'blk':''} ${ds===today?'today':''}">
+        <span class="dn">${d}</span>
+        ${canAct()?`<button class="blkbtn" title="${blk?'Unblock day':'Block day (holiday)'}" onclick="dayBlock('${ds}',${!blk})">${ic('ban','width:12px;height:12px;')}</button>`:''}
+        ${hol?`<span class="tag">${esc(hol)}</span>`:''}${blk&&!hol?'<span class="tag" style="color:#b91c1c;">Blocked</span>':''}
+        ${bks.map(b=>`<span class="bk" title="${esc(b.company)} — ${esc(b.slot||b.time)}" onclick="openDrawer('${b.lead_id}')">${b.time} ${esc(b.company)}</span>`).join('')}
+        ${open?`<span class="sl">${open} open</span>`:''}</div>`;
+    }
+    h+=`</div></div>`;
+  }else{
+    h+=`<div class="panel" style="overflow-x:auto;"><table><thead><tr><th></th><th>Company</th><th>Date</th><th>Time</th><th>Slot</th><th>Meeting</th></tr></thead><tbody>${
+      BOOK.bookings.map(b=>`<tr><td><button class="ibtn" onclick="openDrawer('${b.lead_id}')">${ic('eye')}</button></td>
+        <td><b>${esc(b.company)}</b><br><span style="font-size:11.5px;color:var(--mut);">${esc(b.email)}</span></td>
+        <td>${esc(b.date)}</td><td>${esc(b.time)}</td><td style="font-size:12px;">${esc(b.slot)||'—'}</td>
+        <td>${b.meeting_link?`<a href="${esc(b.meeting_link)}" target="_blank">Join ↗</a>`:'—'}</td></tr>`).join('')||
+      '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:24px;">No bookings yet</td></tr>'}</tbody></table></div>`;
+  }
+  document.getElementById('view-bookings').innerHTML=h;
+}
+async function dayBlock(date,block){
+  try{const d=await api('/day-block',{method:'POST',body:JSON.stringify({date,block})});toast(d.message);loadBookings();}
+  catch(e){toast(e.message,false);}
+}
+
+/* ============================ documents ============================ */
+function renderDocs(){
+  const rows=LEADS.filter(l=>l.onboarding);
+  document.getElementById('view-docs').innerHTML=`<div class="panel" style="overflow-x:auto;">
+    <table><thead><tr><th>Company</th><th>KYC</th><th>NDA</th><th>Agreement</th></tr></thead><tbody>${
+    rows.map(l=>{const o=l.onboarding;return `<tr>
+      <td><b>${esc(l.company)}</b><br><span style="font-size:11.5px;color:var(--mut);">${esc(l.email)}</span><br>
+        <span class="chip ${o.company_type==='overseas'?'c-amber':'c-blue'}">${o.company_type==='overseas'?'Overseas':'Indian'}</span></td>
+      <td>${chip(o.kyc_status)}<br><a class="btn btn-o" style="padding:5px 11px;font-size:11px;margin-top:5px;" target="_blank" href="${o.kyc_view_url}">${ic('eye')} View</a></td>
+      <td>${docCell(o,'nda')}</td><td>${docCell(o,'agreement')}</td></tr>`;}).join('')||
+    '<tr><td colspan="4" style="text-align:center;color:var(--mut);padding:28px;">No onboarding records yet</td></tr>'}</tbody></table></div>`;
+}
+function docCell(o,k){
+  let h=chip(o[k+'_status']);
+  if(o[k+'_signed'])h+=' <span class="chip c-green">✓ SIGNED</span>';
+  h+=`<br><a class="btn ${canAct()?'btn-p':'btn-o'}" style="padding:5px 11px;font-size:11px;margin-top:5px;" target="_blank" href="${o[k+'_edit_url']}">${ic(canAct()?'edit':'eye')} ${canAct()?'Edit & Preview':'Preview'}</a>
+    <button class="btn btn-o" style="padding:5px 11px;font-size:11px;margin-top:5px;" onclick="navigator.clipboard.writeText('${o[k+'_sign_url']}');toast('Signing link copied')">${ic('copy')} Sign Link</button>`;
+  return h;
+}
+
+/* ============================ approvals ============================ */
+async function loadApprovals(){
+  let list=[];try{list=await api('/approvals');}catch(e){}
+  document.getElementById('view-approvals').innerHTML=`<div class="panel" style="overflow-x:auto;">
+    <h3>${ic('check2')} Pending Approvals — ${list.length}</h3>
+    <table><thead><tr><th>Type</th><th>Company</th><th>Waiting Since</th><th>Review</th><th>Decision</th></tr></thead><tbody>${
+    list.map(a=>`<tr>
+      <td><span class="chip ${a.kind==='kyc'?'c-amber':a.kind==='nda_draft'?'c-purple':'c-blue'}">${esc(a.label)}</span></td>
+      <td><b>${esc(a.company)}</b><br><span style="font-size:11.5px;color:var(--mut);">${esc(a.email)}</span></td>
+      <td style="font-size:12px;">${esc(a.since)||'—'}</td>
+      <td><a class="btn btn-o" style="padding:5px 12px;font-size:11px;" target="_blank" href="${a.view_url}">${ic('eye')} Open</a></td>
+      <td>${canAct()?`
+        <button class="btn btn-g" style="padding:5px 12px;font-size:11px;" onclick="approve('${a.onboarding_id}','${a.kind}','approve')">${ic('check2')} Approve${a.kind!=='kyc'?' & Send':''}</button>
+        <button class="btn btn-r" style="padding:5px 12px;font-size:11px;" onclick="approveReject('${a.onboarding_id}','${a.kind}')">${ic('x')} Reject</button>`
+        :'<span style="font-size:11px;color:var(--mut);">approver only</span>'}</td></tr>`).join('')||
+    '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:28px;">Nothing pending — all caught up ✓</td></tr>'}</tbody></table></div>`;
+}
+async function approve(id,kind,action,notes=''){
+  if(action==='approve'&&!confirm(kind==='kyc'?'Approve this KYC? NDA will be generated.':'Approve and send to the lead for e-signature?'))return;
+  try{const d=await api('/approvals/act',{method:'POST',body:JSON.stringify({onboarding_id:id,kind,action,notes})});
+    toast(d.message);loadApprovals();loadLeads();}catch(e){toast(e.message,false);}
+}
+function approveReject(id,kind){
+  const notes=prompt('Reason for rejection (sent to the lead for KYC):','');
+  if(notes===null)return;approve(id,kind,'reject',notes);
+}
+
+/* ============================ bulk ============================ */
+function renderBulk(){
+  document.getElementById('view-bulk').innerHTML=`<div class="panel" style="max-width:640px;">
+    <h3>${ic('send')} Bulk Send — Start Onboarding</h3>
+    <p style="font-size:12.5px;color:var(--mut);margin-bottom:10px;">Paste any number of email addresses (one per line or comma separated).
+      Each lead gets the KYC form email. Existing pipeline leads are skipped — no duplicates.</p>
+    <div class="fld"><textarea id="bulk-emails" rows="7" placeholder="ceo@acme.com&#10;ops@skyparts.io"></textarea></div>
+    <button class="btn btn-p" onclick="bulkSend()">${ic('send')} Start Onboarding for All</button>
+    <div class="msg" id="bulk-msg"></div><div id="bulk-results" style="margin-top:14px;"></div></div>`;
+}
+async function bulkSend(){
+  const m=document.getElementById('bulk-msg');m.className='msg';
+  try{const d=await api('/bulk-start',{method:'POST',body:JSON.stringify({emails:document.getElementById('bulk-emails').value})});
+    m.className='msg ok';m.textContent=`Started: ${d.started} · Skipped (duplicates): ${d.skipped} · Errors: ${d.errors}`;
+    document.getElementById('bulk-results').innerHTML='<table><thead><tr><th>Email</th><th>Status</th><th>Detail</th></tr></thead><tbody>'+
+      d.results.map(r=>`<tr><td>${esc(r.email)}</td><td><span class="chip ${r.status==='started'?'c-green':r.status==='skipped'?'c-amber':'c-red'}">${r.status}</span></td>
+      <td style="font-size:12px;color:var(--mut);">${esc(r.detail)}</td></tr>`).join('')+'</tbody></table>';
+    loadLeads();}catch(e){m.className='msg err';m.textContent=e.message;}
+}
+
+/* ============================ logs ============================ */
+async function loadLogs(){
+  let d=[];try{d=await api('/logs?limit=150');}catch(e){}
+  document.getElementById('view-logs').innerHTML=`<div class="panel" style="overflow-x:auto;">
+    <table><thead><tr><th>Time</th><th>Event</th><th>Company</th><th>Email</th><th>Detail</th></tr></thead><tbody>${
+    d.map(r=>`<tr><td style="white-space:nowrap;font-size:11.5px;color:var(--mut);">${esc(r.ts)}</td>
+      <td><span class="chip c-blue" style="font-size:9.5px;">${esc(r.event)}</span></td>
+      <td style="font-size:12px;">${esc(r.company)}</td><td style="font-size:12px;color:var(--mut);">${esc(r.email)}</td>
+      <td style="font-size:12px;">${esc(r.detail)}</td></tr>`).join('')||
+    '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:24px;">No events yet</td></tr>'}</tbody></table></div>`;
+}
+
+/* ============================ users ============================ */
+async function loadUsers(){
+  if(ROLE!=='admin')return;
+  let d=[];try{d=await api('/users');}catch(e){}
+  document.getElementById('view-users').innerHTML=`
+  <div style="display:grid;grid-template-columns:340px 1fr;gap:20px;align-items:start;">
+    <div class="panel"><h3>${ic('plus')} Add User</h3>
+      <div class="fld"><label>Full Name</label><input id="u-name"></div>
+      <div class="fld"><label>Email</label><input id="u-email" type="email"></div>
+      <div class="fld"><label>Password</label><input id="u-pass" type="text"></div>
+      <div class="fld"><label>Role</label><select id="u-role">
+        <option value="viewer">Viewer — read-only tracking</option>
+        <option value="approver">Approver — can approve KYC/NDA/Agreement + lead actions</option>
+        <option value="admin">Admin — full access incl. user management</option></select></div>
+      <div class="msg" id="u-msg"></div>
+      <button class="btn btn-p" onclick="createUser()">${ic('plus')} Create User</button></div>
+    <div class="panel"><h3>${ic('users2')} All Users</h3>
+      <table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Created</th><th></th></tr></thead><tbody>${
+      d.map(u=>`<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.email)}</td>
+        <td><span class="chip ${u.role==='admin'?'c-purple':u.role==='approver'?'c-blue':'c-gray'}">${esc(u.role)}</span></td>
+        <td style="font-size:12px;color:var(--mut);">${esc(u.created_at)}</td>
+        <td><button class="ibtn" style="color:var(--bad);border-color:#fecaca;" title="Remove"
+          onclick="deleteUser('${u.id}','${esc(u.email)}')">${ic('drop')}</button></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+async function createUser(){
+  const m=document.getElementById('u-msg');m.className='msg';
+  try{const d=await api('/users',{method:'POST',body:JSON.stringify({
+      full_name:document.getElementById('u-name').value,email:document.getElementById('u-email').value,
+      password:document.getElementById('u-pass').value,role:document.getElementById('u-role').value})});
+    m.className='msg ok';m.textContent=d.message;loadUsers();}
+  catch(e){m.className='msg err';m.textContent=e.message;}
+}
+async function deleteUser(id,email){
+  if(!confirm('Remove user '+email+'?'))return;
+  try{await api('/users/'+id,{method:'DELETE'});toast('User removed');loadUsers();}catch(e){toast(e.message,false);}
+}
+
+/* ============================ add-lead modal ============================ */
+function openModal(){
+  document.getElementById('modal-wrap').style.display='flex';
+  document.getElementById('modal').innerHTML=`<h3>${ic('plus')} Add Lead</h3>
+    <div class="fld"><label>Email *</label><input id="m-email" type="email" placeholder="ceo@acme.com"></div>
+    <div class="fld"><label>Company Name</label><input id="m-company" placeholder="Acme Aerospace Pvt Ltd"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="fld"><label>Contact Person</label><input id="m-contact"></div>
+      <div class="fld"><label>Phone</label><input id="m-phone"></div></div>
+    <div class="fld"><label>Summary / Notes</label><textarea id="m-summary" rows="2"></textarea></div>
+    <label style="display:flex;gap:9px;align-items:center;font-size:13px;margin:4px 0 14px;cursor:pointer;">
+      <input type="checkbox" id="m-start" style="width:16px;height:16px;"> Start onboarding immediately (send KYC form)</label>
+    <div class="msg" id="m-msg"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-o" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-p" onclick="addLead()">${ic('plus')} Add Lead</button></div>
+    <p style="font-size:11px;color:var(--mut);margin-top:12px;">Automatically synced to Zoho CRM and appended to the Google Sheet.</p>`;
+}
+function closeModal(){document.getElementById('modal-wrap').style.display='none';}
+async function addLead(){
+  const m=document.getElementById('m-msg');m.className='msg';
+  try{const d=await api('/add-lead',{method:'POST',body:JSON.stringify({
+      email:document.getElementById('m-email').value,company_name:document.getElementById('m-company').value,
+      contact_name:document.getElementById('m-contact').value,phone:document.getElementById('m-phone').value,
+      summary:document.getElementById('m-summary').value,start_onboarding:document.getElementById('m-start').checked})});
+    toast(d.message);closeModal();await loadLeads();refreshAll();}
+  catch(e){m.className='msg err';m.textContent=e.message;}
+}
+
+/* ============================ boot ============================ */
+if(TOKEN)enterApp();
+setInterval(()=>{if(TOKEN){const a=document.querySelector('.nav a.active');
+  if(a&&a.dataset.view==='overview')loadOverview();}},60000);
+</script>
+</body>
+</html>

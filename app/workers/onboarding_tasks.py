@@ -385,63 +385,28 @@ async def _generate_nda_draft(db: AsyncSession, onboarding_id: str) -> None:
 
     extra = (kyc.kyc_verification_result or {}).get("extra_fields", {})
 
-    def _mf(*keys):
-        for k in keys:
-            v = extra.get(k)
-            if v:
-                return v
-        return ""
+    # Pre-fill the official PDF template fields from KYC and store for the team editor
+    import json as _json
 
-    merge_fields: dict = {
-        "company_name":          kyc.company_name,
-        "contact_name":          kyc.contact_name or (lead.contact_name if lead else "") or company_name,
-        "contact_number":        kyc.contact_number or "",
-        "effective_date":        now.strftime("%d %B %Y"),
-        "signatory_email":       lead.email if lead else "",
-        "entity_type":           _mf("entity_type"),
-        "date_of_incorporation": _mf("date_of_incorporation"),
-        "registered_address":    _mf("registered_address"),
-        "city":                  _mf("city"),
-        "state":                 _mf("state"),
-        "nature_of_business":    _mf("nature_of_business"),
-        "signatory1_designation":_mf("signatory1_designation"),
+    from app.services.onboarding_email import make_doc_edit_url
+    from app.services.pdf_documents import default_replacements, kyc_fields_from_submission
+
+    fields = kyc_fields_from_submission(
+        company_name=kyc.company_name,
+        cin_number=kyc.cin_number,
+        extra=extra or {},
+        is_overseas=is_overseas,
+    )
+    doc_data = {
+        "replacements": default_replacements("nda", fields),
+        "signatory_name": kyc.contact_name or (lead.contact_name if lead else "") or company_name,
+        "signatory_email": lead.email if lead else "",
     }
-    if not is_overseas:
-        merge_fields.update({k: v for k, v in {
-            "pan_number":   kyc.pan_number or "",
-            "gstin_number": kyc.gstin_number or "",
-            "cin_number":   kyc.cin_number or "",
-        }.items() if v})
-    else:
-        merge_fields.update({k: v for k, v in {
-            "country_of_incorporation": _mf("country_of_incorporation"),
-            "company_reg_number":       _mf("company_reg_number"),
-            "tax_id_tin":               _mf("tax_id_tin"),
-            "lei_number":               _mf("lei_number"),
-            "country":                  _mf("country"),
-            "signatory1_nationality":   _mf("signatory1_nationality"),
-            "signatory1_passport_id":   _mf("signatory1_passport_id"),
-        }.items() if v})
-
-    # Create Zoho Contracts NDA (without submitting — team reviews first)
+    rec.nda_draft_content = _json.dumps(doc_data, ensure_ascii=False)
+    view_link = make_doc_edit_url(onboarding_id, "nda")
     contract_id = ""
-    view_link = ""
-    try:
-        from app.services.zoho_contracts import prepare_nda_contract
-        contract_id, view_link = prepare_nda_contract(
-            merge_fields=merge_fields,
-            is_overseas=is_overseas,
-            signatory_name=merge_fields.get("contact_name") or company_name,
-            signatory_email=merge_fields.get("signatory_email") or (lead.email if lead else ""),
-            company_name=company_name,
-        )
-        rec.nda_zoho_contract_id = contract_id
-        rec.nda_draft_content = view_link  # store view link for later use
-        log_pipeline("NDA_CONTRACT_CREATED", company=company_name,
-                     detail=f"Zoho Contracts NDA created. contract_id={contract_id}")
-    except Exception as _ce:
-        logger.warning("nda_zoho_contracts_create_failed", error=str(_ce))
-        # Leave nda_draft_content empty; _send_nda_to_lead will fall back to HTML NDA
+    log_pipeline("NDA_DRAFT_FILLED", company=company_name,
+                 detail=f"{nda_label} PDF pre-filled from KYC — pending team review")
 
     rec.nda_status = DocumentStatus.TEAM_REVIEW
     rec.nda_status_display = f"NDA Ready — Pending Team Review ({_fmt(now)})"
@@ -497,90 +462,54 @@ async def _send_nda_to_lead(db: AsyncSession, onboarding_id: str) -> None:
     kyc = kyc_result.scalars().first()
     extra = (kyc.kyc_verification_result or {}).get("extra_fields", {}) if kyc else {}
 
-    def _mf(*keys):
-        for k in keys:
-            v = extra.get(k)
-            if v:
-                return v
-        return ""
+    company_name = (kyc.company_name if kyc else None) or lead.business_name
+    contact_name = (kyc.contact_name if kyc else None) or lead.contact_name or lead.business_name
 
-    merge_fields: dict = {
-        "company_name":          (kyc.company_name if kyc else None) or lead.business_name,
-        "contact_name":          (kyc.contact_name if kyc else None) or lead.contact_name or lead.business_name,
-        "contact_number":        (kyc.contact_number if kyc else "") or "",
-        "effective_date":        now.strftime("%d %B %Y"),
-        "signatory_email":       lead.email,
-        "entity_type":           _mf("entity_type"),
-        "date_of_incorporation": _mf("date_of_incorporation"),
-        "registered_address":    _mf("registered_address"),
-        "city":                  _mf("city"),
-        "state":                 _mf("state"),
-        "nature_of_business":    _mf("nature_of_business"),
-        "signatory1_designation":_mf("signatory1_designation"),
-    }
-    if not is_overseas:
-        merge_fields.update({k: v for k, v in {
-            "pan_number":   (kyc.pan_number or "") if kyc else "",
-            "gstin_number": (kyc.gstin_number or "") if kyc else "",
-            "cin_number":   (kyc.cin_number or "") if kyc else "",
-        }.items() if v})
-    else:
-        merge_fields.update({k: v for k, v in {
-            "country_of_incorporation": _mf("country_of_incorporation"),
-            "company_reg_number":       _mf("company_reg_number"),
-            "tax_id_tin":               _mf("tax_id_tin"),
-            "lei_number":               _mf("lei_number"),
-            "country":                  _mf("country"),
-            "signatory1_nationality":   _mf("signatory1_nationality"),
-            "signatory1_passport_id":   _mf("signatory1_passport_id"),
-        }.items() if v})
+    # Ensure PDF field data exists (built at draft stage; rebuild if missing)
+    import json as _json
 
-    company_name = merge_fields["company_name"]
-    contact_name = merge_fields["contact_name"]
+    from app.services.onboarding_email import make_doc_sign_url, send_document_sign_email
+    from app.services.pdf_documents import default_replacements, kyc_fields_from_submission
 
-    # Submit via Zoho Contracts and get signing link
-    contract_id = rec.nda_zoho_contract_id or ""
-    view_link = ""
-
-    if contract_id:
+    doc_data = None
+    if rec.nda_draft_content:
         try:
-            from app.services.zoho_contracts import get_contract_view_link, submit_contract
-            submit_contract(contract_id)
-            view_link = get_contract_view_link(contract_id) or ""
-            if view_link:
-                rec.nda_draft_content = view_link
-            log_pipeline("NDA_CONTRACT_SUBMITTED", company=company_name,
-                         detail=f"Zoho Contracts NDA submitted. contract_id={contract_id}")
-        except Exception as _ce:
-            logger.warning("nda_zoho_contracts_submit_failed", error=str(_ce))
+            _d = _json.loads(rec.nda_draft_content)
+            if isinstance(_d, dict) and "replacements" in _d:
+                doc_data = _d
+        except (ValueError, TypeError):
+            pass
+    if doc_data is None:
+        fields = kyc_fields_from_submission(
+            company_name=company_name,
+            cin_number=kyc.cin_number if kyc else None,
+            extra=extra or {},
+            is_overseas=is_overseas,
+        )
+        doc_data = {
+            "replacements": default_replacements("nda", fields),
+            "signatory_name": contact_name,
+            "signatory_email": lead.email,
+        }
+        rec.nda_draft_content = _json.dumps(doc_data, ensure_ascii=False)
 
-    if contract_id and view_link:
-        from app.services.onboarding_email import send_nda_contract_link
-        send_nda_contract_link(
-            to_email=lead.email,
-            lead_name=contact_name,
-            company_name=company_name,
-            contract_link=view_link,
-        )
-    else:
-        # Fallback: render HTML NDA and email inline
-        from app.services.nda_template import render_nda_html
-        from app.services.onboarding_email import send_nda_to_lead as _send_nda_email
-        nda_html = render_nda_html(merge_fields, is_overseas)
-        _send_nda_email(
-            to_email=lead.email,
-            lead_name=contact_name,
-            company_name=company_name,
-            nda_content_html=nda_html,
-        )
+    sign_url = make_doc_sign_url(onboarding_id, "nda")
+    send_document_sign_email(
+        to_email=str(doc_data.get("signatory_email") or lead.email),
+        lead_name=str(doc_data.get("signatory_name") or contact_name),
+        company_name=company_name,
+        doc_type="nda",
+        sign_url=sign_url,
+    )
+    contract_id = ""
 
     rec.nda_status = DocumentStatus.SENT_TO_LEAD
     rec.nda_sent_at = now
-    rec.nda_status_display = f"NDA Sent to Lead ({_fmt(now)}) — Awaiting Signature via Zoho Contracts"
+    rec.nda_status_display = f"NDA Sent to Lead ({_fmt(now)}) — Awaiting E-Signature"
     await db.commit()
 
     log_pipeline("NDA_SENT", company=company_name, email=lead.email,
-                 detail="NDA sent via Zoho Contracts link.")
+                 detail="NDA signing link emailed to lead.")
 
     await _export_to_sheets(db, onboarding_id)
 
@@ -659,61 +588,28 @@ async def _generate_agreement_draft(db: AsyncSession, onboarding_id: str) -> Non
 
     extra = (kyc.kyc_verification_result or {}).get("extra_fields", {})
 
-    def _mf(*keys):
-        for k in keys:
-            v = extra.get(k)
-            if v:
-                return v
-        return ""
+    # Pre-fill the official PDF template fields from KYC and store for the team editor
+    import json as _json
 
-    merge_fields: dict = {
-        "company_name":          kyc.company_name,
-        "contact_name":          kyc.contact_name or (lead.contact_name if lead else "") or company_name,
-        "contact_number":        kyc.contact_number or "",
-        "effective_date":        now.strftime("%d %B %Y"),
-        "signatory_email":       lead.email if lead else "",
-        "entity_type":           _mf("entity_type"),
-        "registered_address":    _mf("registered_address"),
-        "nature_of_business":    _mf("nature_of_business"),
-        "annual_turnover":       _mf("annual_turnover"),
-        "signatory1_designation":_mf("signatory1_designation"),
+    from app.services.onboarding_email import make_doc_edit_url
+    from app.services.pdf_documents import default_replacements, kyc_fields_from_submission
+
+    fields = kyc_fields_from_submission(
+        company_name=kyc.company_name,
+        cin_number=kyc.cin_number,
+        extra=extra or {},
+        is_overseas=is_overseas,
+    )
+    doc_data = {
+        "replacements": default_replacements("agreement", fields),
+        "signatory_name": kyc.contact_name or (lead.contact_name if lead else "") or company_name,
+        "signatory_email": lead.email if lead else "",
     }
-    if not is_overseas:
-        merge_fields.update({k: v for k, v in {
-            "pan_number":   kyc.pan_number or "",
-            "gstin_number": kyc.gstin_number or "",
-            "cin_number":   kyc.cin_number or "",
-            "bank_name":    _mf("bank_name"),
-            "ifsc_code":    _mf("ifsc_code"),
-        }.items() if v})
-    else:
-        merge_fields.update({k: v for k, v in {
-            "country_of_incorporation": _mf("country_of_incorporation"),
-            "company_reg_number":       _mf("company_reg_number"),
-            "tax_id_tin":               _mf("tax_id_tin"),
-            "lei_number":               _mf("lei_number"),
-            "country":                  _mf("country"),
-        }.items() if v})
-
-    # Create Zoho Contracts Agreement (without submitting — team reviews first)
+    rec.agreement_draft_content = _json.dumps(doc_data, ensure_ascii=False)
+    agr_view_link = make_doc_edit_url(onboarding_id, "agreement")
     agr_contract_id = ""
-    agr_view_link = ""
-    try:
-        from app.services.zoho_contracts import prepare_agreement_contract
-        agr_contract_id, agr_view_link = prepare_agreement_contract(
-            merge_fields=merge_fields,
-            is_overseas=is_overseas,
-            signatory_name=merge_fields.get("contact_name") or company_name,
-            signatory_email=merge_fields.get("signatory_email") or (lead.email if lead else ""),
-            company_name=company_name,
-        )
-        rec.agreement_zoho_contract_id = agr_contract_id
-        rec.agreement_draft_content = agr_view_link  # store view link for later use
-        log_pipeline("AGREEMENT_CONTRACT_CREATED", company=company_name,
-                     detail=f"Zoho Contracts Agreement created. contract_id={agr_contract_id}")
-    except Exception as _ce:
-        logger.warning("agreement_zoho_contracts_create_failed", error=str(_ce))
-        # Leave agreement_draft_content empty; _send_agreement_to_lead will fall back to HTML
+    log_pipeline("AGREEMENT_DRAFT_FILLED", company=company_name,
+                 detail="Supply Agreement PDF pre-filled from KYC — pending team review")
 
     rec.agreement_status = DocumentStatus.TEAM_REVIEW
     rec.agreement_status_display = f"Agreement Ready — Pending Team Review ({_fmt(now)})"
@@ -769,86 +665,54 @@ async def _send_agreement_to_lead(db: AsyncSession, onboarding_id: str) -> None:
     kyc = kyc_result.scalars().first()
     extra = (kyc.kyc_verification_result or {}).get("extra_fields", {}) if kyc else {}
 
-    def _mf(*keys):
-        for k in keys:
-            v = extra.get(k)
-            if v:
-                return v
-        return ""
-
     company_name = (kyc.company_name if kyc else None) or lead.business_name
     contact_name = (kyc.contact_name if kyc else None) or lead.contact_name or lead.business_name
 
-    merge_fields: dict = {
-        "company_name":          company_name,
-        "contact_name":          contact_name,
-        "contact_number":        (kyc.contact_number if kyc else "") or "",
-        "effective_date":        now.strftime("%d %B %Y"),
-        "signatory_email":       lead.email,
-        "entity_type":           _mf("entity_type"),
-        "registered_address":    _mf("registered_address"),
-        "nature_of_business":    _mf("nature_of_business"),
-        "annual_turnover":       _mf("annual_turnover"),
-        "signatory1_designation":_mf("signatory1_designation"),
-    }
-    if not is_overseas:
-        merge_fields.update({k: v for k, v in {
-            "pan_number":   (kyc.pan_number or "") if kyc else "",
-            "gstin_number": (kyc.gstin_number or "") if kyc else "",
-            "cin_number":   (kyc.cin_number or "") if kyc else "",
-            "bank_name":    _mf("bank_name"),
-            "ifsc_code":    _mf("ifsc_code"),
-        }.items() if v})
-    else:
-        merge_fields.update({k: v for k, v in {
-            "country_of_incorporation": _mf("country_of_incorporation"),
-            "company_reg_number":       _mf("company_reg_number"),
-            "tax_id_tin":               _mf("tax_id_tin"),
-            "lei_number":               _mf("lei_number"),
-            "country":                  _mf("country"),
-        }.items() if v})
+    # Ensure PDF field data exists (built at draft stage; rebuild if missing)
+    import json as _json
 
-    agr_contract_id = rec.agreement_zoho_contract_id or ""
-    agr_view_link = ""
+    from app.services.onboarding_email import make_doc_sign_url, send_document_sign_email
+    from app.services.pdf_documents import default_replacements, kyc_fields_from_submission
 
-    if agr_contract_id:
+    doc_data = None
+    if rec.agreement_draft_content:
         try:
-            from app.services.zoho_contracts import get_contract_view_link, submit_contract
-            submit_contract(agr_contract_id)
-            agr_view_link = get_contract_view_link(agr_contract_id) or ""
-            if agr_view_link:
-                rec.agreement_draft_content = agr_view_link
-            log_pipeline("AGREEMENT_CONTRACT_SUBMITTED", company=company_name,
-                         detail=f"Zoho Contracts Agreement submitted. contract_id={agr_contract_id}")
-        except Exception as _ce:
-            logger.warning("agreement_zoho_contracts_submit_failed", error=str(_ce))
+            _d = _json.loads(rec.agreement_draft_content)
+            if isinstance(_d, dict) and "replacements" in _d:
+                doc_data = _d
+        except (ValueError, TypeError):
+            pass
+    if doc_data is None:
+        fields = kyc_fields_from_submission(
+            company_name=company_name,
+            cin_number=kyc.cin_number if kyc else None,
+            extra=extra or {},
+            is_overseas=is_overseas,
+        )
+        doc_data = {
+            "replacements": default_replacements("agreement", fields),
+            "signatory_name": contact_name,
+            "signatory_email": lead.email,
+        }
+        rec.agreement_draft_content = _json.dumps(doc_data, ensure_ascii=False)
 
-    if agr_contract_id and agr_view_link:
-        from app.services.onboarding_email import send_agreement_contract_link
-        send_agreement_contract_link(
-            to_email=lead.email,
-            lead_name=contact_name,
-            company_name=company_name,
-            contract_link=agr_view_link,
-        )
-    else:
-        from app.services.nda_template import render_nda_html
-        from app.services.onboarding_email import send_agreement_to_lead as _send_agr_email
-        agreement_html = render_nda_html(merge_fields, is_overseas)
-        _send_agr_email(
-            to_email=lead.email,
-            lead_name=contact_name,
-            company_name=company_name,
-            agreement_content_html=agreement_html,
-        )
+    sign_url = make_doc_sign_url(onboarding_id, "agreement")
+    send_document_sign_email(
+        to_email=str(doc_data.get("signatory_email") or lead.email),
+        lead_name=str(doc_data.get("signatory_name") or contact_name),
+        company_name=company_name,
+        doc_type="agreement",
+        sign_url=sign_url,
+    )
+    agr_contract_id = ""
 
     rec.agreement_status = DocumentStatus.SENT_TO_LEAD
     rec.agreement_sent_at = now
-    rec.agreement_status_display = f"Customer Agreement Sent ({_fmt(now)}) — Awaiting Signature via Zoho Contracts"
+    rec.agreement_status_display = f"Customer Agreement Sent ({_fmt(now)}) — Awaiting E-Signature"
     await db.commit()
 
     log_pipeline("AGREEMENT_SENT", company=company_name, email=lead.email,
-                 detail="Customer Agreement sent via Zoho Contracts link.")
+                 detail="Agreement signing link emailed to lead.")
 
     await _export_to_sheets(db, onboarding_id)
 

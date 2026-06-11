@@ -215,6 +215,34 @@ async def _sync_google_sheet(db):
             logger.info("added_lead_from_sheet", email=email, contact=contact_name, summary=summary)
             added += 1
         else:
+            # Back-fill fields that were missing when the lead was first synced
+            # (e.g. phone/company added to the sheet later, or synced before the
+            # column-mapping fix) and push them to CRM.
+            backfill: dict = {}
+            if phone and not existing.phone_number:
+                existing.phone_number = phone
+                backfill["Phone"] = phone
+            if contact_name and not existing.contact_name:
+                existing.contact_name = contact_name
+            if designation and not existing.designation:
+                existing.designation = designation
+            if location and not existing.location:
+                existing.location = location
+            if business_name and (
+                not existing.business_name
+                or existing.business_name == (existing.contact_name or "")
+            ) and business_name != existing.business_name:
+                existing.business_name = business_name
+                backfill["Company"] = business_name
+            if backfill:
+                try:
+                    from app.services.zoho_crm import find_lead_by_email, update_lead
+                    _cid = find_lead_by_email(email)
+                    if _cid:
+                        update_lead(_cid, backfill)
+                    logger.info("sheet_backfill", email=email, fields=list(backfill.keys()))
+                except Exception as exc:
+                    logger.warning("sheet_backfill_crm_failed", email=email, error=str(exc))
             skipped_existing += 1
             continue
 

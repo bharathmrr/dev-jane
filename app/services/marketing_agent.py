@@ -201,7 +201,7 @@ def _generate_ai_outreach(
             p.strip() for p in "\n".join(body_lines).split("\n\n") if p.strip()
         )
         if not subject:
-            subject = f"Partnership Opportunity — Jane Aerospace & {business_name}"
+            subject = f"Partnership Opportunity Jane Aerospace & {business_name}"
         return subject, body
     except Exception as exc:
         logger.warning("ai_outreach_failed", company=business_name, error=str(exc))

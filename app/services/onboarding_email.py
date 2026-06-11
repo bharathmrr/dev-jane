@@ -67,6 +67,31 @@ def make_kyc_view_url(onboarding_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Document (NDA / Agreement) URLs — HMAC-signed, purpose-scoped
+# ---------------------------------------------------------------------------
+
+def make_doc_token(onboarding_id: str, doc_type: str, purpose: str) -> str:
+    """purpose: 'edit' (team page) or 'sign' (lead page)."""
+    msg = f"doc:{purpose}:{doc_type}:{onboarding_id}".encode()
+    return _hmac.new(settings.ONBOARDING_HMAC_SECRET.encode(), msg, hashlib.sha256).hexdigest()[:24]
+
+
+def verify_doc_token(onboarding_id: str, doc_type: str, purpose: str, token: str) -> bool:
+    expected = make_doc_token(onboarding_id, doc_type, purpose)
+    return _hmac.compare_digest(expected, token)
+
+
+def make_doc_edit_url(onboarding_id: str, doc_type: str) -> str:
+    token = make_doc_token(onboarding_id, doc_type, "edit")
+    return f"{settings.APP_URL.rstrip('/')}/api/v1/documents/edit/{onboarding_id}/{doc_type}/{token}"
+
+
+def make_doc_sign_url(onboarding_id: str, doc_type: str) -> str:
+    token = make_doc_token(onboarding_id, doc_type, "sign")
+    return f"{settings.APP_URL.rstrip('/')}/api/v1/documents/sign/{onboarding_id}/{doc_type}/{token}"
+
+
+# ---------------------------------------------------------------------------
 # Email send helpers
 # ---------------------------------------------------------------------------
 
@@ -228,6 +253,69 @@ def send_kyc_approved_email(
         <p>Thank you for your cooperation in completing this step promptly.</p>
     """)
     return _send_html_email(to_email, subject, html)
+
+
+# ---------------------------------------------------------------------------
+# Document signing emails (PDF template flow)
+# ---------------------------------------------------------------------------
+
+_DOC_LABELS = {"nda": "Non-Disclosure Agreement (NDA)", "agreement": "Supply / Customer Agreement"}
+
+
+def send_document_sign_email(
+    to_email: str,
+    lead_name: str,
+    company_name: str,
+    doc_type: str,
+    sign_url: str,
+) -> bool:
+    label = _DOC_LABELS.get(doc_type, doc_type.upper())
+    subject = f"{label} for Signature — Jane Aerospace × {company_name}"
+    html = _wrap(f"""
+        <p>Dear {lead_name},</p>
+        <p>Please review and sign the <strong>{label}</strong> between Jane Aerospace and
+        <strong>{company_name}</strong>. The document is pre-filled with your verified details.</p>
+        <p style="margin:24px 0;">
+            <a href="{sign_url}"
+               style="background:#1a56db;color:#fff;padding:12px 28px;border-radius:6px;
+                      text-decoration:none;font-size:16px;font-weight:bold;display:inline-block;">
+                Review &amp; Sign Document
+            </a>
+        </p>
+        <p style="color:#555;font-size:13px;">If the button doesn't work, open this link:<br>
+        <a href="{sign_url}" style="color:#1155cc;">{sign_url}</a></p>
+    """)
+    return _send_html_email(to_email, subject, html)
+
+
+def notify_team_document_signed(
+    company_name: str,
+    lead_email: str,
+    doc_type: str,
+    signed_name: str,
+    signed_pdf: bytes | None = None,
+) -> bool:
+    label = _DOC_LABELS.get(doc_type, doc_type.upper())
+    next_step = ("Supply Agreement has been generated and is ready for your review."
+                 if doc_type == "nda" else "Onboarding is now complete.")
+    subject = f"✓ {label} Signed — {company_name}"
+    html = f"""
+    <div style="font-family:Arial,sans-serif;font-size:14px;color:#222;max-width:560px;">
+      <h2 style="color:#16a34a;margin:0 0 12px;">{label} Signed</h2>
+      <p><strong>{company_name}</strong> ({lead_email}) has signed the {label}.</p>
+      <p>Signed by: <strong>{signed_name}</strong></p>
+      <p>{next_step}</p>
+      <p style="color:#888;font-size:12px;">The signed PDF is attached for your records.</p>
+    </div>"""
+    ok = _send_html_email(settings.ORGANIZER_EMAIL, subject, html,
+                          attachment_bytes=signed_pdf,
+                          attachment_name=f"{doc_type}_signed_{company_name.replace(' ', '_')}.pdf")
+    reviewer = (settings.ONBOARDING_REVIEWER_EMAIL or "").strip()
+    if reviewer and reviewer != settings.ORGANIZER_EMAIL:
+        _send_html_email(reviewer, subject, html,
+                         attachment_bytes=signed_pdf,
+                         attachment_name=f"{doc_type}_signed_{company_name.replace(' ', '_')}.pdf")
+    return ok
 
 
 # ---------------------------------------------------------------------------
@@ -533,16 +621,18 @@ def notify_team_nda_draft_ready(
         preview_btn = (
             f'<p><a href="{preview_url}" style="display:inline-block;background:#1e40af;color:#fff;'
             f'padding:10px 22px;border-radius:6px;text-decoration:none;font-size:14px;'
-            f'font-weight:bold;margin:4px 6px 4px 0;">👁️ Preview NDA in Zoho Contracts</a></p>'
+            f'font-weight:bold;margin:4px 6px 4px 0;">✏️ Review, Edit &amp; Preview NDA</a></p>'
         )
 
     subject = f"📋 NDA Draft Ready — {company_name} (Review & Approve)"
     html = f"""
-        <p>The NDA draft for <strong>{lead_name}</strong> from <strong>{company_name}</strong>
-        has been created in Zoho Contracts with all KYC data pre-filled.</p>
-        <p><strong>Step 1:</strong> Preview the NDA — review data, edit manual fields (term, security deposit, etc.)</p>
+        <p>The NDA for <strong>{lead_name}</strong> from <strong>{company_name}</strong>
+        has been pre-filled with the verified KYC data.</p>
+        <p><strong>Step 1:</strong> Open the editor — verify company name, registration number and address,
+        adjust anything if needed, and preview the final PDF.</p>
         {preview_btn}
-        <p><strong>Step 2:</strong> Once satisfied, approve to send to lead for e-signature:</p>
+        <p><strong>Step 2:</strong> Send it to the lead for e-signature — either from the editor page,
+        or directly with this button:</p>
         <p>{_action_btn(approve_url, "✅ Approve NDA & Send to Lead", "#16a34a")}</p>
         <p style="color:#888;font-size:12px;">Onboarding ID: {onboarding_id}
         {f" | Contract: {contract_id}" if contract_id else ""}</p>
@@ -564,17 +654,18 @@ def notify_team_agreement_draft_ready(
         preview_btn = (
             f'<p><a href="{preview_url}" style="display:inline-block;background:#1e40af;color:#fff;'
             f'padding:10px 22px;border-radius:6px;text-decoration:none;font-size:14px;'
-            f'font-weight:bold;margin:4px 6px 4px 0;">👁️ Preview Agreement in Zoho Contracts</a></p>'
+            f'font-weight:bold;margin:4px 6px 4px 0;">✏️ Review, Edit &amp; Preview Agreement</a></p>'
         )
 
     subject = f"📋 Agreement Draft Ready — {company_name} (Review & Approve)"
     html = f"""
-        <p>The Customer Agreement draft for <strong>{lead_name}</strong> from
-        <strong>{company_name}</strong> has been created in Zoho Contracts with all KYC data pre-filled.</p>
-        <p><strong>Step 1:</strong> Preview the Agreement — review data, edit manual fields
-        (security deposit, contract term, etc.)</p>
+        <p>The Supply / Customer Agreement for <strong>{lead_name}</strong> from
+        <strong>{company_name}</strong> has been pre-filled with the verified KYC data.</p>
+        <p><strong>Step 1:</strong> Open the editor — verify company details and fill the commercial
+        terms (security deposit, contract term, etc.), then preview the final PDF.</p>
         {preview_btn}
-        <p><strong>Step 2:</strong> Once satisfied, approve to send to lead for e-signature:</p>
+        <p><strong>Step 2:</strong> Send it to the lead for e-signature — either from the editor page,
+        or directly with this button:</p>
         <p>{_action_btn(approve_url, "✅ Approve Agreement & Send to Lead", "#16a34a")}</p>
         <p style="color:#888;font-size:12px;">Onboarding ID: {onboarding_id}
         {f" | Contract: {contract_id}" if contract_id else ""}</p>
