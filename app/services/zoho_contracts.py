@@ -1,83 +1,180 @@
-"""Zoho Contracts e-signature integration.
+"""Zoho Contracts integration — create NDA/Agreement contracts from templates.
 
-Flow per document (NDA or Customer Agreement):
-  1. get_access_token()        — exchange refresh token → access token
-  2. create_contract()         — POST /createcontract with merge fields
-                                 returns (contract_id, contract_api_name)
-  3. send_for_signature()      — POST /contracts/{api_name}/actions/send-for-signature
-  4. Webhook OR polling        — webhook: POST /api/v1/onboarding/zoho-webhook
-                                 polling: poll_contract_status() every 2h
-  5. DB updated                — status → SIGN_UNDER_REVIEW
+Real API flow (corrected from official docs):
+  1. POST /api/v1/contracts          — create contract using inputfields structure
+                                       contract type identified by apiName (e.g. "jane-nda-auto")
+  2. GET  /api/v1/contracts          — list to find the new contract's apiName
+  3. POST /api/v1/contracts/{apiName}/actions/send-for-signature
+                                     — Zoho sends signing email to counterparty directly
 
-Base URL  : https://contracts.zoho.in/api/v1/
-Org header: X-com-zoho-contracts-orgid: {ZOHO_CONTRACTS_ORG_ID}
-Auth      : Zoho-oauthtoken {access_token}
-
-Merge fields in templates must use {{field_name}} syntax. The field API names
-must match exactly: company_name, contact_name, contact_number, effective_date,
-signatory_email — as configured in each Zoho Contracts template.
+Env vars (store the contract type apiName from Admin → Contract Types):
+  ZOHO_CONTRACTS_CLIENT_ID
+  ZOHO_CONTRACTS_CLIENT_SECRET
+  ZOHO_CONTRACTS_REFRESH_TOKEN
+  ZOHO_CONTRACTS_NDA_TEMPLATE_ID_INDIAN       ← apiName e.g. "jane-nda-auto"
+  ZOHO_CONTRACTS_NDA_TEMPLATE_ID_OVERSEAS     ← apiName e.g. "jane-nda-overseas"
+  ZOHO_CONTRACTS_AGREEMENT_TEMPLATE_ID_INDIAN ← apiName e.g. "jane-customer-agreement-auto"
+  ZOHO_CONTRACTS_AGREEMENT_TEMPLATE_ID_OVERSEAS
+  ZOHO_DC                                     ← default "in"
 """
 from __future__ import annotations
 
-import re
 import time
 from typing import Any
 
-import httpx
+import requests
 
 from app.core.config import settings
 from app.core.logging import get_logger
 
-log = get_logger("zoho_contracts")
-
-_BASE = "https://contracts.zoho.in/api/v1"
-_TOKEN_URL = "https://accounts.zoho.in/oauth/v2/token"
+logger = get_logger("zoho_contracts")
 
 _token_cache: dict[str, Any] = {}
 
 
+def _dc() -> str:
+    return (settings.ZOHO_DC or "in").lower()
+
+
+def _base() -> str:
+    return f"https://contracts.zoho.{_dc()}/api/v1"
+
+
+def _accounts_url() -> str:
+    return f"https://accounts.zoho.{_dc()}/oauth/v2/token"
+
+
 # ---------------------------------------------------------------------------
-# Auth
+# OAuth
 # ---------------------------------------------------------------------------
 
 def get_access_token() -> str:
-    """Return a valid access token, refreshing when < 60s remain."""
     now = time.time()
-    if _token_cache.get("expires_at", 0) - now > 60:
-        return _token_cache["token"]
+    if _token_cache.get("access_token") and _token_cache.get("expires_at", 0) > now + 60:
+        return _token_cache["access_token"]
 
-    resp = httpx.post(
-        _TOKEN_URL,
+    resp = requests.post(
+        _accounts_url(),
         data={
-            "grant_type": "refresh_token",
-            "client_id": settings.ZOHO_CONTRACTS_CLIENT_ID or settings.ZOHO_CLIENT_ID,
-            "client_secret": settings.ZOHO_CONTRACTS_CLIENT_SECRET or settings.ZOHO_CLIENT_SECRET,
+            "grant_type":    "refresh_token",
+            "client_id":     settings.ZOHO_CONTRACTS_CLIENT_ID,
+            "client_secret": settings.ZOHO_CONTRACTS_CLIENT_SECRET,
             "refresh_token": settings.ZOHO_CONTRACTS_REFRESH_TOKEN,
         },
         timeout=15,
     )
     resp.raise_for_status()
     data = resp.json()
-    if "access_token" not in data:
-        raise RuntimeError(f"Zoho Contracts token error: {data}")
+    token = data.get("access_token")
+    if not token:
+        raise RuntimeError(f"Zoho Contracts token refresh failed: {data}")
 
-    _token_cache["token"] = data["access_token"]
-    _token_cache["expires_at"] = now + data.get("expires_in", 3600)
-    log.info("zoho_contracts_token_refreshed")
-    return _token_cache["token"]
+    _token_cache["access_token"] = token
+    _token_cache["expires_at"] = now + int(data.get("expires_in", 3600))
+    logger.info("zoho_contracts_token_refreshed")
+    return token
 
 
-def _headers(token: str) -> dict[str, str]:
+def _headers() -> dict:
     return {
-        "Authorization": f"Zoho-oauthtoken {token}",
-        "X-com-zoho-contracts-orgid": settings.ZOHO_CONTRACTS_ORG_ID,
+        "Authorization": f"Zoho-oauthtoken {get_access_token()}",
         "Content-Type": "application/json",
     }
 
 
-def _slug(name: str) -> str:
-    """Convert display name to Zoho API name slug (e.g. 'Jane Corp' → 'jane-corp')."""
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:60]
+# ---------------------------------------------------------------------------
+# List contract types (helper — use to discover apiName values for .env)
+# ---------------------------------------------------------------------------
+
+def list_contract_types() -> list[dict]:
+    """Return all contract types with id, name, apiName.
+
+    Run this once to discover the apiName values you need for .env.
+    """
+    resp = requests.get(f"{_base()}/contracttypes", headers=_headers(), timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("contracttypes", [])
+
+
+# ---------------------------------------------------------------------------
+# Build inputfields payload (Zoho Contracts API format)
+# ---------------------------------------------------------------------------
+
+# Placeholder format in Zoho Contracts Writer templates: ##field_name##
+# The inputApiName must match exactly the name between ## in the document.
+# Our internal key  →  Zoho Contracts placeholder name (between ##...##)
+_FIELD_MAP = {
+    "company_name":             "company_name",
+    "contact_name":             "contact_name",
+    "effective_date":           "effective_date",
+    "registered_address":       "registered_address",
+    "pan_number":               "pan_number",
+    "gstin_number":             "gstin_number",
+    "cin_number":               "cin_number",
+    "ifsc_code":                "ifsc_code",
+    "bank_name":                "bank_name",
+    "nature_of_business":       "nature_of_business",
+    "entity_type":              "entity_type",
+    "date_of_incorporation":    "date_of_incorporation",
+    "annual_turnover":          "annual_turnover",
+    "signatory_email":          "signatory_email",
+    "signatory1_designation":   "signatory1_designation",
+    "country_of_incorporation": "country_of_incorporation",
+    "company_reg_number":       "company_reg_number",
+    "lei_number":               "lei_number",
+    "tax_id_tin":               "tax_id_tin",
+    "contact_number":           "contact_number",
+    "city":                     "city",
+    "state":                    "state",
+}
+
+
+def _build_inputfields(
+    contract_type_api_name: str,
+    contract_title: str,
+    counterparty_name: str,
+    counterparty_email: str,
+    merge_fields: dict,
+) -> list[dict]:
+    """Convert flat merge_fields dict into Zoho Contracts inputfields array."""
+
+    def _field(api_name: str, value: Any) -> dict:
+        return {
+            "metaApiName": api_name,
+            "inputs": [{"inputApiName": api_name, "inputValue": value if isinstance(value, str) else str(value)}],
+        }
+
+    fields = [
+        _field("contract-type",  contract_type_api_name),
+        _field("title",          contract_title),
+        _field("description",    f"Contract for {contract_title}"),
+        _field("requester-name", "Leo Peter Charles"),
+        _field("requester-department", "legal"),
+        _field("party-b-name",   counterparty_name),
+        {
+            "metaApiName": "counterparty-primary-contact",
+            "inputs": [{"inputApiName": "party-b-primary-contact-name", "inputValue": counterparty_email}],
+        },
+        _field("contract-term", True),
+        {
+            "metaApiName": "contract-effective-date",
+            "inputs": [
+                {"inputApiName": "contract-effective-date", "inputValue": 0},
+                {"inputApiName": "effective-specific-date",
+                 "inputValue": __import__("datetime").date.today().strftime("%d/%m/%Y")},
+            ],
+        },
+    ]
+
+    # Add custom document merge fields using confirmed Zoho Contracts apiNames
+    for key, value in merge_fields.items():
+        if not value:
+            continue
+        zoho_key = _FIELD_MAP.get(key, key)  # map to confirmed apiName
+        fields.append(_field(zoho_key, str(value)))
+
+    return fields
 
 
 # ---------------------------------------------------------------------------
@@ -85,304 +182,182 @@ def _slug(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 def create_contract(
-    contract_type_id: str,
-    contract_name: str,
-    lead_name: str,
-    lead_email: str,
-    merge_fields: dict | None = None,
-) -> tuple[str, str]:
-    """Create a contract from a Zoho Contracts template.
+    contract_type_api_name: str,
+    contract_title: str,
+    counterparty_name: str,
+    counterparty_email: str,
+    merge_fields: dict,
+) -> dict:
+    """Create a contract in Zoho Contracts.
 
-    Uses POST /createcontract (the documented endpoint for pre-filling
-    document/template merge fields).
-
-    Returns:
-        (contract_id, contract_api_name) — store the api_name; it is used
-        for send-for-signature, status polling, and webhook matching.
-
-    Template merge fields must be configured in Zoho Contracts under the
-    contract type. Field API names must match exactly what you pass in
-    merge_fields (e.g. company_name, contact_name, effective_date).
+    Returns the full response dict (contains contract id, apiName, etc.).
+    Raises RuntimeError on failure.
     """
-    token = get_access_token()
-
-    counterparty_slug = _slug(lead_name)
-
-    # Build inputfields array using the documented format
-    inputfields: list[dict] = [
-        {
-            "metaApiName": "contract-type",
-            "inputs": [{"inputApiName": "contract-type", "inputValue": contract_type_id}],
-        },
-        {
-            "metaApiName": "title",
-            "inputs": [{"inputApiName": "title", "inputValue": contract_name}],
-        },
-        {
-            "metaApiName": "party-b-name",
-            "inputs": [{"inputApiName": "party-b-name", "inputValue": counterparty_slug}],
-        },
-        {
-            "metaApiName": "counterparty-primary-contact",
-            "inputs": [{"inputApiName": "counterparty-primary-contact", "inputValue": lead_email}],
-        },
-    ]
-
-    # Add template merge/document fields
-    if merge_fields:
-        for field_name, field_value in merge_fields.items():
-            if field_value:
-                inputfields.append({
-                    "metaApiName": field_name,
-                    "inputs": [{"inputApiName": field_name, "inputValue": str(field_value)}],
-                })
-
+    inputfields = _build_inputfields(
+        contract_type_api_name=contract_type_api_name,
+        contract_title=contract_title,
+        counterparty_name=counterparty_name,
+        counterparty_email=counterparty_email,
+        merge_fields=merge_fields,
+    )
+    # templateType=1 (Zoho Writer doc) needs externalSource:True
+    # templateType=0 (form-based) needs source:1
     payload = {
+        "externalSource": True,
         "source": 1,
         "inputfields": inputfields,
     }
 
-    log.info("zoho_contracts_create", contract_type_id=contract_type_id,
-             name=contract_name, email=lead_email)
+    resp = requests.post(f"{_base()}/contracts", json=payload, headers=_headers(), timeout=20)
 
-    resp = httpx.post(
-        f"{_BASE}/createcontract",
-        headers=_headers(token),
-        json=payload,
-        timeout=30,
-    )
-
-    if not resp.is_success:
-        log.error("zoho_contracts_create_failed", status=resp.status_code,
-                  body=resp.text[:500], payload=payload)
-        resp.raise_for_status()
+    if resp.status_code not in (200, 201):
+        logger.error("zoho_contracts_create_failed",
+                     status=resp.status_code, body=resp.text[:400])
+        raise RuntimeError(
+            f"Zoho Contracts create failed ({resp.status_code}): {resp.text[:300]}"
+        )
 
     data = resp.json()
-    log.info("zoho_contracts_created", response_keys=list(data.keys()))
-
-    # Extract from response — Zoho returns a "contracts" array
-    contracts_list = (
-        data.get("contracts")
-        or (data.get("data", {}).get("contracts") if isinstance(data.get("data"), dict) else None)
-        or []
-    )
-    if not contracts_list:
-        # Fallback: maybe response is the contract object directly
-        contracts_list = [data]
-
-    contract = contracts_list[0] if contracts_list else {}
+    # Response structure: {"contracts": [{...}]} or {"contract": {...}}
+    contracts = data.get("contracts") or []
+    contract = contracts[0] if contracts else data.get("contract") or data
 
     contract_id = (
-        contract.get("id")
-        or contract.get("contractId")
-        or contract.get("contract_id")
-        or data.get("contractId")
-        or data.get("id")
+        str(contract.get("id", ""))
+        or str(contract.get("contractId", ""))
+        or ""
     )
     contract_api_name = (
-        contract.get("contractApiName")
-        or contract.get("contract_api_name")
-        or contract.get("contractapiname")
-        or data.get("contractApiName")
+        contract.get("apiName")
+        or contract.get("api_name")
+        or contract_id
     )
 
-    if not contract_id:
-        raise RuntimeError(f"No contract ID in Zoho Contracts response: {data}")
-
-    # If api_name not returned, fall back to the numeric ID
-    if not contract_api_name:
-        contract_api_name = str(contract_id)
-        log.warning("zoho_contracts_no_api_name", contract_id=contract_id)
-
-    log.info("zoho_contracts_created_ok", contract_id=contract_id,
-             contract_api_name=contract_api_name)
-    return str(contract_id), str(contract_api_name)
+    logger.info("zoho_contracts_created",
+                contract_id=contract_id, api_name=contract_api_name, title=contract_title)
+    return {
+        "id":      contract_id,
+        "apiName": contract_api_name,
+        "raw":     contract,
+    }
 
 
 # ---------------------------------------------------------------------------
 # Send for signature
 # ---------------------------------------------------------------------------
 
-def send_for_signature(contract_api_name: str) -> None:
-    """Send a Zoho Contracts contract for e-signature.
+def send_for_signature(contract_api_name: str) -> bool:
+    """Submit contract for e-signature.
 
-    Uses the documented endpoint:
-      POST /contracts/{contractApiName}/actions/send-for-signature
-
-    The lead receives an email with a Zoho Sign link.
+    Zoho Contracts sends its own signing email to the counterparty.
+    Returns True on success.
     """
-    token = get_access_token()
-    log.info("zoho_contracts_send_sign", contract_api_name=contract_api_name)
+    url = f"{_base()}/contracts/{contract_api_name}/actions/send-for-signature"
+    resp = requests.post(url, headers=_headers(), timeout=15)
 
-    resp = httpx.post(
-        f"{_BASE}/contracts/{contract_api_name}/actions/send-for-signature",
-        headers=_headers(token),
-        json={},
-        timeout=30,
+    if resp.status_code in (200, 201, 204):
+        logger.info("zoho_contracts_sent_for_signature", contract_api_name=contract_api_name)
+        return True
+
+    logger.error("zoho_contracts_send_sig_failed",
+                 contract_api_name=contract_api_name,
+                 status=resp.status_code, body=resp.text[:200])
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Build a portal view URL (no share-link API — use portal direct URL)
+# ---------------------------------------------------------------------------
+
+def get_contract_portal_url(contract_api_name: str, org_name: str = "janeaerospace") -> str:
+    dc = _dc()
+    return f"https://contracts.zoho.{dc}/{org_name}#/contracts/{contract_api_name}"
+
+
+# Aliases used by onboarding_tasks.py
+def submit_contract(contract_api_name: str) -> bool:
+    """Alias for send_for_signature — submits contract for e-signature."""
+    return send_for_signature(contract_api_name)
+
+
+def get_contract_view_link(contract_api_name: str) -> str:
+    """Return portal view URL for the contract (requires Zoho login).
+
+    Zoho sends its own signing email to the counterparty when send_for_signature()
+    is called; this link is for our team/admin notification email.
+    """
+    return get_contract_portal_url(contract_api_name)
+
+
+# ---------------------------------------------------------------------------
+# Two-step helpers: prepare (team review) then submit (send to lead)
+# ---------------------------------------------------------------------------
+
+def prepare_nda_contract(
+    merge_fields: dict,
+    is_overseas: bool,
+    signatory_name: str,
+    signatory_email: str,
+    company_name: str,
+) -> tuple[str, str]:
+    """Create NDA contract (no signing email yet) for team review.
+
+    Returns (contract_api_name, portal_url).
+    Raises RuntimeError if apiName is not configured.
+    """
+    api_name = (
+        settings.ZOHO_CONTRACTS_NDA_TEMPLATE_ID_OVERSEAS
+        if is_overseas
+        else settings.ZOHO_CONTRACTS_NDA_TEMPLATE_ID_INDIAN
     )
+    if not api_name:
+        raise RuntimeError(
+            "Zoho Contracts NDA apiName not configured. "
+            "Run list_contract_types() to find apiName, then set "
+            "ZOHO_CONTRACTS_NDA_TEMPLATE_ID_INDIAN / _OVERSEAS in .env"
+        )
 
-    if not resp.is_success:
-        log.error("zoho_contracts_send_sign_failed", contract_api_name=contract_api_name,
-                  status=resp.status_code, body=resp.text[:500])
-        resp.raise_for_status()
-
-    data = resp.json()
-    stage = (data.get("action") or [{}])[0].get("stage") if isinstance(data.get("action"), list) else data.get("stage")
-    log.info("zoho_contracts_sign_sent", contract_api_name=contract_api_name, stage=stage)
-
-
-# ---------------------------------------------------------------------------
-# Create + send in one call
-# ---------------------------------------------------------------------------
-
-def create_and_send(
-    contract_type_id: str,
-    contract_name: str,
-    lead_name: str,
-    lead_email: str,
-    merge_fields: dict | None = None,
-) -> str:
-    """Create contract and immediately send for e-signature.
-
-    Returns the contract_api_name — store this in nda_zoho_contract_id or
-    agreement_zoho_contract_id. It is used for status polling and webhook
-    matching (the webhook payload contains this same value as contract.id).
-    """
-    _contract_id, contract_api_name = create_contract(
-        contract_type_id=contract_type_id,
-        contract_name=contract_name,
-        lead_name=lead_name,
-        lead_email=lead_email,
+    result = create_contract(
+        contract_type_api_name=api_name,
+        contract_title=f"NDA — {company_name}",
+        counterparty_name=signatory_name,
+        counterparty_email=signatory_email,
         merge_fields=merge_fields,
     )
-    send_for_signature(contract_api_name)
-    return contract_api_name
+    contract_api_name = result["apiName"] or result["id"]
+    portal_url = get_contract_portal_url(contract_api_name)
+    return contract_api_name, portal_url
 
 
-# ---------------------------------------------------------------------------
-# Poll contract status  (webhook fallback)
-# ---------------------------------------------------------------------------
+def prepare_agreement_contract(
+    merge_fields: dict,
+    is_overseas: bool,
+    signatory_name: str,
+    signatory_email: str,
+    company_name: str,
+) -> tuple[str, str]:
+    """Create Agreement contract (no signing email yet) for team review.
 
-_SIGNED_STAGES = {"signed", "completed", "executed", "sign-completed"}
-
-
-def get_contract_status(contract_api_name: str) -> dict:
-    """Fetch current contract status from Zoho Contracts API.
-
-    GET /contracts/{contractApiName}
-
-    Returns a dict with at minimum:
-      - "api_name": str
-      - "stage": str   (e.g. "sign-pending", "signed", "active", "withdrawn")
-      - "is_signed": bool
+    Returns (contract_api_name, portal_url).
     """
-    token = get_access_token()
-    resp = httpx.get(
-        f"{_BASE}/contracts/{contract_api_name}",
-        headers=_headers(token),
-        timeout=20,
-    )
-
-    if resp.status_code == 404:
-        log.warning("zoho_contracts_not_found", contract_api_name=contract_api_name)
-        return {"api_name": contract_api_name, "stage": "not_found", "is_signed": False}
-
-    if not resp.is_success:
-        log.warning("zoho_contracts_status_failed", contract_api_name=contract_api_name,
-                    status=resp.status_code, body=resp.text[:300])
-        return {"api_name": contract_api_name, "stage": "error", "is_signed": False}
-
-    data = resp.json()
-    contracts_list = data.get("contracts") or [data]
-    contract = contracts_list[0] if contracts_list else data
-
-    stage = (
-        contract.get("stage")
-        or contract.get("contractStage")
-        or contract.get("status")
-        or contract.get("contractstatus")
-        or ""
-    ).lower()
-
-    is_signed = stage in _SIGNED_STAGES
-
-    log.info("zoho_contracts_status_polled", contract_api_name=contract_api_name,
-             stage=stage, is_signed=is_signed)
-
-    return {
-        "api_name": contract_api_name,
-        "stage": stage,
-        "is_signed": is_signed,
-        "raw": contract,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Template helpers
-# ---------------------------------------------------------------------------
-
-def get_contract_type_id(doc_type: str, company_type: str) -> str:
-    """Return the Zoho Contracts contract type ID for a given doc + company type."""
-    is_overseas = company_type.upper() in ("OVERSEAS", "FOREIGN", "INTERNATIONAL")
-    if doc_type == "nda":
-        return (
-            settings.ZOHO_CONTRACTS_NDA_TEMPLATE_OVERSEAS
-            if is_overseas
-            else settings.ZOHO_CONTRACTS_NDA_TEMPLATE_INDIAN
-        )
-    return (
-        settings.ZOHO_CONTRACTS_AGREEMENT_TEMPLATE_OVERSEAS
+    api_name = (
+        settings.ZOHO_CONTRACTS_AGREEMENT_TEMPLATE_ID_OVERSEAS
         if is_overseas
-        else settings.ZOHO_CONTRACTS_AGREEMENT_TEMPLATE_INDIAN
+        else settings.ZOHO_CONTRACTS_AGREEMENT_TEMPLATE_ID_INDIAN
     )
+    if not api_name:
+        raise RuntimeError(
+            "Zoho Contracts Agreement apiName not configured. "
+            "Set ZOHO_CONTRACTS_AGREEMENT_TEMPLATE_ID_INDIAN / _OVERSEAS in .env"
+        )
 
-
-def get_contract_type_details(contract_type_id: str) -> dict:
-    """Fetch contract type metadata from Zoho Contracts API."""
-    token = get_access_token()
-    resp = httpx.get(
-        f"{_BASE}/contracttypes/{contract_type_id}",
-        headers=_headers(token),
-        timeout=20,
+    result = create_contract(
+        contract_type_api_name=api_name,
+        contract_title=f"Customer Agreement — {company_name}",
+        counterparty_name=signatory_name,
+        counterparty_email=signatory_email,
+        merge_fields=merge_fields,
     )
-    if not resp.is_success:
-        log.warning("zoho_contracts_type_fetch_failed", contract_type_id=contract_type_id,
-                    status=resp.status_code)
-        return {}
-    return resp.json()
-
-
-def get_template_preview_text(contract_type_id: str, contract_type_name: str = "") -> str:
-    """Return a human-readable summary of the Zoho Contracts template for team review."""
-    details = get_contract_type_details(contract_type_id)
-
-    name = (
-        details.get("contracttype", {}).get("contracttypename")
-        or details.get("contracttypename")
-        or details.get("name")
-        or contract_type_name
-        or contract_type_id
-    )
-    description = (
-        details.get("contracttype", {}).get("description")
-        or details.get("description")
-        or ""
-    )
-    body = (
-        details.get("contracttype", {}).get("contractbody")
-        or details.get("contractbody")
-        or details.get("body")
-        or ""
-    )
-
-    portal_link = f"https://contracts.zoho.in/janeaerospace/contracttypes/{contract_type_id}"
-
-    lines = [f"Template: {name}", f"Contract Type ID: {contract_type_id}"]
-    if description:
-        lines.append(f"Description: {description}")
-    lines.append(f"Preview in Zoho Contracts: {portal_link}")
-    if body:
-        lines.append("\n--- Template Content ---")
-        lines.append(body[:5000])
-
-    return "\n".join(lines)
+    contract_api_name = result["apiName"] or result["id"]
+    portal_url = get_contract_portal_url(contract_api_name)
+    return contract_api_name, portal_url

@@ -1,0 +1,130 @@
+To: support@zohocontracts.com
+Subject: POST /api/v1/contracts returns 500 Server Error for all contract types via API
+
+Dear Zoho Contracts Support Team,
+
+I am experiencing a persistent 500 Internal Server Error when attempting to create
+contracts via the Zoho Contracts REST API. The issue occurs for ALL contract types,
+including your built-in default templates.
+
+------------------------------------------------------------
+ACCOUNT DETAILS
+------------------------------------------------------------
+Account Email   : bharath.p@janeaerospace.co.in
+Organization    : janeaerospace
+Portal URL      : https://contracts.zoho.in/janeaerospace
+Region          : India (.in)
+Date Reported   : 11 June 2026
+
+------------------------------------------------------------
+OAUTH DETAILS
+------------------------------------------------------------
+Grant Type      : Self Client (authorization_code)
+Client ID       : 1000.IFWA0SUU8OE87A6FM0ST59SHJ1NXEU
+Scopes Used     : contracts.contracts.ALL
+                  ZohoSign.documents.ALL
+                  ZohoWriter.documentEditor.ALL
+                  contracts.meta.READ
+
+------------------------------------------------------------
+FAILING ENDPOINT
+------------------------------------------------------------
+Method  : POST
+URL     : https://contracts.zoho.in/api/v1/contracts
+Header  : Authorization: Zoho-oauthtoken <valid_token>
+Header  : Content-Type: application/json
+
+------------------------------------------------------------
+SAMPLE REQUEST BODY (minimal — same error for all variations)
+------------------------------------------------------------
+{
+  "source": 1,
+  "inputfields": [
+    {
+      "metaApiName": "contract-type",
+      "inputs": [{"inputApiName": "contract-type", "inputValue": "non-disclosure-agreement-nda"}]
+    },
+    {
+      "metaApiName": "title",
+      "inputs": [{"inputApiName": "title", "inputValue": "Test NDA"}]
+    },
+    {
+      "metaApiName": "party-b-name",
+      "inputs": [{"inputApiName": "party-b-name", "inputValue": "jane-test-company"}]
+    },
+    {
+      "metaApiName": "counterparty-primary-contact",
+      "inputs": [{"inputApiName": "party-b-primary-contact-name", "inputValue": "test@example.com"}]
+    }
+  ]
+}
+
+------------------------------------------------------------
+RESPONSE RECEIVED (always, for every request)
+------------------------------------------------------------
+HTTP Status : 500
+Body        :
+{
+  "Errors": {
+    "ErrorCode": 0,
+    "ErrorMessage": "Sorry, unable to complete your action due to an unknown error. Please try again."
+  }
+}
+
+------------------------------------------------------------
+TESTING DONE — ENDPOINTS THAT WORK
+------------------------------------------------------------
+GET  /api/v1/contracttypes                          -> 200 OK (returns 21 contract types)
+GET  /api/v1/counterparties                         -> 200 OK (returns all counterparties)
+POST /api/v1/counterparties                         -> 200 OK (creates counterparty successfully)
+GET  /api/v1/admin/contracttypes/{apiName}/fields   -> 200 OK (returns template field definitions)
+GET  /api/v1/contracts                              -> 200 OK (returns existing contracts)
+
+------------------------------------------------------------
+ENDPOINTS THAT FAIL
+------------------------------------------------------------
+POST /api/v1/contracts  -> 500 every time, regardless of payload
+
+------------------------------------------------------------
+VARIATIONS TESTED (all return 500)
+------------------------------------------------------------
+1. Minimal payload (only contract-type + title)
+2. Full payload (requester-name, requester-department, party-b-name,
+   counterparty-primary-contact, contract-term, contract-effective-date,
+   contract-end-date, custom merge fields)
+3. With "source": 1
+4. With "externalSource": true
+5. With both "source" and "externalSource"
+6. Using built-in templateType=0 templates:
+   - non-disclosure-agreement-nda
+   - master-services-agreement
+   - software-as-a-service-agreement
+7. Using custom templateType=1 templates:
+   - jane-nda-auto
+   - jane-customer-agreement
+   - jane-nda-overseas-2
+8. With different counterparty apiNames (jane-test-company, test-1)
+9. With different primary contact emails
+10. With and without optional fields
+
+------------------------------------------------------------
+CONCLUSION
+------------------------------------------------------------
+The POST /api/v1/contracts endpoint returns HTTP 500 for absolutely every
+combination of contract type, payload format, and field values tested.
+All GET endpoints and other POST endpoints (counterparties) work correctly,
+confirming the OAuth token and API access are valid.
+
+This appears to be a server-side bug specific to the POST /contracts endpoint
+on the contracts.zoho.in (India) region.
+
+Please investigate and resolve as this is blocking our automated onboarding
+pipeline which relies on programmatic contract creation.
+
+------------------------------------------------------------
+CONTACT
+------------------------------------------------------------
+Name            : Bharathsimha Putta
+Company         : Jane Aerospace Private Limited
+Email           : bharath.p@janeaerospace.co.in
+Phone           : (available on request)

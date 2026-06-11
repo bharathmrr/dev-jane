@@ -1,28 +1,7 @@
-"""Marketing Expert AI Agent for Jane Aerospace lead outreach.
+"""Jane Aerospace outreach email generator — fixed professional templates.
 
-Generates short, human-tone, personalised cold emails using Claude Sonnet.
-Implements 3 A/B body variants + 3 subject line variants.
-
-Body variants (angle):
-  A - Challenge: opens by naming the lead's specific pain point
-  B - Industry insight: FOMO / "most companies in your space are still..."
-  C - Social proof: "we work with companies like yours..."
-
-Subject variants:
-  S1 - "Quick question, [FirstName]"
-  S2 - "[CompanyName] — supply chain"
-  S3 - "15 min? [Industry/role context]"
-
-Email rules (non-negotiable):
-  - Max 4 sentences in body
-  - Supply chain as a SERVICE (we own your supply chain, not sell software)
-  - Human tone — sounds like Leo wrote it personally at 8am
-  - No "I hope this email finds you well"
-  - No "I wanted to reach out"
-  - No "I came across your profile"
-  - No bullet points, no headers
-  - Body only — greeting ("Hi [Name],") and sign-off ("Leo") added separately
-  - CTA is always soft: "Worth a quick call?" / "15 minutes this week?"
+Fixed templates replace AI generation for consistent, professional messaging.
+A/B/C variants track which body angle performs best (reply rate).
 """
 from __future__ import annotations
 
@@ -49,6 +28,7 @@ def _get_client():
 
 
 def _ask(system: str, user: str, model: str = _SONNET, max_tokens: int = 200) -> str:
+    """Used only for reply-handling (questions, pricing, etc.) — not outreach."""
     if not settings.ANTHROPIC_API_KEY:
         return ""
     try:
@@ -65,119 +45,168 @@ def _ask(system: str, user: str, model: str = _SONNET, max_tokens: int = 200) ->
 
 
 # ---------------------------------------------------------------------------
-# Variant A — Challenge Angle
+# Subject lines — professional, sector-relevant
 # ---------------------------------------------------------------------------
 
-_SYSTEM_A = """You are Leo Charles, Founder of Jane Aerospace — India's supply chain as a service company.
-
-Write 3-4 sentences for a cold email using the CHALLENGE ANGLE.
-Open by naming the lead's specific operational challenge based on their role, company, location and summary.
-Then one sentence: how Jane Aerospace as a dedicated supply chain partner (not a vendor, not software — a service) solves it.
-End with a soft CTA like "Worth a quick call this week?" or "15 minutes?"
-
-STRICT RULES:
-- Max 4 sentences total. Short. Punchy.
-- Do NOT use: "I hope", "I wanted to reach out", "I came across", "Please find", "Kindly", "As per"
-- Do NOT use bullet points or numbered lists
-- Sound like a real person wrote this at 8am — not an AI
-- Supply chain as a service = Jane Aerospace becomes your supply chain team, end-to-end
-- No greeting (we add "Hi [Name]," separately), no sign-off (we add "Leo" separately)
-- Return ONLY the body sentences, nothing else"""
-
-_SYSTEM_B = """You are Leo Charles, Founder of Jane Aerospace — India's supply chain as a service company.
-
-Write 3-4 sentences for a cold email using the INDUSTRY INSIGHT ANGLE.
-Start with an observation about what most companies in their industry or region are still doing wrong in supply chain.
-Create a slight FOMO — they're operating like it's 5 years ago.
-Then: Jane Aerospace as a supply chain as a service partner changes this.
-Soft CTA at the end.
-
-STRICT RULES:
-- Max 4 sentences total
-- Start with "Most [industry] companies..." or "A lot of [role]s in [location]..." or similar
-- Do NOT use: "I hope", "I wanted to reach out", "I came across", bullets, long sentences
-- Sound exactly like a human — informal but credible
-- No greeting, no sign-off — just the body
-- Return ONLY the body sentences"""
-
-_SYSTEM_C = """You are Leo Charles, Founder of Jane Aerospace — India's supply chain as a service company.
-
-Write 3-4 sentences for a cold email using the SOCIAL PROOF ANGLE.
-Reference that we've recently worked with companies similar to theirs (same industry or scale).
-Mention a specific outcome or capability — what changed for them.
-Connect it to this lead's situation.
-Soft CTA.
-
-STRICT RULES:
-- Max 4 sentences total
-- Do NOT invent company names — say "a [type of company] in [similar location/industry]"
-- Do NOT use: "I hope", "I wanted to reach out", "I came across", bullets
-- Very human, warm, peer-to-peer tone
-- No greeting, no sign-off
-- Return ONLY the body sentences"""
-
-
-def _build_user_msg(business_name: str, contact_name: str | None, designation: str | None,
-                    location: str | None, summary: str | None) -> str:
-    parts = [f"Company: {business_name}"]
-    if contact_name:
-        parts.append(f"Contact: {contact_name}")
-    if designation:
-        parts.append(f"Designation: {designation}")
-    if location:
-        parts.append(f"Location: {location}")
-    if summary:
-        parts.append(f"Context/Summary: {summary}")
-    parts.append("\nWrite the email body now.")
-    return "\n".join(parts)
-
-
-# ---------------------------------------------------------------------------
-# Subject line variants
-# ---------------------------------------------------------------------------
-
-def _subject_s1(contact_name: str | None) -> str:
-    first = (contact_name or "").split()[0].capitalize() if contact_name else "there"
-    return f"Quick question, {first}"
+def _subject_s1(_contact_name: str | None) -> str:
+    return "Aerospace & Defence Supply Chain Solutions — Jane Aerospace"
 
 
 def _subject_s2(business_name: str) -> str:
-    short = business_name.split()[0] if business_name else business_name
-    return f"{short} — supply chain"
+    return f"Partnership Opportunity — Jane Aerospace & {business_name}"
 
 
-def _subject_s3(designation: str | None, location: str | None) -> str:
-    if designation:
-        role_word = designation.split()[0]
-        return f"15 min? {role_word} × supply chain"
-    if location:
-        return f"Supply chain in {location} — 15 min?"
-    return "15 minutes — Jane Aerospace"
+def _subject_s3(_designation: str | None, _location: str | None) -> str:
+    return "Strategic Collaboration — Jane Aerospace"
 
 
 # ---------------------------------------------------------------------------
-# Fallback bodies (when Claude is unavailable)
+# Fixed professional body templates (Variant A / B / C)
 # ---------------------------------------------------------------------------
 
-_FALLBACKS_A = [
-    "Managing supply chain end-to-end while running a growing business pulls your team in too many directions. Jane Aerospace works as your dedicated supply chain partner — we own the coordination, vendor relationships, and delivery so you can focus on growth. Worth a quick call this week?",
-    "The hardest part of scaling isn't the product — it's keeping the supply chain from becoming the bottleneck. Jane Aerospace runs supply chain as a service: one partner, full accountability, zero chaos on your end. 15 minutes to see if it fits?",
-]
+def _body_a(business_name: str, contact_name: str | None,
+            _designation: str | None, is_repeat_lead: bool) -> str:
+    name_ref = (contact_name or business_name).split()[0].capitalize()
+    if is_repeat_lead:
+        return (
+            f"It was great speaking with you previously, {name_ref}, and I wanted to reconnect "
+            f"with a quick update on what we have been building at Jane Aerospace.\n\n"
+            f"Since we last spoke, we have deepened our work in defence-grade vendor qualification, "
+            f"AI-enabled procurement, and supply chain resilience — areas I believe remain highly "
+            f"relevant to {business_name}.\n\n"
+            f"I would welcome a brief 20-minute call to catch up and explore where we might collaborate."
+        )
+    return (
+        f"My name is Leo Peter Charles — I am the Founder of Jane Aerospace, India's first integrated "
+        f"aerospace supply chain company, which I established in 2019 after working extensively in the "
+        f"unmanned aviation and defence ecosystem.\n\n"
+        f"We specialise in end-to-end supply chain solutions for the aerospace and defence sector — "
+        f"vendor qualification, procurement optimisation, and AI-enabled sourcing. We have been "
+        f"recognised among India's Top 10 Aerospace & Defence Startups and I was named in the "
+        f"'40 Under 40 India 2025' leaders list.\n\n"
+        f"I came across {business_name} and believe there is a strong strategic fit worth a short "
+        f"conversation. I would appreciate 20 minutes of your time — no obligations, just a focused call."
+    )
 
-_FALLBACKS_B = [
-    "Most growing companies in India are still running supply chain the old way — fragmented vendors, manual follow-ups, and no single point of accountability when things break. Jane Aerospace works as a dedicated supply chain-as-a-service partner, so there's one team owning the whole thing. Worth 15 minutes?",
-    "A lot of operations teams are spending 40% of their time chasing vendors and fixing supply chain gaps that shouldn't exist. Jane Aerospace takes that entire function off your plate as a service. Worth a quick call?",
-]
 
-_FALLBACKS_C = [
-    "We recently helped a mid-size manufacturer in India consolidate their vendor base and cut procurement lead times significantly — running their supply chain as a service rather than an in-house headache. Given what you're building at {company}, thought this might be relevant. 15 minutes?",
-    "We've been working with a few companies in your space as their dedicated supply chain partner — handling everything from vendor coordination to last-mile so their team stays focused on the business. Thought it might be worth a conversation.",
-]
+def _body_b(business_name: str, _contact_name: str | None,
+            _designation: str | None, location: str | None) -> str:
+    sector_note = f" in the {location} region" if location else ""
+    return (
+        f"I am Leo Peter Charles, Founder of Jane Aerospace — I started the company in 2019 after "
+        f"years in the drone and defence supply chain space{sector_note}, and we have since grown "
+        f"into India's leading aerospace supply chain services firm.\n\n"
+        f"We work alongside procurement and operations teams at aerospace and defence companies to "
+        f"reduce sourcing lead times, qualify vendors to international standards, and build resilient "
+        f"supply networks — helping organisations like {business_name} operate with greater efficiency.\n\n"
+        f"Would a brief 20-minute call this week or next give us the chance to see if there is a fit?"
+    )
+
+
+def _body_c(business_name: str, _contact_name: str | None, summary: str | None) -> str:
+    context = ""
+    if summary:
+        snippet = summary.strip().rstrip(".").split(".")[0]
+        context = f" — particularly in areas like {snippet.lower()}" if snippet else ""
+    return (
+        f"I am Leo Peter Charles, Founder of Jane Aerospace — recognised in the '40 Under 40 India "
+        f"2025' list for our work in aerospace supply chain innovation.\n\n"
+        f"We have helped companies{context} reduce procurement cycle times, improve vendor "
+        f"qualification, and build more resilient sourcing networks within the aerospace and defence "
+        f"sector. Our approach combines deep domain expertise with AI-enabled tooling.\n\n"
+        f"Given what your team is doing at {business_name}, I believe there is a meaningful fit worth "
+        f"exploring. I would be glad to share relevant case studies on a concise 20-minute call — "
+        f"no commitment required."
+    )
 
 
 # ---------------------------------------------------------------------------
 # Main entrypoint
 # ---------------------------------------------------------------------------
+
+def _generate_ai_outreach(
+    business_name: str,
+    contact_name: str | None,
+    designation: str | None,
+    location: str | None,
+    summary: str | None,
+    is_repeat_lead: bool = False,
+) -> tuple[str, str] | None:
+    """Use Claude to write a fully personalised cold outreach email.
+
+    Returns (subject, body) or None if AI unavailable.
+    """
+    if not settings.ANTHROPIC_API_KEY:
+        return None
+
+    role_line = f"Their designation: {designation}" if designation else "Their role is not specified."
+    location_line = f"They are based in {location}." if location else ""
+    summary_line = f"Company background: {summary}" if summary else ""
+    repeat_line = (
+        "IMPORTANT: This person has engaged with Jane Aerospace before. "
+        "Open with a warm reconnect — do NOT introduce Jane from scratch."
+        if is_repeat_lead else ""
+    )
+
+    system = (
+        "You are Leo Peter Charles — Founder & Managing Director of Jane Aerospace, "
+        "India's first integrated aerospace supply chain company (est. 2019, Bengaluru). "
+        "You are an aeronautical engineer with 10+ years in the drone, unmanned aviation, "
+        "and defence supply chain ecosystem. You were named in '40 Under 40 India 2025'. "
+        "Jane Aerospace has been recognised as one of India's Top 10 Aerospace & Defence Startups.\n\n"
+        "Write a cold outreach email to a potential business lead. Rules:\n"
+        "- Address the person BY NAME if provided. Use first name only.\n"
+        "- ALWAYS reference their SPECIFIC ROLE/DESIGNATION in the opening line — "
+        "  show you know who they are and what they do.\n"
+        "- Reference their SPECIFIC COMPANY by name — make it clear this is not a bulk email.\n"
+        "- Use the company summary/background to draw ONE specific connection to Jane Aerospace's work.\n"
+        "- Introduce yourself as Leo Peter Charles, Founder of Jane Aerospace, "
+        "  briefly (1 sentence) — aeronautical engineer, 10+ years in the sector.\n"
+        "- Explain in 1-2 sentences what Jane Aerospace does that is RELEVANT to their business.\n"
+        "- End with a clear, low-pressure CTA: request a 20-minute call.\n"
+        "- Total length: 4-5 short paragraphs. NO bullet points. NO jargon. "
+        "  Sound like a real person writing a real email, not a sales template.\n"
+        "- DO NOT include a greeting line (no 'Hi X,') — that is added separately.\n"
+        "- DO NOT include a sign-off — that is added separately.\n"
+        "- Return ONLY the email body paragraphs. Nothing else.\n\n"
+        "Also generate a subject line: professional, specific to their company or role, "
+        "under 60 characters. Return it on the VERY FIRST LINE prefixed with 'SUBJECT: ', "
+        "then a blank line, then the body."
+    )
+
+    user_parts = [
+        f"Lead name: {contact_name or 'Unknown'}",
+        f"Company: {business_name}",
+        role_line,
+        location_line,
+        summary_line,
+        repeat_line,
+    ]
+    user = "\n".join(p for p in user_parts if p)
+
+    try:
+        raw = _ask(system, user, model=_SONNET, max_tokens=500)
+        if not raw:
+            return None
+        lines = raw.strip().split("\n")
+        subject = ""
+        body_lines = []
+        for i, line in enumerate(lines):
+            if line.startswith("SUBJECT:"):
+                subject = line.replace("SUBJECT:", "").strip()
+            elif subject and line.strip():
+                body_lines = lines[i:]
+                break
+        body = "\n\n".join(
+            p.strip() for p in "\n".join(body_lines).split("\n\n") if p.strip()
+        )
+        if not subject:
+            subject = f"Partnership Opportunity — Jane Aerospace & {business_name}"
+        return subject, body
+    except Exception as exc:
+        logger.warning("ai_outreach_failed", company=business_name, error=str(exc))
+        return None
+
 
 def generate_outreach(
     business_name: str,
@@ -187,24 +216,38 @@ def generate_outreach(
     summary: str | None,
     is_repeat_lead: bool = False,
 ) -> dict:
-    """Generate personalised outreach email.
+    """Generate a personalised outreach email.
+
+    Tries AI-generated personalisation first (using Claude).
+    Falls back to fixed templates if AI is unavailable.
 
     Returns:
         {
-          "body": str,           # 3-4 sentence body (no greeting/sign-off)
-          "subject": str,        # email subject line
-          "variant": str,        # "A", "B", or "C"
-          "subject_variant": str # "S1", "S2", or "S3"
+          "body": str,
+          "subject": str,
+          "variant": str,        # "AI", "A", "B", or "C"
+          "subject_variant": str # "AI" or "S1"/"S2"/"S3"
         }
     """
-    # Select body variant by weighted random (self-adjusting based on reply rates)
+    # Try AI personalisation first
+    ai_result = _generate_ai_outreach(
+        business_name=business_name,
+        contact_name=contact_name,
+        designation=designation,
+        location=location,
+        summary=summary,
+        is_repeat_lead=is_repeat_lead,
+    )
+    if ai_result:
+        subject, body = ai_result
+        logger.info("ai_outreach_generated", company=business_name, designation=designation)
+        return {"body": body, "subject": subject, "variant": "AI", "subject_variant": "AI"}
+
+    # Fallback to fixed templates
     weights = get_variant_weights()
     variant = random.choices(["A", "B", "C"], weights=weights, k=1)[0]
-
-    # Select subject variant uniformly (tracked separately later)
     subject_variant = random.choice(["S1", "S2", "S3"])
 
-    # Generate subject
     if subject_variant == "S1":
         subject = _subject_s1(contact_name)
     elif subject_variant == "S2":
@@ -212,40 +255,15 @@ def generate_outreach(
     else:
         subject = _subject_s3(designation, location)
 
-    # Generate body via AI
-    user_msg = _build_user_msg(business_name, contact_name, designation, location, summary)
-
-    # Repeat lead (#25): prepend a warm reconnect opener before the variant body
-    if is_repeat_lead:
-        first_name = (contact_name or business_name).split()[0]
-        reconnect_prefix = (
-            f"Great to reconnect, {first_name} — it's been a while since we last spoke. "
-            "A lot has moved forward on our end and I wanted to share a quick update."
-        )
-        if variant == "A":
-            body = _ask(_SYSTEM_A, user_msg) or random.choice(_FALLBACKS_A)
-        elif variant == "B":
-            body = _ask(_SYSTEM_B, user_msg) or random.choice(_FALLBACKS_B)
-        else:
-            fb = random.choice(_FALLBACKS_C).format(company=business_name)
-            body = _ask(_SYSTEM_C, user_msg) or fb
-        body = f"{reconnect_prefix}\n\n{body}"
-    elif variant == "A":
-        body = _ask(_SYSTEM_A, user_msg) or random.choice(_FALLBACKS_A)
+    if variant == "A":
+        body = _body_a(business_name, contact_name, designation, is_repeat_lead)
     elif variant == "B":
-        body = _ask(_SYSTEM_B, user_msg) or random.choice(_FALLBACKS_B)
+        body = _body_b(business_name, contact_name, designation, location)
     else:
-        fb = random.choice(_FALLBACKS_C).format(company=business_name)
-        body = _ask(_SYSTEM_C, user_msg) or fb
+        body = _body_c(business_name, contact_name, summary)
 
-    logger.info("outreach_generated", company=business_name, variant=variant, subject_variant=subject_variant)
-
-    return {
-        "body": body,
-        "subject": subject,
-        "variant": variant,
-        "subject_variant": subject_variant,
-    }
+    logger.info("template_outreach_generated", company=business_name, variant=variant)
+    return {"body": body, "subject": subject, "variant": variant, "subject_variant": subject_variant}
 
 
 # ---------------------------------------------------------------------------

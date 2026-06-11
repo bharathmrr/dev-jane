@@ -342,27 +342,23 @@ def send_week_selection_email(
 ) -> bool:
     greeting_name = (contact_name or recipient_name).split()[0].capitalize()
     company_name = recipient_name
-    subject = subject_override or f"Partnership Opportunity — Jane Aerospace × {company_name}"
+    subject = subject_override or f"Meeting Request — Jane Aerospace"
 
-    # AI-generated intro paragraph (personalized) or default
     if body_text:
         intro_paras = [p.strip() for p in body_text.split("\n\n") if p.strip()]
     else:
         intro_paras = [
-            f"I came across {company_name} while exploring companies doing meaningful work in procurement and supply chain — and your name kept coming up in the right conversations.",
+            f"My name is Leo Peter Charles — I am the Founder of Jane Aerospace, India's first integrated aerospace supply chain company, established in Bengaluru in 2019.",
+            f"We specialise in end-to-end supply chain solutions for the aerospace and defence sector — vendor qualification, procurement optimisation, and AI-enabled sourcing. Jane Aerospace has been recognised among India's Top 10 Aerospace & Defence Startups.",
+            f"I came across {company_name} and believe there is a strong strategic fit worth a short conversation. I would appreciate 20 minutes of your time — no obligations, just a focused call.",
         ]
 
     body_paras = [f"Hi {greeting_name},", ""] + intro_paras + [
-        "",
-        f"My name is {settings.ORGANIZER_NAME}, Founder and Managing Director of Jane Aerospace, where we focus on unmanned aviation products, supply chain integration, vendor network intelligence, and AI-enabled procurement solutions aligned with the Atmanirbhar Bharat mission.",
-        f"We have been working with companies like yours to help them streamline procurement cycles, build resilient supplier networks, and stay ahead of industry shifts. I believe there is a genuine opportunity for us to explore together.",
-        "I am not looking to pitch anything heavy — just a focused 20-minute call to understand where you are headed and share what we are building. No obligations whatsoever.",
-        "Please click one of the options below to let me know which week works better for you:",
+        "Please select a week that suits you:",
     ]
 
     closing = [
-        "Alternatively, feel free to reply directly to this email and I will work around your schedule.",
-        "Thank you for your time and I look forward to hearing from you.",
+        "If neither week works, simply reply and I will find a time that fits your schedule.",
     ]
 
     print(f"[EMAIL] Sending week-selection email -> {to_email}")
@@ -394,15 +390,14 @@ def send_v2_slots_email(
         intro_paras = [p.strip() for p in body_text.split("\n\n") if p.strip()]
     else:
         intro_paras = [
-            "Thank you for getting back to me — I really appreciate it.",
-            "I have checked our calendar and put together a few time slots that are open right now. Each of the times listed below is confirmed available. Simply click the one that works best for you and your spot will be locked in instantly — no back and forth needed.",
+            "Thank you for your interest — I appreciate you taking the time to respond.",
+            "I have reserved the following slots exclusively for this call. Please click on a time that works best for you to instantly confirm your booking:",
         ]
 
     body_paras = [f"Hi {greeting_name},", ""] + intro_paras
 
     closing = [
-        "If none of these times work for you, please do not hesitate to reply to this email with a date and time that suits you better and I will do my best to accommodate.",
-        "Looking forward to speaking with you.",
+        "Should none of the above times suit you, please reply with your preferred date and time and I will do my best to accommodate.",
     ]
 
     if book_urls:
@@ -435,20 +430,19 @@ def send_booking_confirmation_to_lead(
     subject = f"Meeting Confirmed — Jane Aerospace"
 
     link_line = (
-        f'You can join the call using the following link: <a href="{meeting_link}" style="color:#1155cc;">{meeting_link}</a>'
+        f'Join the call using this link: <a href="{meeting_link}" style="color:#1155cc;font-weight:600;">{meeting_link}</a>'
         if meeting_link else
-        "A calendar invitation with the full meeting details will be sent to your inbox shortly."
+        "A calendar invitation with full joining details has been sent to your inbox."
     )
 
     body_paras = [
         f"Hi {greeting_name},",
         "",
-        "I am delighted to confirm that your meeting with Jane Aerospace has been successfully scheduled. We are genuinely looking forward to speaking with you.",
-        f"Your confirmed meeting time is: <strong>{slot_start} IST</strong>",
+        f"Your meeting with <strong>Jane Aerospace</strong> is confirmed.",
+        f"<strong>Date &amp; Time:</strong> {slot_start} IST",
         link_line,
-        "Please add this to your calendar so you do not miss it. If for any reason you need to reschedule or if anything changes on your end, please do not hesitate to reply to this email and we will find another time that works — there is absolutely no trouble at all.",
-        "We are excited about this conversation and believe it will be a valuable one for both sides.",
-        "Thank you once again for your time and we look forward to speaking with you soon.",
+        "Please add this to your calendar. We will cover a brief overview of our capabilities and explore areas of strategic alignment.",
+        "Should you need to reschedule, please reply to this email at least 24 hours in advance and we will arrange an alternative time.",
     ]
 
     print(f"[EMAIL] Sending booking confirmation -> {to_email}")
@@ -477,26 +471,25 @@ def send_v2_reminder_email(
         body_paras = [
             f"Hi {greeting_name},",
             "",
-            "I wanted to follow up on my earlier note in case it got buried — inboxes can get very busy and I completely understand.",
-            "I reached out because I genuinely believe there is a real opportunity for Jane Aerospace and your organisation to explore a conversation together. We work with companies on supply chain integration, drone procurement, and AI-enabled vendor intelligence, and the work your team is doing is exactly the kind of initiative we love to support.",
-            "I am only asking for 20 minutes of your time — no heavy pitch, just an open conversation about where things are heading and whether there is a fit worth exploring.",
-            "If any of these weeks work for you, please click below to pick a time:",
+            "I wanted to follow up on my earlier message — I appreciate you taking the time to read it.",
+            "To give you a bit more context: Jane Aerospace was founded by Leo Peter Charles, an aeronautical engineer who built the company from the ground up in 2019 to address a genuine gap in India's aerospace and defence supply chain. We have since been recognised among India's Top 10 Aerospace & Defence Startups.",
+            "Our focus is practical — vendor qualification, procurement cycle reduction, and AI-enabled sourcing for companies in the aerospace, defence, and industrial sectors. Many of our clients came to us with a specific pain point and discovered a much broader fit.",
+            "I believe a 20-minute call would be worth your time — please select a week below:",
         ]
         closing = [
-            "Or simply reply to this email and we will sort something out.",
-            "Thank you for your time and I hope to hear from you soon.",
+            "Alternatively, reply to this email and I will work around your schedule.",
         ]
     else:
         body_paras = [
             f"Hi {greeting_name},",
             "",
-            "I hope you are doing well. This will be my last follow-up and I want to keep it brief.",
-            "I have genuinely enjoyed learning about what your organisation is doing and I still believe there is something worth exploring together. That said, I also respect that timing is everything in business and now may simply not be the right moment.",
-            "If you are ever open to a conversation in the future — whether it is this month or six months from now — please know that the door is always open at Jane Aerospace.",
-            "If now works, please click below:",
+            "I wanted to send one final note before I close the loop on my end.",
+            "I understand timing and priorities shift — if this is not the right moment for {greeting_name} and the team at your company, that is completely fine. Our door remains open.",
+            "For context, Leo Peter Charles (our Founder) makes it a point to personally engage with every company we reach out to — so if you do want to reconnect at any point, you will be speaking directly with him.",
+            "If you are open to a brief conversation now, some available slots are below:",
         ]
         closing = [
-            "Wishing you and your team all the very best.",
+            "Thank you for your time. We wish you and your team continued success — and hope to connect at the right moment.",
         ]
 
     print(f"[EMAIL] Sending follow-up #{follow_up_count} -> {to_email}")

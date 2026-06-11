@@ -45,6 +45,21 @@ _STAGE_TO_PICKLIST: dict[str, str] = {
     "Onboarding Complete": "Complete",
 }
 
+# Maps onboarding stage → Zoho CRM Lead_Status picklist value (actual CRM values)
+_STAGE_TO_LEAD_STATUS: dict[str, str] = {
+    "Onboarding Started": "Discovery Call Stage",
+    "KYC Form Sent":      "Discovery Call Stage",
+    "KYC Submitted":      "Discovery Call Stage",
+    "KYC Auto-Approved":  "Discovery Call Stage",
+    "KYC Manually Approved": "Discovery Call Stage",
+    "KYC Approved":       "Discovery Call Stage",
+    "KYC Rejected":       "Discovery Call Stage",
+    "NDA Sent for E-Sign": "Discovery Call Stage",
+    "NDA Approved":       "Discovery Call Stage",
+    "Agreement Sent for E-Sign": "Discovery Call Stage",
+    "Onboarding Complete": "Qualified",
+}
+
 
 def _get_access_token() -> str:
     now = time.time()
@@ -110,24 +125,54 @@ def create_lead(
     phone: str = "",
     company_type: str = "",
     onboarding_id: str = "",
+    summary: str = "",
+    designation: str = "",
+    industry: str = "",
+    city: str = "",
+    state: str = "",
+    country: str = "",
+    street: str = "",
+    annual_revenue: str = "",
 ) -> str | None:
     """Create a new CRM Lead. Returns Lead ID or None on failure."""
     first, last = _split_name(contact_name)
-    payload = {
-        "data": [
-            {
-                "First_Name": first,
-                "Last_Name": last or company_name,
-                "Email": email,
-                "Phone": phone,
-                "Company": company_name,
-                "Description": f"Onboarding ID: {onboarding_id} | Type: {company_type}",
-                "Lead_Source": "Jane Aerospace Onboarding",
-            }
-        ]
+    desc_parts = []
+    if summary:
+        desc_parts.append(summary)
+    if company_type:
+        desc_parts.append(f"Company Type: {company_type}")
+    if onboarding_id:
+        desc_parts.append(f"Onboarding ID: {onboarding_id}")
+
+    record: dict = {
+        "First_Name": first,
+        "Last_Name": last or company_name,
+        "Email": email,
+        "Company": company_name,
+        "Lead_Source": "Jane Aerospace Onboarding",
+        "Lead_Status": "Leads",
     }
+    if phone:
+        record["Phone"] = phone
+    if desc_parts:
+        record["Description"] = "\n".join(desc_parts)
+    if designation:
+        record["Designation"] = designation
+    if industry:
+        record["Industry"] = industry
+    if city:
+        record["City"] = city
+    if state:
+        record["State"] = state
+    if country:
+        record["Country"] = country
+    if street:
+        record["Street"] = street
+    if annual_revenue:
+        record["Annual_Revenue"] = annual_revenue
+
     try:
-        resp = httpx.post(f"{_BASE}/Leads", headers=_headers(), json=payload, timeout=20)
+        resp = httpx.post(f"{_BASE}/Leads", headers=_headers(), json={"data": [record]}, timeout=20)
         resp.raise_for_status()
         data = resp.json()
         lead_id = data.get("data", [{}])[0].get("details", {}).get("id")
@@ -178,16 +223,160 @@ def upsert_lead(
     phone: str = "",
     company_type: str = "",
     onboarding_id: str = "",
+    summary: str = "",
+    designation: str = "",
+    industry: str = "",
+    city: str = "",
+    state: str = "",
+    country: str = "",
+    street: str = "",
+    annual_revenue: str = "",
 ) -> str | None:
-    """Find or create a Lead. Returns Lead ID."""
+    """Find or create a CRM Lead. Returns Lead ID."""
     lead_id = find_lead_by_email(email)
     if lead_id:
-        update_lead(lead_id, {
-            "Company": company_name,
-            "Description": f"Onboarding ID: {onboarding_id} | Type: {company_type}",
-        })
+        # Update with any enriched data provided
+        upd: dict = {"Company": company_name}
+        if summary:
+            upd["Description"] = summary
+        if phone:
+            upd["Phone"] = phone
+        if designation:
+            upd["Designation"] = designation
+        if industry:
+            upd["Industry"] = industry
+        if city:
+            upd["City"] = city
+        if state:
+            upd["State"] = state
+        if country:
+            upd["Country"] = country
+        if street:
+            upd["Street"] = street
+        if annual_revenue:
+            upd["Annual_Revenue"] = annual_revenue
+        if onboarding_id:
+            upd["Onboarding_ID"] = onboarding_id
+        update_lead(lead_id, upd)
         return lead_id
-    return create_lead(email, contact_name, company_name, phone, company_type, onboarding_id)
+    return create_lead(
+        email=email,
+        contact_name=contact_name,
+        company_name=company_name,
+        phone=phone,
+        company_type=company_type,
+        onboarding_id=onboarding_id,
+        summary=summary,
+        designation=designation,
+        industry=industry,
+        city=city,
+        state=state,
+        country=country,
+        street=street,
+        annual_revenue=annual_revenue,
+    )
+
+
+def upload_lead_attachment(lead_id: str, filename: str, file_bytes: bytes, mime_type: str = "application/octet-stream") -> str | None:
+    """Attach a file to a CRM Lead. Returns the Zoho attachment ID or None."""
+    try:
+        url = f"{_BASE}/Leads/{lead_id}/Attachments"
+        resp = httpx.post(
+            url,
+            headers={"Authorization": f"Zoho-oauthtoken {_get_access_token()}"},
+            files={"file": (filename, file_bytes, mime_type)},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        att_id = data.get("data", [{}])[0].get("details", {}).get("id")
+        log.info("zoho_crm_attachment_uploaded", lead_id=lead_id, filename=filename, att_id=att_id)
+        return str(att_id) if att_id else None
+    except Exception as exc:
+        log.error("zoho_crm_attachment_failed", lead_id=lead_id, filename=filename, error=str(exc))
+        return None
+
+
+def download_lead_attachment(lead_id: str, attachment_id: str) -> bytes | None:
+    """Download a CRM Lead attachment. Returns raw bytes or None."""
+    try:
+        url = f"{_BASE}/Leads/{lead_id}/Attachments/{attachment_id}"
+        resp = httpx.get(
+            url,
+            headers={"Authorization": f"Zoho-oauthtoken {_get_access_token()}"},
+            timeout=30,
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+        return resp.content
+    except Exception as exc:
+        log.error("zoho_crm_attachment_download_failed", lead_id=lead_id, att_id=attachment_id, error=str(exc))
+        return None
+
+
+def sync_kyc_data(
+    email: str,
+    company_name: str,
+    kyc: dict,
+) -> None:
+    """Called after KYC submission — updates CRM Lead with all KYC fields + adds Note.
+
+    kyc dict keys: gstin, pan, cin, ifsc, bank_name, registered_address, city, state,
+                   nature_of_business, entity_type, date_of_incorporation,
+                   annual_turnover, designation, country_of_incorporation,
+                   company_reg_number, tax_id_tin, lei_number
+    """
+    if not settings.ZOHO_CRM_REFRESH_TOKEN:
+        return
+
+    lead_id = find_lead_by_email(email)
+    if not lead_id:
+        log.warning("zoho_crm_sync_kyc_no_lead", email=email)
+        return
+
+    upd: dict = {}
+    if kyc.get("city"):
+        upd["City"] = kyc["city"]
+    if kyc.get("state"):
+        upd["State"] = kyc["state"]
+    if kyc.get("registered_address"):
+        upd["Street"] = kyc["registered_address"]
+    if kyc.get("country_of_incorporation") or kyc.get("country"):
+        upd["Country"] = kyc.get("country_of_incorporation") or kyc.get("country", "")
+    if kyc.get("nature_of_business"):
+        upd["Industry"] = kyc["nature_of_business"]
+    if kyc.get("designation") or kyc.get("signatory1_designation"):
+        upd["Designation"] = kyc.get("designation") or kyc.get("signatory1_designation", "")
+    if upd:
+        update_lead(lead_id, upd)
+
+    # Build a detailed KYC note
+    lines = [f"KYC Form Submitted for {company_name}", ""]
+    for label, key in [
+        ("GSTIN",            "gstin"),
+        ("PAN",              "pan"),
+        ("CIN",              "cin"),
+        ("IFSC",             "ifsc"),
+        ("Bank",             "bank_name"),
+        ("Address",          "registered_address"),
+        ("City",             "city"),
+        ("State",            "state"),
+        ("Nature of Business", "nature_of_business"),
+        ("Entity Type",      "entity_type"),
+        ("Date of Incorp.",  "date_of_incorporation"),
+        ("Annual Turnover",  "annual_turnover"),
+        ("Signatory",        "designation"),
+        ("Country of Incorp.", "country_of_incorporation"),
+        ("Company Reg No",   "company_reg_number"),
+        ("Tax ID / TIN",     "tax_id_tin"),
+        ("LEI Number",       "lei_number"),
+    ]:
+        val = kyc.get(key, "") or ""
+        if val:
+            lines.append(f"{label}: {val}")
+
+    add_note(lead_id, f"KYC Data — {company_name}", "\n".join(lines))
+    log.info("zoho_crm_kyc_synced", email=email, company=company_name)
 
 
 def sync_onboarding_stage(
@@ -201,29 +390,21 @@ def sync_onboarding_stage(
     onboarding_id: str = "",
     nda_contract_id: str = "",
     agreement_contract_id: str = "",
+    summary: str = "",
 ) -> None:
-    """
-    Called at every pipeline stage. Upserts the contact and adds a note.
-
-    stage examples:
-      "Onboarding Started"
-      "KYC Submitted"
-      "KYC Auto-Approved"
-      "KYC Manually Approved"
-      "KYC Rejected"
-      "NDA Draft Generated"
-      "NDA Sent for E-Sign"
-      "NDA Signed — Pending Review"
-      "NDA Approved"
-      "Agreement Sent for E-Sign"
-      "Agreement Signed — Pending Review"
-      "Agreement Approved"
-      "Onboarding Complete"
-    """
+    """Called at every pipeline stage. Upserts the Lead and adds a Note."""
     if not settings.ZOHO_CRM_REFRESH_TOKEN:
         return
 
-    lead_id = upsert_lead(email, contact_name, company_name, phone, company_type, onboarding_id)
+    lead_id = upsert_lead(
+        email=email,
+        contact_name=contact_name,
+        company_name=company_name,
+        phone=phone,
+        company_type=company_type,
+        onboarding_id=onboarding_id,
+        summary=summary,
+    )
     if not lead_id:
         log.warning("zoho_crm_sync_skipped_no_lead", email=email, stage=stage)
         return
@@ -233,6 +414,9 @@ def sync_onboarding_stage(
     picklist_val = _STAGE_TO_PICKLIST.get(stage)
     if picklist_val:
         extra_fields["Onboarding_Stage"] = picklist_val
+    lead_status_val = _STAGE_TO_LEAD_STATUS.get(stage)
+    if lead_status_val:
+        extra_fields["Lead_Status"] = lead_status_val
     if onboarding_id:
         extra_fields["Onboarding_ID"] = onboarding_id
     if nda_contract_id:

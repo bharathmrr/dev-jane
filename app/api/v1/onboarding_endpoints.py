@@ -1,22 +1,19 @@
 """Customer Onboarding Pipeline API endpoints.
 
 Routes:
-  POST /onboarding/start/{lead_id}                  — team initiates onboarding
-  GET  /onboarding/list                             — all onboarding records
-  GET  /onboarding/{onboarding_id}                  — single record detail
-  GET  /onboarding/kyc/form/{onboarding_id}/{token} — lead fills KYC form (public, HMAC-signed)
+  POST /onboarding/start/{lead_id}                   — team initiates onboarding
+  GET  /onboarding/list                              — all onboarding records
+  GET  /onboarding/{onboarding_id}                   — single record detail
+  GET  /onboarding/kyc/form/{onboarding_id}/{token}  — lead fills KYC form (public, HMAC-signed)
   POST /onboarding/kyc/submit/{onboarding_id}/{token}— lead submits KYC form
-  POST /onboarding/kyc/review/{onboarding_id}       — team approve/reject KYC
-  GET  /onboarding/nda/preview/{onboarding_id}      — team views filled NDA
-  POST /onboarding/nda/draft-review/{onboarding_id} — team approve/reject NDA draft
-  GET  /onboarding/nda/signed/{onboarding_id}       — team views signed NDA from lead
-  POST /onboarding/nda/sign-review/{onboarding_id}  — team approve/reject signed NDA
-  POST /onboarding/nda/upload-template              — upload NDA template file
-  GET  /onboarding/agreement/preview/{onboarding_id}
-  POST /onboarding/agreement/draft-review/{onboarding_id}
-  GET  /onboarding/agreement/signed/{onboarding_id}
-  POST /onboarding/agreement/sign-review/{onboarding_id}
-  POST /onboarding/agreement/upload-template
+  POST /onboarding/kyc/review/{onboarding_id}        — team approve/reject KYC
+  GET  /onboarding/nda/preview/{onboarding_id}       — team views NDA draft HTML
+  POST /onboarding/nda/draft-review/{onboarding_id}  — team approve/reject NDA draft → emails lead
+  POST /onboarding/nda/sign-review/{onboarding_id}   — team marks NDA acknowledged → triggers Agreement
+  GET  /onboarding/agreement/preview/{onboarding_id} — team views Agreement draft HTML
+  POST /onboarding/agreement/draft-review/{onboarding_id} — team approve/reject Agreement → emails lead
+  POST /onboarding/agreement/sign-review/{onboarding_id}  — team marks Agreement acknowledged → complete
+  POST /onboarding/import-csv                             — bulk import leads from CSV (email,company_name,summary,contact_name,phone)
 """
 from __future__ import annotations
 
@@ -28,13 +25,16 @@ import uuid
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.logging import get_logger
+
+logger = get_logger("onboarding_endpoints")
 from app.db.base import CompanyType, DocumentStatus, KYCStatus
 from app.db.models import KYCSubmission, LeadV2, OnboardingRecord
 from app.db.session import get_db
@@ -42,8 +42,6 @@ from app.services.onboarding_email import (
     make_action_url,
     make_kyc_token,
     make_kyc_url,
-    notify_team_kyc_submitted,
-    notify_team_signed_doc_received,
     verify_kyc_token,
 )
 
@@ -426,6 +424,218 @@ async def _pipeline_stats(db: AsyncSession) -> dict:
     return {"total": total, "counts": counts, "stuck": stuck, "recent_complete": recent_complete}
 
 
+@router.get("/track", response_class=HTMLResponse, include_in_schema=False)
+async def lead_track_page(db: AsyncSession = Depends(get_db)):
+    """Lead tracking lookup — enter email, Ctrl+S to auto-fill all lead details."""
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lead Tracker — Jane Aerospace</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:Arial,sans-serif;background:#f4f6fb;padding:24px;}
+  .card{background:#fff;max-width:820px;margin:0 auto;border-radius:12px;
+        box-shadow:0 2px 16px rgba(0,0,0,.1);padding:32px 36px;}
+  h1{color:#1a3a6b;font-size:20px;margin-bottom:20px;}
+  .logo{font-size:16px;font-weight:700;color:#1a3a6b;margin-bottom:16px;}
+  .search-row{display:flex;gap:10px;align-items:center;margin-bottom:24px;}
+  input[type=email]{flex:1;padding:10px 14px;border:2px solid #d1d5db;border-radius:7px;
+    font-size:14px;outline:none;transition:border .2s;}
+  input[type=email]:focus{border-color:#1a3a6b;}
+  .btn{padding:10px 22px;background:#1a3a6b;color:#fff;border:none;border-radius:7px;
+    font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;}
+  .btn:hover{background:#163060;}
+  .hint{font-size:11px;color:#9ca3af;margin-top:4px;}
+  #result{display:none;}
+  .sec{font-size:11px;font-weight:700;color:#fff;background:#1a3a6b;
+    text-transform:uppercase;letter-spacing:.06em;padding:7px 12px;border-radius:5px;
+    margin:20px 0 10px;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;margin-bottom:4px;}
+  .grid-3{grid-template-columns:1fr 1fr 1fr;}
+  .field{padding:9px 14px;border-bottom:1px solid #f0f2f8;}
+  .field:nth-child(odd){background:#f8fafc;}
+  .field label{display:block;font-size:11px;color:#6b7280;font-weight:600;margin-bottom:2px;text-transform:uppercase;}
+  .field span{font-size:13px;color:#111;font-family:monospace;}
+  .badge{display:inline-block;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700;}
+  .badge-new{background:#f3f4f6;color:#374151;}
+  .badge-sent{background:#dbeafe;color:#1e40af;}
+  .badge-replied{background:#d1fae5;color:#065f46;}
+  .badge-booked{background:#bbf7d0;color:#14532d;}
+  .badge-kyc{background:#fef3c7;color:#92400e;}
+  .badge-nda{background:#ede9fe;color:#5b21b6;}
+  .badge-ok{background:#d1fae5;color:#065f46;}
+  .badge-pending{background:#fef3c7;color:#92400e;}
+  .badge-rejected{background:#fee2e2;color:#991b1b;}
+  #err{display:none;background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:7px;
+    font-size:13px;margin-bottom:16px;}
+  #loading{display:none;color:#6b7280;font-size:13px;margin-bottom:12px;}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">✈ Jane Aerospace</div>
+  <h1>Lead Tracker</h1>
+
+  <div class="search-row">
+    <input type="email" id="emailInput" placeholder="Enter lead email address…" autocomplete="off">
+    <button class="btn" onclick="lookupLead()">Look Up</button>
+  </div>
+  <p class="hint">Type the lead email and press <strong>Enter</strong> or click Look Up</p>
+
+  <div id="err"></div>
+  <div id="loading">Looking up lead…</div>
+
+  <div id="result">
+    <!-- Lead Info -->
+    <div class="sec">Lead Information</div>
+    <div class="grid">
+      <div class="field"><label>Email</label><span id="f-email">—</span></div>
+      <div class="field"><label>Company</label><span id="f-company">—</span></div>
+      <div class="field"><label>Contact Name</label><span id="f-contact">—</span></div>
+      <div class="field"><label>Phone</label><span id="f-phone">—</span></div>
+      <div class="field"><label>Lead Status</label><span id="f-status">—</span></div>
+      <div class="field"><label>Summary</label><span id="f-summary">—</span></div>
+      <div class="field"><label>Sent At</label><span id="f-sent">—</span></div>
+      <div class="field"><label>Replied At</label><span id="f-replied">—</span></div>
+      <div class="field"><label>Booked At</label><span id="f-booked">—</span></div>
+      <div class="field"><label>Onboarding Started</label><span id="f-ob-started">—</span></div>
+    </div>
+
+    <!-- Onboarding Pipeline -->
+    <div id="ob-section" style="display:none;">
+      <div class="sec">Onboarding Pipeline</div>
+      <div class="grid">
+        <div class="field"><label>Overall Stage</label><span id="f-stage">—</span></div>
+        <div class="field"><label>Company Type</label><span id="f-ctype">—</span></div>
+        <div class="field"><label>KYC Status</label><span id="f-kyc">—</span></div>
+        <div class="field"><label>KYC Submitted At</label><span id="f-kyc-sub">—</span></div>
+        <div class="field"><label>KYC Approved At</label><span id="f-kyc-app">—</span></div>
+        <div class="field"><label>NDA Status</label><span id="f-nda">—</span></div>
+        <div class="field"><label>NDA Sent At</label><span id="f-nda-sent">—</span></div>
+        <div class="field"><label>Agreement Status</label><span id="f-agr">—</span></div>
+        <div class="field"><label>Agreement Sent At</label><span id="f-agr-sent">—</span></div>
+        <div class="field"><label>Onboarding ID</label><span id="f-ob-id">—</span></div>
+      </div>
+
+      <!-- KYC Submission Details -->
+      <div id="kyc-sub-section" style="display:none;">
+        <div class="sec">KYC Submission</div>
+        <div class="grid grid-3">
+          <div class="field"><label>Company Name (KYC)</label><span id="f-kyc-company">—</span></div>
+          <div class="field"><label>Contact (KYC)</label><span id="f-kyc-contact">—</span></div>
+          <div class="field"><label>Contact Number</label><span id="f-kyc-phone">—</span></div>
+          <div class="field"><label>GSTIN</label><span id="f-gstin">—</span></div>
+          <div class="field"><label>PAN</label><span id="f-pan">—</span></div>
+          <div class="field"><label>CIN</label><span id="f-cin">—</span></div>
+          <div class="field"><label>GST Certificate</label><span id="f-gst-file">—</span></div>
+          <div class="field"><label>Incorporation Cert.</label><span id="f-inc-file">—</span></div>
+          <div class="field"><label>KYC Attempt #</label><span id="f-kyc-att">—</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = '/api/v1/onboarding';
+
+function badge(val, map) {
+  if (!val) return '<span style="color:#9ca3af">—</span>';
+  const cls = map[val.toLowerCase()] || 'badge-new';
+  return `<span class="badge ${cls}">${val}</span>`;
+}
+
+function fmt(v) { return v || '—'; }
+
+async function lookupLead() {
+  const email = document.getElementById('emailInput').value.trim();
+  if (!email) return;
+
+  document.getElementById('err').style.display = 'none';
+  document.getElementById('result').style.display = 'none';
+  document.getElementById('loading').style.display = 'block';
+
+  try {
+    const r = await fetch(`${BASE}/status-by-email?email=${encodeURIComponent(email)}`);
+    document.getElementById('loading').style.display = 'none';
+
+    if (!r.ok) {
+      const errBox = document.getElementById('err');
+      errBox.textContent = r.status === 404 ? `No lead found for: ${email}` : `Error ${r.status}`;
+      errBox.style.display = 'block';
+      return;
+    }
+
+    const d = await r.json();
+
+    // Lead info
+    document.getElementById('f-email').textContent   = fmt(d.lead_email);
+    document.getElementById('f-company').textContent = fmt(d.lead_business_name);
+    document.getElementById('f-contact').textContent = fmt(d.lead_contact_name);
+    document.getElementById('f-phone').textContent   = fmt(d.lead_phone_number || '—');
+    document.getElementById('f-sent').textContent    = fmt(d.lead_sent_at);
+    document.getElementById('f-replied').textContent = fmt(d.lead_replied_at);
+    document.getElementById('f-booked').textContent  = fmt(d.lead_booked_at);
+    document.getElementById('f-summary').textContent = fmt(d.lead_summary);
+    document.getElementById('f-status').innerHTML    = badge(d.lead_status,{
+      new:'badge-new',sent:'badge-sent',replied:'badge-replied',booked:'badge-booked'});
+    document.getElementById('f-ob-started').innerHTML = d.onboarding_started
+      ? '<span class="badge badge-ok">Yes</span>'
+      : '<span class="badge badge-new">No</span>';
+
+    // Onboarding
+    if (d.onboarding_started) {
+      document.getElementById('ob-section').style.display = 'block';
+      document.getElementById('f-stage').textContent    = fmt(d.overall_stage || d.kyc_status_display);
+      document.getElementById('f-ctype').textContent    = fmt(d.company_type);
+      document.getElementById('f-kyc').innerHTML        = badge(d.kyc_status, {
+        approved:'badge-ok',rejected:'badge-rejected',under_review:'badge-kyc',pending:'badge-pending'});
+      document.getElementById('f-kyc-sub').textContent  = fmt(d.kyc_submitted_at);
+      document.getElementById('f-kyc-app').textContent  = fmt(d.kyc_approved_at);
+      document.getElementById('f-nda').innerHTML        = badge(d.nda_status, {
+        approved:'badge-ok',sent_to_lead:'badge-nda',signed_received:'badge-nda',pending:'badge-pending'});
+      document.getElementById('f-nda-sent').textContent = fmt(d.nda_sent_at);
+      document.getElementById('f-agr').innerHTML        = badge(d.agreement_status, {
+        approved:'badge-ok',sent_to_lead:'badge-nda',signed_received:'badge-nda',pending:'badge-pending'});
+      document.getElementById('f-agr-sent').textContent = fmt(d.agreement_sent_at);
+      document.getElementById('f-ob-id').textContent    = (d.id||'').substring(0,8)+'…';
+
+      if (d.kyc_submission) {
+        const k = d.kyc_submission;
+        document.getElementById('kyc-sub-section').style.display = 'block';
+        document.getElementById('f-kyc-company').textContent = fmt(k.company_name);
+        document.getElementById('f-kyc-contact').textContent = fmt(k.contact_name);
+        document.getElementById('f-kyc-phone').textContent   = fmt(k.contact_number);
+        document.getElementById('f-gstin').textContent       = fmt(k.gstin_number);
+        document.getElementById('f-pan').textContent         = fmt(k.pan_number);
+        document.getElementById('f-cin').textContent         = fmt(k.cin_number);
+        document.getElementById('f-gst-file').innerHTML      = k.has_gst ? '<span class="badge badge-ok">Uploaded</span>' : '—';
+        document.getElementById('f-inc-file').innerHTML      = k.has_incorporation ? '<span class="badge badge-ok">Uploaded</span>' : '—';
+        document.getElementById('f-kyc-att').textContent     = fmt(k.attempt_number);
+      }
+    }
+
+    document.getElementById('result').style.display = 'block';
+
+  } catch(e) {
+    document.getElementById('loading').style.display = 'none';
+    const errBox = document.getElementById('err');
+    errBox.textContent = 'Network error — ' + e.message;
+    errBox.style.display = 'block';
+  }
+}
+
+// Trigger on Enter in the input
+document.getElementById('emailInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') lookupLead();
+});
+</script>
+</body></html>"""
+    return HTMLResponse(html)
+
+
 @router.get("/pipeline-summary", response_class=HTMLResponse, include_in_schema=False)
 async def pipeline_summary_html(db: AsyncSession = Depends(get_db)):
     stats = await _pipeline_stats(db)
@@ -499,79 +709,6 @@ async def pipeline_summary_html(db: AsyncSession = Depends(get_db)):
 @router.get("/pipeline-summary.json")
 async def pipeline_summary_json(db: AsyncSession = Depends(get_db)):
     return await _pipeline_stats(db)
-
-
-# ---------------------------------------------------------------------------
-# WorkDrive: list & extract uploaded KYC documents
-# ---------------------------------------------------------------------------
-
-@router.get("/workdrive/files")
-async def workdrive_list_files(folder_id: str | None = None):
-    """List all files currently uploaded to the Zoho WorkDrive KYC folder.
-
-    Pass ?folder_id=XXXX to inspect a specific sub-folder.
-    Returns file name, size, upload time, and a direct download URL.
-    """
-    from app.services.zoho_workdrive import list_files, list_subfolders
-    try:
-        files = list_files(folder_id)
-        subfolders = list_subfolders(folder_id)
-        return {
-            "folder_id": folder_id or "default (ZOHO_WORKDRIVE_FOLDER_ID)",
-            "total_files": len(files),
-            "total_subfolders": len(subfolders),
-            "subfolders": subfolders,
-            "files": files,
-        }
-    except Exception as exc:
-        raise HTTPException(502, f"WorkDrive API error: {exc}")
-
-
-@router.get("/workdrive/kyc-documents")
-async def workdrive_kyc_documents(db: AsyncSession = Depends(get_db)):
-    """Extract all KYC document references from the database
-    and pair them with their Zoho WorkDrive download URLs.
-
-    Returns every GST certificate and incorporation certificate
-    that has been uploaded across all onboarding submissions.
-    """
-    from app.services.zoho_workdrive import get_download_url
-    from app.db.models import KYCSubmission as KYCSubmissionModel
-
-    rows = (await db.execute(
-        select(KYCSubmissionModel).order_by(KYCSubmissionModel.created_at.desc())
-    )).scalars().all()
-
-    documents = []
-    for sub in rows:
-        entry: dict = {
-            "onboarding_id": str(sub.onboarding_id),
-            "submission_id": str(sub.id),
-            "attempt": sub.attempt_number,
-            "company": sub.company_name,
-            "company_type": sub.company_type,
-            "submitted_at": sub.created_at.isoformat() if sub.created_at else None,
-            "gst_certificate": None,
-            "incorporation_certificate": None,
-        }
-        if sub.gst_certificate_zoho_id:
-            entry["gst_certificate"] = {
-                "file_id": sub.gst_certificate_zoho_id,
-                "filename": sub.gst_certificate_filename,
-                "url": get_download_url(sub.gst_certificate_zoho_id),
-            }
-        if sub.incorporation_zoho_id:
-            entry["incorporation_certificate"] = {
-                "file_id": sub.incorporation_zoho_id,
-                "filename": sub.incorporation_filename,
-                "url": get_download_url(sub.incorporation_zoho_id),
-            }
-        documents.append(entry)
-
-    return {
-        "total_submissions": len(documents),
-        "documents": documents,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -729,7 +866,12 @@ async def status_by_email(email: str, db: AsyncSession = Depends(get_db)):
         "lead_email": lead.email,
         "lead_contact_name": lead.contact_name,
         "lead_business_name": lead.business_name,
-        "lead_status": lead.status,
+        "lead_status": lead.status.value if hasattr(lead.status, "value") else lead.status,
+        "lead_phone_number": lead.phone_number or "",
+        "lead_sent_at": _fmt(lead.sent_at),
+        "lead_replied_at": _fmt(lead.replied_at),
+        "lead_booked_at": _fmt(lead.booked_at),
+        "lead_summary": lead.summary or "",
         "onboarding_started": rec is not None,
     }
     if not rec:
@@ -737,6 +879,13 @@ async def status_by_email(email: str, db: AsyncSession = Depends(get_db)):
 
     data = _serialize(rec)
     data.update(base)
+
+    # Add missing date/stage fields from the onboarding record
+    data["kyc_submitted_at"] = _fmt(rec.kyc_submitted_at)
+    data["kyc_approved_at"] = _fmt(rec.kyc_approved_at)
+    data["nda_sent_at"] = _fmt(rec.nda_sent_at)
+    data["agreement_sent_at"] = _fmt(rec.agreement_sent_at)
+    data["overall_stage"] = _pending_action(rec)["label"]
 
     kyc_result = await db.execute(
         select(KYCSubmission)
@@ -750,6 +899,9 @@ async def status_by_email(email: str, db: AsyncSession = Depends(get_db)):
             "company_name": latest_kyc.company_name,
             "contact_name": latest_kyc.contact_name,
             "contact_number": latest_kyc.contact_number,
+            "gstin_number": latest_kyc.gstin_number or "",
+            "pan_number": latest_kyc.pan_number or "",
+            "cin_number": latest_kyc.cin_number or "",
             "has_gst": bool(latest_kyc.gst_certificate_zoho_id),
             "has_incorporation": bool(latest_kyc.incorporation_zoho_id),
             "attempt_number": latest_kyc.attempt_number,
@@ -777,6 +929,8 @@ async def get_onboarding(onboarding_id: str, db: AsyncSession = Depends(get_db))
     )
     latest_kyc = kyc_result.scalars().first()
     if latest_kyc:
+        _vr = latest_kyc.kyc_verification_result or {}
+        _ef = _vr.get("extra_fields") or {}
         data["kyc_submission"] = {
             "company_type": latest_kyc.company_type,
             "company_name": latest_kyc.company_name,
@@ -785,12 +939,14 @@ async def get_onboarding(onboarding_id: str, db: AsyncSession = Depends(get_db))
             "gstin_number": latest_kyc.gstin_number,
             "pan_number": latest_kyc.pan_number,
             "cin_number": latest_kyc.cin_number,
-            "kyc_verification_result": latest_kyc.kyc_verification_result,
+            "attempt_number": latest_kyc.attempt_number,
             "auto_verified": latest_kyc.auto_verified,
             "has_gst": bool(latest_kyc.gst_certificate_zoho_id),
             "has_incorporation": bool(latest_kyc.incorporation_zoho_id),
-            "attempt_number": latest_kyc.attempt_number,
             "reviewer_notes": latest_kyc.reviewer_notes,
+            "verification_passed": _vr.get("overall_passed"),
+            "verification_issues": _vr.get("issues", []),
+            "extra_fields": _ef,
         }
 
     data["nda_draft_content"] = rec.nda_draft_content
@@ -798,6 +954,67 @@ async def get_onboarding(onboarding_id: str, db: AsyncSession = Depends(get_db))
     data["nda_team_notes"] = rec.nda_team_notes
     data["agreement_team_notes"] = rec.agreement_team_notes
     return data
+
+
+# ---------------------------------------------------------------------------
+# KYC file download proxy (team-facing, token-gated)
+# ---------------------------------------------------------------------------
+
+@router.get("/kyc/file/{onboarding_id}/{token}/{file_type}")
+async def kyc_file_download(
+    onboarding_id: str,
+    token: str,
+    file_type: str,          # "gst" or "incorporation"
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream a KYC attachment from Zoho CRM. Uses the same view token as kyc_view_page."""
+    from app.services.onboarding_email import verify_kyc_view_token
+    if not verify_kyc_view_token(onboarding_id, token):
+        raise HTTPException(403, "Invalid or expired link")
+
+    rec = await _get_onboarding(db, onboarding_id)
+    kyc_result = await db.execute(
+        select(KYCSubmission)
+        .where(KYCSubmission.onboarding_id == rec.id)
+        .order_by(KYCSubmission.attempt_number.desc())
+    )
+    kyc = kyc_result.scalars().first()
+    if not kyc:
+        raise HTTPException(404, "No KYC submission found")
+
+    if file_type == "gst":
+        att_id = kyc.gst_certificate_zoho_id
+        filename = kyc.gst_certificate_filename or "gst_certificate"
+    elif file_type == "incorporation":
+        att_id = kyc.incorporation_zoho_id
+        filename = kyc.incorporation_filename or "incorporation_certificate"
+    else:
+        raise HTTPException(400, "Invalid file_type. Use 'gst' or 'incorporation'")
+
+    if not att_id:
+        raise HTTPException(404, "File not uploaded to CRM yet")
+
+    lead = await db.get(LeadV2, rec.lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+
+    from app.services.zoho_crm import find_lead_by_email, download_lead_attachment
+    crm_lead_id = find_lead_by_email(lead.email)
+    if not crm_lead_id:
+        raise HTTPException(404, "Lead not found in CRM")
+
+    file_bytes = download_lead_attachment(crm_lead_id, att_id)
+    if not file_bytes:
+        raise HTTPException(502, "Could not retrieve file from CRM")
+
+    import mimetypes
+    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    from fastapi.responses import Response
+    return Response(
+        content=file_bytes,
+        media_type=mime,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -828,89 +1045,6 @@ async def kyc_form_page(
     return HTMLResponse(_kyc_form_html(submit_url, company_name, contact_name, preselect))
 
 
-async def _kyc_post_submit_background(
-    submission_id: str,
-    onboarding_id: str,
-    attempt: int,
-    contact_name: str,
-    company_name: str,
-    gst_bytes: bytes | None,
-    gst_filename: str | None,
-    gst_content_type: str | None,
-    inc_bytes: bytes,
-    inc_filename: str,
-    inc_content_type: str,
-    company_name_for_file: str,
-) -> None:
-    """Upload KYC documents to WorkDrive and send team notification email.
-
-    Runs after the HTTP response is already returned to the lead.
-    Creates its own DB session to update file IDs on the submission.
-    """
-    from app.services.zoho_workdrive import upload_file
-    from app.db.session import SessionLocal
-    from app.db.models import KYCSubmission as _KYCSub
-    import uuid as _uuid
-
-    gst_zoho_id = None
-    inc_zoho_id = None
-
-    try:
-        if gst_bytes and gst_filename:
-            ext = gst_filename.rsplit(".", 1)[-1]
-            gst_zoho_id = upload_file(
-                gst_bytes,
-                f"GST_{company_name_for_file}_{onboarding_id[:8]}.{ext}",
-                mime_type=gst_content_type or "application/octet-stream",
-            )
-    except Exception as exc:
-        print(f"[KYC UPLOAD] GST cert upload failed: {exc}")
-
-    try:
-        ext = inc_filename.rsplit(".", 1)[-1]
-        inc_zoho_id = upload_file(
-            inc_bytes,
-            f"INC_{company_name_for_file}_{onboarding_id[:8]}.{ext}",
-            mime_type=inc_content_type or "application/octet-stream",
-        )
-    except Exception as exc:
-        print(f"[KYC UPLOAD] Inc cert upload failed: {exc}")
-
-    if gst_zoho_id or inc_zoho_id:
-        try:
-            async with SessionLocal() as session:
-                sub = await session.get(_KYCSub, _uuid.UUID(submission_id))
-                if sub:
-                    if gst_zoho_id:
-                        sub.gst_certificate_zoho_id = gst_zoho_id
-                    if inc_zoho_id:
-                        sub.incorporation_zoho_id = inc_zoho_id
-                    await session.commit()
-        except Exception as exc:
-            print(f"[KYC UPLOAD] DB file ID update failed: {exc}")
-
-    # Claude Vision OCR — extract KYC fields from uploaded documents
-    try:
-        from app.services.kyc_ocr import extract_kyc_from_multiple_images
-        _ocr_images = []
-        if gst_bytes:
-            _ocr_images.append({"data": gst_bytes, "mime_type": gst_content_type or "image/jpeg", "label": "GST Certificate"})
-        _ocr_images.append({"data": inc_bytes, "mime_type": inc_content_type or "image/jpeg", "label": "Incorporation Certificate"})
-        _ocr_result = extract_kyc_from_multiple_images(_ocr_images)
-        async with SessionLocal() as _ocr_sess:
-            _ocr_sub = await _ocr_sess.get(_KYCSub, _uuid.UUID(submission_id))
-            if _ocr_sub:
-                _vr = dict(_ocr_sub.kyc_verification_result or {})
-                _vr["ocr_result"] = _ocr_result
-                _ocr_sub.kyc_verification_result = _vr
-                await _ocr_sess.commit()
-    except Exception as exc:
-        print(f"[KYC OCR] OCR extraction failed: {exc}")
-
-    try:
-        notify_team_kyc_submitted(contact_name, company_name, onboarding_id, attempt)
-    except Exception as exc:
-        print(f"[KYC NOTIFY] Team notification failed: {exc}")
 
 
 @router.post("/kyc/submit/{onboarding_id}/{token}", response_class=HTMLResponse)
@@ -918,7 +1052,6 @@ async def kyc_form_submit(
     onboarding_id: str,
     token: str,
     request: Request,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     company_type: str = Form(...),
     company_name: str = Form(...),
@@ -1023,18 +1156,12 @@ async def kyc_form_submit(
     if company_type == "indian" and not gst_certificate:
         raise HTTPException(400, "GST certificate is required for Indian companies")
 
-    # Read file bytes now (fast async) — actual upload runs in background after response
-    gst_bytes: bytes | None = None
-    gst_filename: str | None = None
-    gst_content_type: str | None = None
-    if gst_certificate:
-        gst_bytes = await gst_certificate.read()
-        gst_filename = gst_certificate.filename
-        gst_content_type = gst_certificate.content_type or "application/octet-stream"
+    gst_filename: str | None = gst_certificate.filename if gst_certificate else None
+    inc_filename: str | None = incorporation_certificate.filename
 
-    inc_bytes = await incorporation_certificate.read()
-    inc_filename = incorporation_certificate.filename
-    inc_content_type = incorporation_certificate.content_type or "application/octet-stream"
+    # Read file bytes now — UploadFile is unavailable after response is sent
+    gst_bytes: bytes = await gst_certificate.read() if gst_certificate else b""
+    inc_bytes: bytes = await incorporation_certificate.read()
 
     # Count existing submissions for attempt number
     existing_count = (await db.execute(
@@ -1150,21 +1277,29 @@ async def kyc_form_submit(
     rec.company_type = company_type
     await db.commit()
 
-    lead = await db.get(LeadV2, rec.lead_id)
-    lead_contact = lead.contact_name or "" if lead else ""
-    lead_company = lead.business_name if lead else company_name
+    # Upload KYC files to Zoho CRM as Lead attachments
+    try:
+        from app.services.zoho_crm import find_lead_by_email, upload_lead_attachment
+        _lead_for_files = await db.get(LeadV2, rec.lead_id)
+        if _lead_for_files:
+            crm_lead_id = find_lead_by_email(_lead_for_files.email)
+            if crm_lead_id:
+                import mimetypes as _mt
+                if gst_bytes and gst_filename:
+                    _mime = _mt.guess_type(gst_filename)[0] or "application/octet-stream"
+                    gst_att_id = upload_lead_attachment(crm_lead_id, gst_filename, gst_bytes, _mime)
+                    if gst_att_id:
+                        submission.gst_certificate_zoho_id = gst_att_id
+                if inc_bytes and inc_filename:
+                    _mime = _mt.guess_type(inc_filename)[0] or "application/octet-stream"
+                    inc_att_id = upload_lead_attachment(crm_lead_id, inc_filename, inc_bytes, _mime)
+                    if inc_att_id:
+                        submission.incorporation_zoho_id = inc_att_id
+                await db.commit()
+    except Exception as _fe:
+        logger.warning("kyc_file_upload_crm_failed", onboarding_id=onboarding_id, error=str(_fe))
 
-    # Upload docs + notify team after response is returned (non-blocking)
-    background_tasks.add_task(
-        _kyc_post_submit_background,
-        submission_id, onboarding_id, attempt,
-        lead_contact, lead_company,
-        gst_bytes, gst_filename, gst_content_type,
-        inc_bytes, inc_filename or "", inc_content_type,
-        company_name,
-    )
-
-    # Auto-verification and sheet export via Celery
+    # Format verification + team notification via Celery
     from app.workers.onboarding_tasks import auto_verify_kyc_task, export_onboarding_to_sheets
     auto_verify_kyc_task.delay(submission_id, onboarding_id)
     export_onboarding_to_sheets.delay(onboarding_id)
@@ -1271,6 +1406,257 @@ async def kyc_review(
 
 
 # ---------------------------------------------------------------------------
+# KYC read-only view page (reviewer sees what lead submitted, then approves/rejects)
+# ---------------------------------------------------------------------------
+
+@router.get("/kyc/view/{onboarding_id}/{token}", response_class=HTMLResponse)
+async def kyc_view_page(onboarding_id: str, token: str, db: AsyncSession = Depends(get_db)):
+    from app.services.onboarding_email import verify_kyc_view_token, make_action_url
+    if not verify_kyc_view_token(onboarding_id, token):
+        raise HTTPException(403, "Invalid or expired link")
+
+    rec = await _get_onboarding(db, onboarding_id)
+    lead = await db.get(LeadV2, rec.lead_id)
+
+    kyc_result = await db.execute(
+        select(KYCSubmission)
+        .where(KYCSubmission.onboarding_id == rec.id)
+        .order_by(KYCSubmission.attempt_number.desc())
+    )
+    kyc = kyc_result.scalars().first()
+
+    if not kyc:
+        return HTMLResponse("<p style='font-family:sans-serif;padding:40px;'>No KYC submission found.</p>")
+
+    vr = kyc.kyc_verification_result or {}
+    extra = vr.get("extra_fields", {}) or {}
+    issues = vr.get("issues", [])
+    passed = vr.get("overall_passed", False)
+
+    def _row(label: str, val: str) -> str:
+        val = val or "—"
+        return (
+            f"<tr><td style='padding:8px 14px;background:#f8fafc;font-weight:600;font-size:13px;"
+            f"color:#374151;width:36%;vertical-align:top;'>{label}</td>"
+            f"<td style='padding:8px 14px;font-size:13px;color:#111;font-family:monospace;"
+            f"word-break:break-all;'>{val}</td></tr>"
+        )
+
+    def _sec(title: str) -> str:
+        return (
+            f"<tr><td colspan='2' style='padding:10px 14px;background:#1a3a6b;color:#fff;"
+            f"font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.05em;"
+            f"'>{title}</td></tr>"
+        )
+
+    is_overseas = (kyc.company_type or "").lower() == "overseas"
+
+    # ── A. Business Identity ──────────────────────────────────────────────────
+    rows = _sec("A. Business Identity")
+    rows += _row("Company Name", kyc.company_name or "")
+    rows += _row("Company Type", (kyc.company_type or "").title())
+    rows += _row("Trade Name / Brand", extra.get("trade_name", ""))
+    rows += _row("Entity Type", extra.get("entity_type", ""))
+    rows += _row("Date of Incorporation", extra.get("date_of_incorporation", ""))
+    rows += _row("Nature of Business", extra.get("nature_of_business", ""))
+    if extra.get("principal_business_address"):
+        rows += _row("Principal Business Address", extra.get("principal_business_address", ""))
+
+    # ── A. Registered Address ────────────────────────────────────────────────
+    rows += _sec("Registered Address")
+    rows += _row("Address", extra.get("registered_address", ""))
+    rows += _row("City", extra.get("city", ""))
+    rows += _row("State / Province", extra.get("state", ""))
+    rows += _row("PIN / Postal Code", extra.get("pin_code", ""))
+    if is_overseas:
+        rows += _row("Country", extra.get("country", ""))
+
+    # ── A. KYC Identifiers ───────────────────────────────────────────────────
+    if not is_overseas:
+        rows += _sec("Indian KYC Identifiers")
+        rows += _row("GSTIN", kyc.gstin_number or "")
+        rows += _row("PAN (Entity)", kyc.pan_number or "")
+        rows += _row("CIN", kyc.cin_number or "")
+    else:
+        rows += _sec("Overseas Identifiers")
+        rows += _row("Country of Incorporation", extra.get("country_of_incorporation", ""))
+        rows += _row("Company Reg. No.", extra.get("company_reg_number", ""))
+        rows += _row("Country of Tax Residence", extra.get("country_of_tax_residence", ""))
+        rows += _row("Tax ID / TIN", extra.get("tax_id_tin", ""))
+        rows += _row("LEI Number", extra.get("lei_number", ""))
+        rows += _row("VAT / GST Number", extra.get("vat_gst_number", ""))
+        rows += _row("Company Website", extra.get("company_website", ""))
+        rows += _row("Primary Business Activity", extra.get("primary_business_activity", ""))
+        rows += _row("Countries of Operation", extra.get("countries_of_operation", ""))
+
+    # ── B. Authorised Signatories ────────────────────────────────────────────
+    rows += _sec("B. Authorised Signatories")
+    rows += _row("Signatory 1 — Name", kyc.contact_name or "")
+    rows += _row("Signatory 1 — Designation", extra.get("signatory1_designation", ""))
+    rows += _row("Signatory 1 — PAN", extra.get("signatory1_pan", ""))
+    rows += _row("Signatory 1 — Aadhaar (last 4)", extra.get("signatory1_aadhaar", ""))
+    if is_overseas:
+        rows += _row("Signatory 1 — Nationality", extra.get("signatory1_nationality", ""))
+        rows += _row("Signatory 1 — DOB", extra.get("signatory1_dob", ""))
+        rows += _row("Signatory 1 — Passport / ID", extra.get("signatory1_passport_id", ""))
+        rows += _row("Signatory 1 — Country of Residence", extra.get("signatory1_country_of_residence", ""))
+        rows += _row("Signatory 1 — Shareholding %", extra.get("signatory1_shareholding_pct", ""))
+    if extra.get("signatory2_name"):
+        rows += _row("Signatory 2 — Name", extra.get("signatory2_name", ""))
+        rows += _row("Signatory 2 — Designation", extra.get("signatory2_designation", ""))
+        rows += _row("Signatory 2 — PAN", extra.get("signatory2_pan", ""))
+        rows += _row("Signatory 2 — Aadhaar (last 4)", extra.get("signatory2_aadhaar", ""))
+    if extra.get("director_names"):
+        rows += _row("Director / Partner Name(s)", extra.get("director_names", ""))
+
+    # ── UBO ──────────────────────────────────────────────────────────────────
+    if extra.get("ubo_name"):
+        rows += _sec("Ultimate Beneficial Owner (UBO)")
+        rows += _row("UBO Name", extra.get("ubo_name", ""))
+        rows += _row("UBO PAN", extra.get("ubo_pan", ""))
+        rows += _row("UBO Nationality", extra.get("ubo_nationality", ""))
+
+    rows += _row("PEP Status", extra.get("pep_status", ""))
+
+    # ── D. Bank Details ──────────────────────────────────────────────────────
+    rows += _sec("D. Bank & Financial Details")
+    rows += _row("Bank Name", extra.get("bank_name", ""))
+    rows += _row("Account Number", extra.get("account_number", ""))
+    if not is_overseas:
+        rows += _row("IFSC Code", extra.get("ifsc_code", ""))
+        rows += _row("Account Type", extra.get("account_type", ""))
+    else:
+        rows += _row("SWIFT Code / BIC", extra.get("swift_code", ""))
+        rows += _row("IBAN / Account No.", extra.get("iban_number", ""))
+        rows += _row("Bank Country", extra.get("bank_country", ""))
+        rows += _row("Account Currency", extra.get("account_currency", ""))
+    rows += _row("Annual Turnover", extra.get("annual_turnover", ""))
+    if extra.get("bank_branch_address"):
+        rows += _row("Bank Branch Address", extra.get("bank_branch_address", ""))
+
+    # ── Overseas: Escalation Contact ─────────────────────────────────────────
+    if is_overseas and extra.get("escalation_contact_name"):
+        rows += _sec("F. Escalation Contact")
+        rows += _row("Name", extra.get("escalation_contact_name", ""))
+        rows += _row("Title / Designation", extra.get("escalation_contact_title", ""))
+        rows += _row("Email", extra.get("escalation_contact_email", ""))
+        rows += _row("Phone", extra.get("escalation_contact_phone", ""))
+        rows += _row("Department", extra.get("escalation_contact_dept", ""))
+        rows += _row("Relationship", extra.get("escalation_contact_relationship", ""))
+
+    # ── Overseas: Directors ───────────────────────────────────────────────────
+    if is_overseas and extra.get("director1_name"):
+        rows += _sec("G. Directors & Key Controllers")
+        rows += _row("Director 1 — Name", extra.get("director1_name", ""))
+        rows += _row("Director 1 — Nationality", extra.get("director1_nationality", ""))
+        rows += _row("Director 1 — DOB", extra.get("director1_dob", ""))
+        rows += _row("Director 1 — Passport / ID", extra.get("director1_passport_id", ""))
+        rows += _row("Director 1 — Country of Residence", extra.get("director1_country_of_residence", ""))
+        rows += _row("Director 1 — Shareholding %", extra.get("director1_shareholding_pct", ""))
+        if extra.get("director2_name"):
+            rows += _row("Director 2 — Name", extra.get("director2_name", ""))
+            rows += _row("Director 2 — Nationality", extra.get("director2_nationality", ""))
+            rows += _row("Director 2 — DOB", extra.get("director2_dob", ""))
+            rows += _row("Director 2 — Passport / ID", extra.get("director2_passport_id", ""))
+            rows += _row("Director 2 — Country of Residence", extra.get("director2_country_of_residence", ""))
+            rows += _row("Director 2 — Shareholding %", extra.get("director2_shareholding_pct", ""))
+
+    # ── Compliance ────────────────────────────────────────────────────────────
+    if any(extra.get(k) for k in ("sanctions_check", "criminal_investigation_check", "regulated_licensed")):
+        rows += _sec("H. Compliance")
+        rows += _row("Sanctions Check", extra.get("sanctions_check", ""))
+        rows += _row("Criminal Investigation", extra.get("criminal_investigation_check", ""))
+        rows += _row("Regulated / Licensed", extra.get("regulated_licensed", ""))
+        rows += _row("Licensing Regulator", extra.get("licensed_regulator", ""))
+
+    # ── C. Documents ─────────────────────────────────────────────────────────
+    # Build file view URLs (same token used for this page)
+    _base_url = settings.APP_URL.rstrip("/")
+    _file_base = f"{_base_url}/api/v1/onboarding/kyc/file/{onboarding_id}/{token}"
+
+    def _file_row(label: str, filename: str | None, zoho_id: str | None, file_type: str) -> str:
+        if not filename:
+            return _row(label, "Not uploaded")
+        if zoho_id:
+            view_url = f"{_file_base}/{file_type}"
+            link = (
+                f"{filename} &nbsp;"
+                f"<a href='{view_url}' target='_blank' "
+                f"style='display:inline-block;padding:3px 10px;background:#1a3a6b;color:#fff;"
+                f"border-radius:4px;font-size:11px;text-decoration:none;font-family:Arial;'>View File</a>"
+            )
+        else:
+            link = f"{filename} &nbsp;<span style='color:#f59e0b;font-size:11px;'>(uploading to CRM…)</span>"
+        return (
+            f"<tr><td style='padding:8px 14px;background:#f8fafc;font-weight:600;font-size:13px;"
+            f"color:#374151;width:36%;vertical-align:top;'>{label}</td>"
+            f"<td style='padding:8px 14px;font-size:13px;color:#111;'>{link}</td></tr>"
+        )
+
+    rows += _sec("C. Documents Uploaded")
+    if not is_overseas:
+        rows += _file_row("GST Certificate", kyc.gst_certificate_filename, kyc.gst_certificate_zoho_id, "gst")
+    rows += _file_row("Incorporation Cert.", kyc.incorporation_filename, kyc.incorporation_zoho_id, "incorporation")
+    rows += _row("Declaration Agreed", "Yes" if extra.get("declaration_agreed") else "No")
+
+    status_color = "#16a34a" if passed else "#dc2626"
+    status_label = "All Format Checks Passed" if passed else f"{len(issues)} Format Issue(s) Found"
+    issues_html = ""
+    if issues:
+        items = "".join(f"<li style='color:#991b1b;margin-bottom:4px;'>{i}</li>" for i in issues)
+        issues_html = f"<ul style='margin:10px 0;padding-left:20px;font-size:13px;'>{items}</ul>"
+
+    approve_url = make_action_url(onboarding_id, "approve_kyc")
+    reject_url  = make_action_url(onboarding_id, "reject_kyc")
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KYC Review — {kyc.company_name}</title>
+<style>
+  body{{font-family:Arial,sans-serif;background:#f4f6fb;margin:0;padding:24px;}}
+  .card{{background:#fff;max-width:720px;margin:0 auto;border-radius:12px;
+         box-shadow:0 2px 16px rgba(0,0,0,.1);padding:36px 40px;}}
+  h1{{color:#1a3a6b;font-size:22px;margin:0 0 4px;}}
+  table{{width:100%;border-collapse:collapse;border:1px solid #e5e7eb;margin-bottom:20px;}}
+  .badge{{display:inline-block;padding:6px 16px;border-radius:5px;color:#fff;
+          font-weight:700;font-size:13px;margin-bottom:20px;}}
+  .btn{{display:inline-block;padding:13px 28px;border-radius:7px;color:#fff;
+        text-decoration:none;font-weight:700;font-size:15px;margin:4px 8px 4px 0;}}
+  .logo{{font-size:16px;font-weight:700;color:#1a3a6b;margin-bottom:20px;}}
+  @media(max-width:600px){{.card{{padding:20px 16px;}}}}
+</style></head>
+<body>
+<div class="card">
+  <div class="logo">✈ Jane Aerospace — KYC Review</div>
+  <h1>KYC Submission — {kyc.company_name}</h1>
+  <p style="color:#555;font-size:13px;margin:4px 0 12px;">
+    Submitted by: <strong>{lead.email if lead else '—'}</strong> &nbsp;|&nbsp;
+    Attempt #{kyc.attempt_number or 1} &nbsp;|&nbsp;
+    Onboarding ID: {onboarding_id[:8]}…
+  </p>
+  <div style="margin-bottom:16px;">
+    <span style="display:inline-block;padding:4px 14px;border-radius:99px;font-size:12px;font-weight:700;
+      background:{'#dbeafe' if not is_overseas else '#fef3c7'};
+      color:{'#1e40af' if not is_overseas else '#92400e'};">
+      {'🇮🇳 Indian Company' if not is_overseas else '🌐 Overseas Company'}
+    </span>
+  </div>
+  <div class="badge" style="background:{status_color};">{status_label}</div>
+  {issues_html}
+  <table>{rows}</table>
+  <p style="margin:24px 0 10px;font-weight:600;font-size:15px;color:#1a3a6b;">Take Action:</p>
+  <a href="{approve_url}" class="btn" style="background:#16a34a;">✓ Approve KYC</a>
+  <a href="{reject_url}" class="btn" style="background:#dc2626;">✗ Reject KYC</a>
+  <p style="margin-top:24px;color:#aaa;font-size:11px;">
+    This link is valid for 7 days. Do not forward — it contains a secure action token.
+  </p>
+</div>
+</body></html>"""
+    return HTMLResponse(html)
+
+
+# ---------------------------------------------------------------------------
 # NDA draft preview + review (team)
 # ---------------------------------------------------------------------------
 
@@ -1321,10 +1707,7 @@ async def nda_draft_review(
         rec.nda_status_display = f"NDA Draft Rejected — Revision #{rec.nda_draft_revision} ({_fmt(now)})"
         await db.commit()
 
-        from app.workers.onboarding_tasks import revise_nda_draft_task
-        revise_nda_draft_task.delay(onboarding_id, body.notes)
-
-        return {"message": "NDA revision triggered. Revised draft will appear in preview."}
+        return {"message": "NDA draft rejected. Edit the template and re-trigger if needed."}
 
     raise HTTPException(400, "action must be 'approve' or 'reject'")
 
@@ -1332,18 +1715,6 @@ async def nda_draft_review(
 # ---------------------------------------------------------------------------
 # NDA signed copy review (team)
 # ---------------------------------------------------------------------------
-
-@router.get("/nda/signed/{onboarding_id}")
-async def nda_signed_preview(onboarding_id: str, db: AsyncSession = Depends(get_db)):
-    rec = await _get_onboarding(db, onboarding_id)
-    from app.services.zoho_workdrive import get_download_url
-    return {
-        "nda_status": rec.nda_status,
-        "nda_status_display": rec.nda_status_display,
-        "signed_file_url": get_download_url(rec.nda_signed_zoho_file_id),
-        "nda_signed_received_at": rec.nda_signed_received_at.isoformat() if rec.nda_signed_received_at else None,
-    }
-
 
 @router.post("/nda/sign-review/{onboarding_id}")
 async def nda_sign_review(
@@ -1399,24 +1770,6 @@ async def nda_sign_review(
 # NDA template upload
 # ---------------------------------------------------------------------------
 
-@router.post("/nda/upload-template")
-async def upload_nda_template(
-    company_type: str = Form(...),  # "indian" or "overseas"
-    template_file: UploadFile = File(...),
-):
-    if company_type not in ("indian", "overseas"):
-        raise HTTPException(400, "company_type must be 'indian' or 'overseas'")
-
-    from app.services.zoho_workdrive import upload_file
-    content = await template_file.read()
-    file_id = upload_file(
-        content,
-        f"NDA_Template_{company_type}_{template_file.filename}",
-        mime_type=template_file.content_type or "application/octet-stream",
-    )
-
-    # In production you'd persist this file_id to settings/DB
-    return {"message": f"NDA template uploaded", "zoho_file_id": file_id, "company_type": company_type}
 
 
 # ---------------------------------------------------------------------------
@@ -1472,24 +1825,9 @@ async def agreement_draft_review(
         )
         await db.commit()
 
-        from app.workers.onboarding_tasks import revise_agreement_draft_task
-        revise_agreement_draft_task.delay(onboarding_id, body.notes)
-
-        return {"message": "Agreement revision triggered."}
+        return {"message": "Agreement draft rejected. Edit the template and re-trigger if needed."}
 
     raise HTTPException(400, "action must be 'approve' or 'reject'")
-
-
-@router.get("/agreement/signed/{onboarding_id}")
-async def agreement_signed_preview(onboarding_id: str, db: AsyncSession = Depends(get_db)):
-    rec = await _get_onboarding(db, onboarding_id)
-    from app.services.zoho_workdrive import get_download_url
-    return {
-        "agreement_status": rec.agreement_status,
-        "agreement_status_display": rec.agreement_status_display,
-        "signed_file_url": get_download_url(rec.agreement_signed_zoho_file_id),
-        "signed_received_at": rec.agreement_signed_received_at.isoformat() if rec.agreement_signed_received_at else None,
-    }
 
 
 @router.post("/agreement/sign-review/{onboarding_id}")
@@ -1539,126 +1877,132 @@ async def agreement_sign_review(
     raise HTTPException(400, "action must be 'approve' or 'reject'")
 
 
-@router.post("/agreement/upload-template")
-async def upload_agreement_template(
-    company_type: str = Form(...),
-    template_file: UploadFile = File(...),
+# ---------------------------------------------------------------------------
+# CSV bulk lead import → creates leads, syncs CRM, starts onboarding
+# POST /onboarding/import-csv
+# Required CSV columns: email, company_name
+# Optional:  contact_name, summary, phone
+# ---------------------------------------------------------------------------
+
+@router.post("/import-csv")
+async def import_leads_csv(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
 ):
-    if company_type not in ("indian", "overseas"):
-        raise HTTPException(400, "company_type must be 'indian' or 'overseas'")
+    """Upload a CSV of leads. Each row creates a lead, syncs to Zoho CRM, and starts onboarding.
 
-    from app.services.zoho_workdrive import upload_file
-    content = await template_file.read()
-    file_id = upload_file(
-        content,
-        f"Agreement_Template_{company_type}_{template_file.filename}",
-        mime_type=template_file.content_type or "application/octet-stream",
-    )
-    return {"message": "Agreement template uploaded", "zoho_file_id": file_id, "company_type": company_type}
-
-
-# ---------------------------------------------------------------------------
-# Zoho Contracts webhook — fired when a lead signs or declines
-# ---------------------------------------------------------------------------
-
-@router.post("/zoho-webhook")
-async def zoho_contracts_webhook(request: Request, db: AsyncSession = Depends(get_db)):
-    """Receive Zoho Contracts signature events.
-
-    Expected payload structure (Zoho Contracts event):
-      {
-        "contract": {"id": "...", "status": "SIGNED" | "DECLINED" | ...},
-        "event": "CONTRACT_SIGNED" | "CONTRACT_DECLINED" | ...
-      }
+    Minimum required CSV columns: email, company_name
+    Optional columns: contact_name, summary, phone
     """
-    from app.core.logging import get_logger
-    log = get_logger("zoho_webhook")
+    import csv
+    import io
 
+    content = await file.read()
     try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
+        text = content.decode("utf-8-sig")  # handles BOM
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
 
-    log.info("zoho_webhook_received", payload=payload)
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise HTTPException(400, "CSV has no headers")
 
-    event = payload.get("event", "") or payload.get("type", "")
-    contract = payload.get("contract", {}) or {}
-    contract_id = str(contract.get("id", "") or payload.get("contractId", "") or "")
+    # Normalise header names (lowercase, strip)
+    norm = {k.lower().strip().replace(" ", "_"): k for k in (reader.fieldnames or [])}
 
-    if not contract_id:
-        return {"status": "ignored", "reason": "no contract_id"}
+    def _get(row: dict, *keys: str) -> str:
+        for k in keys:
+            v = row.get(norm.get(k, k), "").strip()
+            if v:
+                return v
+        return ""
 
-    now = _now_ist()
+    created, skipped, errors = [], [], []
 
-    # Find the onboarding record that matches this contract_id
-    nda_result = await db.execute(
-        select(OnboardingRecord).where(OnboardingRecord.nda_zoho_contract_id == contract_id)
-    )
-    rec = nda_result.scalar_one_or_none()
-    doc_type = "NDA" if rec else None
+    for raw in reader:
+        email = _get(raw, "email", "lead_email").lower()
+        company = _get(raw, "company_name", "company", "business_name")
+        if not email or not company:
+            skipped.append({"row": dict(raw), "reason": "missing email or company_name"})
+            continue
 
-    if not rec:
-        ag_result = await db.execute(
-            select(OnboardingRecord).where(OnboardingRecord.agreement_zoho_contract_id == contract_id)
-        )
-        rec = ag_result.scalar_one_or_none()
-        doc_type = "Agreement" if rec else None
+        contact_name = _get(raw, "contact_name", "name", "contact")
+        summary      = _get(raw, "summary", "interest", "notes", "message")
+        phone        = _get(raw, "phone", "contact_phone", "mobile")
 
-    if not rec:
-        log.warning("zoho_webhook_no_record", contract_id=contract_id)
-        return {"status": "ignored", "reason": "contract not found"}
+        try:
+            # Create or find lead
+            existing = (await db.execute(
+                select(LeadV2).where(LeadV2.email == email)
+            )).scalar_one_or_none()
 
-    lead = await db.get(LeadV2, rec.lead_id)
+            if existing:
+                # Update fields if richer data available
+                if contact_name and not existing.contact_name:
+                    existing.contact_name = contact_name
+                if summary and not existing.summary:
+                    existing.summary = summary
+                lead = existing
+                is_new = False
+            else:
+                from app.db.base import LeadStatus
+                lead = LeadV2(
+                    email=email,
+                    business_name=company,
+                    contact_name=contact_name or None,
+                    summary=summary or None,
+                    status=LeadStatus.NEW,
+                )
+                db.add(lead)
+                await db.flush()
+                is_new = True
 
-    signed = event.upper() in ("CONTRACT_SIGNED", "SIGNED", "COMPLETED")
-    declined = event.upper() in ("CONTRACT_DECLINED", "DECLINED", "REJECTED")
+            await db.commit()
+            await db.refresh(lead)
 
-    if signed:
-        if doc_type == "NDA":
-            rec.nda_status = DocumentStatus.SIGN_UNDER_REVIEW
-            rec.nda_signed_received_at = now
-            rec.nda_status_display = f"NDA Signed via Zoho Contracts — Pending Team Approval ({_fmt(now)})"
-        else:
-            rec.agreement_status = DocumentStatus.SIGN_UNDER_REVIEW
-            rec.agreement_signed_received_at = now
-            rec.agreement_status_display = f"Agreement Signed via Zoho Contracts — Pending Team Approval ({_fmt(now)})"
+            # Sync to Zoho CRM — pass all CSV fields into the Lead record
+            try:
+                from app.services.zoho_crm import upsert_lead, add_note
+                crm_lead_id = upsert_lead(
+                    email=email,
+                    contact_name=contact_name or company,
+                    company_name=company,
+                    phone=phone,
+                    summary=summary,
+                )
+                if crm_lead_id and summary:
+                    add_note(
+                        crm_lead_id,
+                        f"Lead Imported via CSV — {company}",
+                        f"Email: {email}\nCompany: {company}\nContact: {contact_name or '—'}\n"
+                        f"Phone: {phone or '—'}\nSummary: {summary}",
+                    )
+            except Exception as _crm_err:
+                logger.warning("csv_import_crm_sync_failed", email=email, error=str(_crm_err))
 
-        await db.commit()
-        log.info("zoho_webhook_signed_pending_review", doc_type=doc_type, contract_id=contract_id)
 
-        if lead:
-            from app.services.onboarding_email import notify_team_signed_doc_received
-            notify_team_signed_doc_received(
-                lead.contact_name or "", lead.business_name, str(rec.id),
-                doc_type or "", contract_id=contract_id,
-            )
+            # Check if onboarding already started
+            existing_ob = (await db.execute(
+                select(OnboardingRecord).where(OnboardingRecord.lead_id == lead.id)
+            )).scalar_one_or_none()
 
-            from app.services.zoho_crm import sync_onboarding_stage
-            sync_onboarding_stage(
-                email=lead.email,
-                contact_name=lead.contact_name or lead.business_name,
-                company_name=lead.business_name,
-                stage=f"{doc_type} Signed — Pending Team Review",
-                detail=f"{doc_type} signed via Zoho Contracts. Contract ID: {contract_id}",
-                company_type=rec.company_type or "",
-                onboarding_id=str(rec.id),
-            )
+            if not existing_ob:
+                from app.workers.onboarding_tasks import initiate_onboarding_task
+                initiate_onboarding_task.delay(str(lead.id))
+                created.append({"email": email, "company": company, "status": "onboarding_started"})
+            else:
+                created.append({"email": email, "company": company, "status": "already_onboarding"})
 
-        from app.workers.onboarding_tasks import export_onboarding_to_sheets
-        export_onboarding_to_sheets.delay(str(rec.id))
+        except Exception as exc:
+            await db.rollback()
+            errors.append({"email": email, "company": company, "error": str(exc)})
 
-    elif declined:
-        if doc_type == "NDA":
-            rec.nda_status = DocumentStatus.SENT_TO_LEAD
-            rec.nda_status_display = f"NDA Declined by lead via Zoho Contracts ({_fmt(now)})"
-        else:
-            rec.agreement_status = DocumentStatus.SENT_TO_LEAD
-            rec.agreement_status_display = f"Agreement Declined by lead via Zoho Contracts ({_fmt(now)})"
-
-        await db.commit()
-        log.info("zoho_webhook_declined", doc_type=doc_type, contract_id=contract_id)
-
-    return {"status": "ok", "event": event, "doc_type": doc_type}
+    return {
+        "imported": len(created),
+        "skipped":  len(skipped),
+        "errors":   len(errors),
+        "details": {"created": created, "skipped": skipped, "errors": errors},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1721,7 +2065,7 @@ def _kyc_form_html(submit_url: str, company_name: str, contact_name: str, presel
   <p class="sub">Know Your Customer — Legal Entity &nbsp;|&nbsp; As per RBI Master Direction on KYC 2016 | PMLA 2002 | SEBI Regulations<br>
   Fields marked <span class="required">*</span> are mandatory. Details are auto-verified against government records.</p>
 
-  <form method="POST" action="{submit_url}" enctype="multipart/form-data">
+  <form id="kyc-form" method="POST" action="{submit_url}" enctype="multipart/form-data">
 
     <!-- ── A. BUSINESS IDENTITY ── -->
     <div class="sec">A. Business Identity</div>
@@ -2231,10 +2575,37 @@ def _kyc_form_html(submit_url: str, company_name: str, contact_name: str, presel
       Submitting as: <strong>{contact_name}</strong>
     </div>
 
-    <button type="submit">Submit KYC for Verification ›</button>
+    <button type="button" onclick="kycReview()">Review &amp; Submit ›</button>
   </form>
 </div>
+
+<!-- ── Confirm Review Overlay ── -->
+<div id="kyc-confirm-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+     background:rgba(0,0,0,.5);z-index:999;overflow-y:auto;">
+  <div style="background:#fff;max-width:680px;margin:40px auto;border-radius:12px;
+               padding:36px 40px;position:relative;">
+    <h2 style="color:#1a3a6b;margin:0 0 6px;font-size:20px;">Review Your KYC Details</h2>
+    <p style="color:#555;font-size:13px;margin:0 0 24px;">
+      Please verify all information before submitting. You cannot edit after submission.
+    </p>
+    <div id="kyc-review-body"></div>
+    <div style="margin-top:28px;display:flex;gap:12px;flex-wrap:wrap;">
+      <button type="button" onclick="kycEdit()"
+        style="flex:1;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;
+               padding:12px 24px;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;">
+        ← Edit Details
+      </button>
+      <button type="button" id="kyc-confirm-btn" onclick="kycSubmit()"
+        style="flex:2;background:#1a56db;color:#fff;border:none;
+               padding:12px 24px;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;">
+        Confirm &amp; Submit KYC ›
+      </button>
+    </div>
+  </div>
+</div>
+
 <script>
+/* ── Section toggle ── */
 function _sh(ids, show){{
   for(var i=0;i<ids.length;i++){{
     var el=document.getElementById(ids[i]);
@@ -2273,9 +2644,126 @@ function toggleIndian(val){{
           'escalation_contact_email','escalation_contact_phone'], true);
   }}
 }}
+
+/* ── Real-time format validators ── */
+var _GSTIN_RE = /^[0-9]{{2}}[A-Z]{{5}}[0-9]{{4}}[A-Z]{{1}}[1-9A-Z]{{1}}Z[0-9A-Z]{{1}}$/;
+var _PAN_RE   = /^[A-Z]{{5}}[0-9]{{4}}[A-Z]{{1}}$/;
+var _CIN_RE   = /^[LU][0-9]{{5}}[A-Z]{{2}}[0-9]{{4}}[A-Z]{{3}}[0-9]{{6}}$/;
+var _IFSC_RE  = /^[A-Z]{{4}}0[A-Z0-9]{{6}}$/;
+
+function _err(fieldName, msg){{
+  var el = document.querySelector('[name="'+fieldName+'"]');
+  if(!el) return;
+  var errId = 'err_'+fieldName;
+  var existing = document.getElementById(errId);
+  if(msg){{
+    el.style.borderColor='#dc2626';
+    if(!existing){{
+      var d=document.createElement('div');
+      d.id=errId;
+      d.style.cssText='color:#dc2626;font-size:11px;margin-top:3px;';
+      el.parentNode.insertBefore(d, el.nextSibling);
+    }}
+    document.getElementById(errId).textContent=msg;
+  }} else {{
+    el.style.borderColor='#16a34a';
+    if(existing) existing.remove();
+  }}
+}}
+
+function validateGSTIN(val){{
+  if(!val) return;
+  var v=val.toUpperCase().replace(/\s/g,'');
+  if(!_GSTIN_RE.test(v)) _err('gstin_number','Invalid GSTIN — must be 15 characters, e.g. 22AAAAA0000A1Z5');
+  else _err('gstin_number','');
+}}
+function validatePAN(val){{
+  if(!val) return;
+  var v=val.toUpperCase().replace(/\s/g,'');
+  if(!_PAN_RE.test(v)) _err('pan_number','Invalid PAN — must be 10 characters, e.g. AAAAA1234A');
+  else _err('pan_number','');
+}}
+function validateCIN(val){{
+  if(!val) return;
+  var v=val.toUpperCase().replace(/\s/g,'');
+  if(!_CIN_RE.test(v)) _err('cin_number','Invalid CIN — must be 21 characters, e.g. L12345AB1234ABC123456');
+  else _err('cin_number','');
+}}
+function validateIFSC(val){{
+  if(!val) return;
+  var v=val.toUpperCase().replace(/\s/g,'');
+  if(!_IFSC_RE.test(v)) _err('ifsc_code','Invalid IFSC — must be 11 characters, e.g. HDFC0001234');
+  else _err('ifsc_code','');
+}}
+
+/* ── Confirm review screen ── */
+function _fv(name){{
+  var el=document.querySelector('[name="'+name+'"]');
+  if(!el) return '—';
+  return el.value||'—';
+}}
+function _row(label, val){{
+  if(!val||val==='—') return '';
+  return '<tr><td style="padding:7px 12px;background:#f8fafc;font-weight:600;font-size:13px;'+
+         'color:#374151;width:38%;vertical-align:top;">'+label+'</td>'+
+         '<td style="padding:7px 12px;font-size:13px;color:#111;">'+val+'</td></tr>';
+}}
+function kycReview(){{
+  var form=document.getElementById('kyc-form');
+  if(form&&!form.checkValidity()){{ form.reportValidity(); return; }}
+  var isIndian=document.querySelector('input[name=company_type]:checked')&&
+               document.querySelector('input[name=company_type]:checked').value==='indian';
+  var rows='';
+  rows+=_row('Company Name',_fv('company_name'));
+  rows+=_row('Company Type',isIndian?'Indian Company':'Overseas Company');
+  rows+=_row('Trade Name',_fv('trade_name'));
+  rows+=_row('Contact Person',_fv('contact_name'));
+  rows+=_row('Contact Number',_fv('contact_number'));
+  if(isIndian){{
+    rows+=_row('GSTIN',_fv('gstin_number'));
+    rows+=_row('PAN',_fv('pan_number'));
+    rows+=_row('CIN',_fv('cin_number'));
+    rows+=_row('IFSC Code',_fv('ifsc_code'));
+  }} else {{
+    rows+=_row('Country of Incorporation',_fv('country_of_incorporation'));
+    rows+=_row('Company Reg. No.',_fv('company_reg_number'));
+    rows+=_row('Tax ID / TIN',_fv('tax_id_tin'));
+    rows+=_row('LEI Number',_fv('lei_number'));
+  }}
+  rows+=_row('Bank Name',_fv('bank_name'));
+  rows+=_row('Account Number',_fv('account_number'));
+  rows+=_row('Annual Turnover',(function(){{
+    var r=document.querySelector('input[name=annual_turnover]:checked');
+    return r?r.value:'—';
+  }})());
+  document.getElementById('kyc-review-body').innerHTML=
+    '<table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;'+
+    'border-radius:8px;overflow:hidden;">'+rows+'</table>';
+  document.getElementById('kyc-confirm-overlay').style.display='block';
+  document.body.style.overflow='hidden';
+}}
+function kycEdit(){{
+  document.getElementById('kyc-confirm-overlay').style.display='none';
+  document.body.style.overflow='';
+}}
+function kycSubmit(){{
+  document.getElementById('kyc-confirm-btn').textContent='Submitting…';
+  document.getElementById('kyc-confirm-btn').disabled=true;
+  document.getElementById('kyc-form').submit();
+}}
+
+/* ── Attach live validators on load ── */
 window.onload=function(){{
   var c=document.querySelector('input[name=company_type]:checked');
   if(c) toggleIndian(c.value);
+  var g=document.querySelector('[name=gstin_number]');
+  if(g) g.addEventListener('blur',function(){{validateGSTIN(this.value);}});
+  var p=document.querySelector('[name=pan_number]');
+  if(p) p.addEventListener('blur',function(){{validatePAN(this.value);}});
+  var ci=document.querySelector('[name=cin_number]');
+  if(ci) ci.addEventListener('blur',function(){{validateCIN(this.value);}});
+  var ifs=document.querySelector('[name=ifsc_code]');
+  if(ifs) ifs.addEventListener('blur',function(){{validateIFSC(this.value);}});
 }};
 </script>
 </body>

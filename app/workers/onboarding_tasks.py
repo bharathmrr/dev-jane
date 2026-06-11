@@ -2,21 +2,16 @@
 
 Tasks:
   initiate_onboarding_task      — detect company type, create record, send KYC email
-  send_kyc_rejection_task       — AI rejection email → lead
-  kyc_daily_reminder_task       — daily beat for unpaid KYC forms
-  generate_nda_draft_task       — fetch template, AI fill, store draft
-  revise_nda_draft_task         — AI revise based on team notes
-  send_nda_to_lead_task         — email NDA to lead
-  send_nda_sign_rejection_task  — email rejection of signed NDA
-  nda_daily_reminder_task       — daily reminder for unsigned NDA
-  generate_agreement_draft_task — same as NDA
-  revise_agreement_draft_task
-  send_agreement_to_lead_task
+  send_kyc_rejection_task       — rejection email → lead
+  auto_verify_kyc_task          — format-only KYC check, route to auto-approve or team review
+  generate_nda_draft_task       — build NDA draft content, notify team to review
+  send_nda_to_lead_task         — email NDA HTML to lead
+  send_nda_sign_rejection_task  — rejection email for signed NDA
+  generate_agreement_draft_task — build Agreement draft content, notify team
+  send_agreement_to_lead_task   — email Agreement HTML to lead
   send_agreement_sign_rejection_task
-  agreement_daily_reminder_task
-  export_onboarding_to_sheets   — real-time Google Sheets export
-  check_signed_docs_inbox       — IMAP: detect signed NDA/Agreement replies
-  sweep_onboarding_reminders    — beat task that fires all overdue reminders
+  export_onboarding_to_sheets   — live Google Sheets export (single row per lead, all stages)
+  sweep_onboarding_reminders    — daily beat task for overdue reminders
 """
 from __future__ import annotations
 
@@ -59,31 +54,26 @@ async def _initiate_onboarding(db: AsyncSession, lead_id: str) -> None:
     if not lead:
         return
 
-    # Idempotency check
     existing = (await db.execute(
         select(OnboardingRecord).where(OnboardingRecord.lead_id == uuid.UUID(lead_id))
     )).scalar_one_or_none()
     if existing:
         return
 
-    # Detect company type via AI
     from app.services.onboarding_ai import detect_company_type
     company_type = detect_company_type(lead.business_name, lead.summary or "")
 
-    # Create onboarding record
-    from app.services.onboarding_email import make_kyc_token
+    from app.services.onboarding_email import make_kyc_token, make_kyc_url
     rec = OnboardingRecord(
         lead_id=uuid.UUID(lead_id),
         company_type=company_type,
         kyc_status=KYCStatus.FORM_SENT,
     )
     db.add(rec)
-    await db.flush()  # get rec.id
+    await db.flush()
 
     token = make_kyc_token(str(rec.id))
     rec.kyc_form_token = token
-
-    from app.services.onboarding_email import make_kyc_url
     kyc_url = make_kyc_url(str(rec.id), token)
 
     now = _now_ist()
@@ -92,15 +82,12 @@ async def _initiate_onboarding(db: AsyncSession, lead_id: str) -> None:
     await db.commit()
 
     log_pipeline("ONBOARDING_STARTED", company=lead.business_name, email=lead.email,
-                 detail=f"Company type detected: {company_type}")
+                 detail=f"Company type: {company_type}")
 
-    # Send KYC form email
     from app.services.onboarding_email import send_kyc_form_email
     send_kyc_form_email(lead.email, lead.contact_name or lead.business_name, lead.business_name, kyc_url)
-    log_pipeline("KYC_FORM_SENT", company=lead.business_name, email=lead.email,
-                 detail="KYC form emailed to lead")
+    log_pipeline("KYC_FORM_SENT", company=lead.business_name, email=lead.email)
 
-    # Notify team immediately that onboarding has started
     try:
         from app.services.onboarding_email import notify_team_onboarding_started
         notify_team_onboarding_started(
@@ -113,7 +100,6 @@ async def _initiate_onboarding(db: AsyncSession, lead_id: str) -> None:
     except Exception as _e:
         logger.warning("notify_team_onboarding_started_failed", error=str(_e))
 
-    # Sync to Zoho CRM
     from app.services.zoho_crm import sync_onboarding_stage
     sync_onboarding_stage(
         email=lead.email,
@@ -125,7 +111,6 @@ async def _initiate_onboarding(db: AsyncSession, lead_id: str) -> None:
         onboarding_id=str(rec.id),
     )
 
-    # Export to sheets
     await _export_to_sheets(db, str(rec.id))
 
 
@@ -147,13 +132,11 @@ def send_kyc_email_task(self, email: str, contact_name: str, business_name: str,
 
 
 # ---------------------------------------------------------------------------
-# KYC: auto-verification (free API)
+# KYC: format verification
 # ---------------------------------------------------------------------------
 
 async def _auto_verify_kyc(db: AsyncSession, submission_id: str, onboarding_id: str) -> None:
-    from app.db.models import KYCSubmission as KYCSubmissionModel
-
-    submission = await db.get(KYCSubmissionModel, uuid.UUID(submission_id))
+    submission = await db.get(KYCSubmission, uuid.UUID(submission_id))
     if not submission:
         return
 
@@ -161,108 +144,92 @@ async def _auto_verify_kyc(db: AsyncSession, submission_id: str, onboarding_id: 
     if not rec:
         return
 
-    # Run verification with up to 3 retries on transient API errors
+    extra = (submission.kyc_verification_result or {}).get("extra_fields", {})
+
     from app.services.kyc_verify import run_kyc_verification
-    import time as _time
-    _prev = submission.kyc_verification_result or {}
-    extra = _prev.get("extra_fields", {})
-    ocr_result = _prev.get("ocr_result")  # stored by background OCR task
+    result = run_kyc_verification(
+        company_type=submission.company_type,
+        company_name=submission.company_name,
+        gstin=submission.gstin_number,
+        pan=submission.pan_number,
+        cin=submission.cin_number,
+        ifsc=extra.get("ifsc_code"),
+        lei_number=extra.get("lei_number"),
+        country_of_incorporation=extra.get("country_of_incorporation"),
+        company_reg_number=extra.get("company_reg_number"),
+        tax_id_tin=extra.get("tax_id_tin"),
+    )
 
-    result: dict = {}
-    for _trial in range(3):
-        result = run_kyc_verification(
-            company_type=submission.company_type,
-            company_name=submission.company_name,
-            gstin=submission.gstin_number,
-            pan=submission.pan_number,
-            cin=submission.cin_number,
-            ifsc=extra.get("ifsc_code"),
-            lei_number=extra.get("lei_number"),
-            country_of_incorporation=extra.get("country_of_incorporation"),
-            company_reg_number=extra.get("company_reg_number"),
-            tax_id_tin=extra.get("tax_id_tin"),
-        )
-        _gstin_chk = (result.get("gstin_check") or {})
-        if _gstin_chk.get("valid") is not None or _trial >= 2:
-            break
-        _time.sleep(2 ** _trial)
-
-    if ocr_result:
-        result["ocr_result"] = ocr_result
-
-    submission.kyc_verification_result = result
+    submission.kyc_verification_result = {**(submission.kyc_verification_result or {}), **result}
     submission.auto_verified = True
     now = _now_ist()
+
+    lead = await db.get(LeadV2, rec.lead_id)
+    issues_txt = "; ".join(result.get("issues", []))
 
     log_pipeline("KYC_SUBMITTED", company=submission.company_name,
                  detail=f"GSTIN:{submission.gstin_number or '—'} PAN:{submission.pan_number or '—'}")
 
-    lead = await db.get(LeadV2, rec.lead_id)
+    # Push all KYC fields to CRM immediately (regardless of pass/fail)
+    if lead:
+        try:
+            from app.services.zoho_crm import sync_kyc_data
+            kyc_payload = {
+                "gstin":                  submission.gstin_number or "",
+                "pan":                    submission.pan_number or "",
+                "cin":                    submission.cin_number or "",
+                "ifsc":                   extra.get("ifsc_code", ""),
+                "bank_name":              extra.get("bank_name", ""),
+                "registered_address":     extra.get("registered_address", ""),
+                "city":                   extra.get("city", ""),
+                "state":                  extra.get("state", ""),
+                "nature_of_business":     extra.get("nature_of_business", ""),
+                "entity_type":            extra.get("entity_type", ""),
+                "date_of_incorporation":  extra.get("date_of_incorporation", ""),
+                "annual_turnover":        extra.get("annual_turnover", ""),
+                "designation":            extra.get("signatory1_designation", ""),
+                "country_of_incorporation": extra.get("country_of_incorporation", ""),
+                "company_reg_number":     extra.get("company_reg_number", ""),
+                "tax_id_tin":             extra.get("tax_id_tin", ""),
+                "lei_number":             extra.get("lei_number", ""),
+            }
+            sync_kyc_data(lead.email, submission.company_name, kyc_payload)
+        except Exception as _kce:
+            logger.warning("crm_kyc_sync_failed", error=str(_kce))
 
-    if result.get("auto_approvable"):
-        # All checks passed + API confirmed → auto-approve
-        rec.kyc_status = KYCStatus.APPROVED
-        rec.kyc_approved_at = now
-        rec.kyc_status_display = f"KYC Auto-Verified & Approved ✓ ({_fmt(now)})"
+    if result.get("overall_passed"):
+        rec.kyc_status = KYCStatus.UNDER_REVIEW
+        rec.kyc_submitted_at = now
+        rec.kyc_status_display = f"KYC Format Valid — Under Team Review ({_fmt(now)})"
         await db.commit()
 
-        gstin_src = (result.get("gstin_check") or {}).get("source", "")
-        log_pipeline("KYC_AUTO_APPROVED", company=submission.company_name,
-                     detail=f"GSTIN verified via {gstin_src} | NDA generation triggered")
-
-        if lead:
-            from app.services.onboarding_email import send_kyc_approved_email
-            send_kyc_approved_email(lead.email, lead.contact_name or "", lead.business_name)
-
-            from app.services.zoho_crm import sync_onboarding_stage
-            sync_onboarding_stage(
-                email=lead.email,
-                contact_name=lead.contact_name or submission.company_name,
-                company_name=submission.company_name,
-                stage="KYC Auto-Approved",
-                detail=f"GSTIN: {submission.gstin_number or '—'} verified via {gstin_src}",
-                phone=submission.contact_number or "",
-                company_type=submission.company_type,
-                onboarding_id=onboarding_id,
-            )
-
-        generate_nda_draft_task.delay(onboarding_id)
-
-    elif result.get("overall_passed"):
-        # Format checks passed but API did not fully confirm → manual review
-        notes_txt = "; ".join(result.get("notes", []))
-        rec.kyc_status_display = (
-            f"KYC Format Verified — Under Manual Review ({_fmt(now)})"
-            + (f" | {notes_txt[:150]}" if notes_txt else "")
-        )
-        await db.commit()
-        log_pipeline("KYC_MANUAL_REVIEW", company=submission.company_name,
-                     detail="Format valid, GST API unconfirmed — manual review needed")
-
-        if lead:
-            from app.services.zoho_crm import sync_onboarding_stage
-            sync_onboarding_stage(
-                email=lead.email,
-                contact_name=lead.contact_name or submission.company_name,
-                company_name=submission.company_name,
-                stage="KYC Under Manual Review",
-                detail=f"Format valid. Notes: {notes_txt[:200]}",
-                phone=submission.contact_number or "",
-                company_type=submission.company_type,
-                onboarding_id=onboarding_id,
-            )
+        log_pipeline("KYC_FORMAT_VALID", company=submission.company_name,
+                     detail="All format checks passed — pending team review")
 
         _send_kyc_reviewer_email(submission, result, lead, onboarding_id)
 
+        if lead:
+            from app.services.zoho_crm import sync_onboarding_stage
+            sync_onboarding_stage(
+                email=lead.email,
+                contact_name=lead.contact_name or submission.company_name,
+                company_name=submission.company_name,
+                stage="KYC Submitted",
+                detail="KYC format valid — pending team review",
+                phone=submission.contact_number or "",
+                company_type=submission.company_type,
+                onboarding_id=onboarding_id,
+            )
     else:
-        # Format-level failures → flag for team review
-        issues_txt = "; ".join(result.get("issues", []))
         rec.kyc_status_display = (
-            f"KYC Verification Issues Found ({_fmt(now)}): {issues_txt[:200]}"
+            f"KYC Format Issues ({_fmt(now)}): {issues_txt[:200]}"
         )
         await db.commit()
-        log_pipeline("KYC_ISSUES_FOUND", company=submission.company_name,
+
+        log_pipeline("KYC_FORMAT_ISSUES", company=submission.company_name,
                      detail=f"Issues: {issues_txt[:200]}")
+
+        _send_kyc_reviewer_email(submission, result, lead, onboarding_id)
 
         if lead:
             from app.services.zoho_crm import sync_onboarding_stage
@@ -277,31 +244,76 @@ async def _auto_verify_kyc(db: AsyncSession, submission_id: str, onboarding_id: 
                 onboarding_id=onboarding_id,
             )
 
-        _send_kyc_reviewer_email(submission, result, lead, onboarding_id)
+    await _export_to_sheets(db, onboarding_id)
 
 
 def _send_kyc_reviewer_email(submission, result: dict, lead, onboarding_id: str) -> None:
-    """Send AI-generated KYC review email to the team reviewer with approve/reject buttons."""
     try:
-        from app.services.kyc_ocr import generate_kyc_review_email
-        from app.services.onboarding_email import _send_to_reviewers, make_action_url
+        from app.services.onboarding_email import _send_to_reviewers, make_kyc_view_url
 
-        approve_url = make_action_url(onboarding_id, "approve_kyc")
-        reject_url = make_action_url(onboarding_id, "reject_kyc")
+        view_url = make_kyc_view_url(onboarding_id)
+        passed = result.get("overall_passed", False)
+        issues = result.get("issues", [])
 
-        html_body = generate_kyc_review_email(
-            lead_name=submission.contact_name or submission.company_name,
-            lead_email=lead.email if lead else "",
-            company_name=submission.company_name,
-            kyc_result=result,
-            ocr_result=result.get("ocr_result"),
-        )
-        html_body += f"""<br>
-<p>
-  <a href="{approve_url}" style="background:#22c55e;color:#fff;padding:10px 22px;border-radius:6px;text-decoration:none;margin-right:12px;font-weight:bold;">&#10003; Approve KYC</a>
-  <a href="{reject_url}" style="background:#ef4444;color:#fff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:bold;">&#10007; Reject KYC</a>
-</p>"""
-        _send_to_reviewers(f"KYC Review Required — {submission.company_name}", html_body)
+        status_color = "#16a34a" if passed else "#dc2626"
+        status_label = "All Format Checks Passed" if passed else f"{len(issues)} Format Issue(s) Found"
+
+        issues_summary = ""
+        if issues:
+            items = "".join(f"<li style='color:#991b1b;font-size:13px;margin-bottom:3px;'>{i}</li>" for i in issues)
+            issues_summary = f"<ul style='margin:8px 0;padding-left:20px;'>{items}</ul>"
+
+        company_type = (submission.company_type or "indian").title()
+        lead_email = lead.email if lead else "—"
+
+        html = f"""
+        <div style="font-family:Arial,sans-serif;font-size:14px;color:#222;max-width:580px;">
+          <h2 style="margin:0 0 4px;color:#1a3a6b;">KYC Submission Received</h2>
+          <p style="color:#555;font-size:13px;margin:0 0 18px;">
+            A new KYC form has been submitted and requires your review.
+          </p>
+          <table style="border-collapse:collapse;width:100%;font-size:13px;
+                        border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px;">
+            <tr style="background:#f0f4ff;">
+              <td style="padding:8px 14px;font-weight:600;width:38%;">Company</td>
+              <td style="padding:8px 14px;">{submission.company_name}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 14px;font-weight:600;color:#555;">Company Type</td>
+              <td style="padding:8px 14px;">{company_type}</td>
+            </tr>
+            <tr style="background:#f0f4ff;">
+              <td style="padding:8px 14px;font-weight:600;color:#555;">Contact</td>
+              <td style="padding:8px 14px;">{submission.contact_name or '—'} | {submission.contact_number or '—'}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 14px;font-weight:600;color:#555;">Lead Email</td>
+              <td style="padding:8px 14px;">{lead_email}</td>
+            </tr>
+            <tr style="background:#f0f4ff;">
+              <td style="padding:8px 14px;font-weight:600;color:#555;">Format Check</td>
+              <td style="padding:8px 14px;">
+                <span style="background:{status_color};color:#fff;padding:3px 10px;
+                  border-radius:4px;font-size:12px;font-weight:700;">{status_label}</span>
+              </td>
+            </tr>
+          </table>
+          {issues_summary}
+          <p style="margin:20px 0 10px;font-size:14px;color:#374151;">
+            Click below to view all submitted details and take action:
+          </p>
+          <a href="{view_url}"
+             style="display:inline-block;background:#1a56db;color:#fff;padding:12px 28px;
+                    border-radius:7px;text-decoration:none;font-weight:700;font-size:15px;">
+            View KYC Details &amp; Review →
+          </a>
+          <p style="margin-top:20px;color:#aaa;font-size:11px;">
+            Onboarding ID: {onboarding_id[:8]}… &nbsp;|&nbsp;
+            Approve / Reject buttons are on the review page.
+          </p>
+        </div>"""
+
+        _send_to_reviewers(f"KYC Review Required — {submission.company_name}", html)
     except Exception as _e:
         logger.warning("kyc_reviewer_email_failed", error=str(_e))
 
@@ -367,15 +379,11 @@ async def _generate_nda_draft(db: AsyncSession, onboarding_id: str) -> None:
 
     company_type = rec.company_type or "indian"
     is_overseas = company_type.upper() in ("OVERSEAS", "FOREIGN", "INTERNATIONAL")
-
-    from app.services.zoho_contracts import get_contract_type_id, create_contract
-    contract_type_id = get_contract_type_id("nda", company_type)
-
     now = _now_ist()
     company_name = kyc.company_name
-    nda_label = "Indian NDA" if not is_overseas else "Overseas NDA"
+    nda_label = "Overseas NDA" if is_overseas else "Indian NDA"
 
-    extra = (kyc.kyc_verification_result or {}).get("extra_fields", {}) if kyc else {}
+    extra = (kyc.kyc_verification_result or {}).get("extra_fields", {})
 
     def _mf(*keys):
         for k in keys:
@@ -398,7 +406,6 @@ async def _generate_nda_draft(db: AsyncSession, onboarding_id: str) -> None:
         "nature_of_business":    _mf("nature_of_business"),
         "signatory1_designation":_mf("signatory1_designation"),
     }
-
     if not is_overseas:
         merge_fields.update({k: v for k, v in {
             "pan_number":   kyc.pan_number or "",
@@ -409,52 +416,38 @@ async def _generate_nda_draft(db: AsyncSession, onboarding_id: str) -> None:
         merge_fields.update({k: v for k, v in {
             "country_of_incorporation": _mf("country_of_incorporation"),
             "company_reg_number":       _mf("company_reg_number"),
-            "country_of_tax_residence": _mf("country_of_tax_residence"),
             "tax_id_tin":               _mf("tax_id_tin"),
             "lei_number":               _mf("lei_number"),
-            "vat_gst_number":           _mf("vat_gst_number"),
             "country":                  _mf("country"),
             "signatory1_nationality":   _mf("signatory1_nationality"),
             "signatory1_passport_id":   _mf("signatory1_passport_id"),
         }.items() if v})
 
-    # Create actual draft in Zoho Contracts (not sent yet — team reviews first)
-    contract_api_name = ""
-    preview_url = f"https://contracts.zoho.in/janeaerospace#/contracttypes/{contract_type_id}"
-    contract_status = "Draft pending creation"
+    # Create Zoho Contracts NDA (without submitting — team reviews first)
+    contract_id = ""
+    view_link = ""
     try:
-        _cid, contract_api_name = create_contract(
-            contract_type_id=contract_type_id,
-            contract_name=f"NDA - {company_name}",
-            lead_name=kyc.contact_name or company_name,
-            lead_email=lead.email if lead else "",
+        from app.services.zoho_contracts import prepare_nda_contract
+        contract_id, view_link = prepare_nda_contract(
             merge_fields=merge_fields,
+            is_overseas=is_overseas,
+            signatory_name=merge_fields.get("contact_name") or company_name,
+            signatory_email=merge_fields.get("signatory_email") or (lead.email if lead else ""),
+            company_name=company_name,
         )
-        rec.nda_zoho_contract_id = contract_api_name
-        preview_url = f"https://contracts.zoho.in/janeaerospace#/contracts/{contract_api_name}"
-        contract_status = f"Draft created in Zoho Contracts (ID: {contract_api_name})"
-    except Exception as e:
-        logger.warning("nda_draft_create_failed", error=str(e), onboarding_id=onboarding_id)
-        contract_status = f"Draft creation failed: {str(e)[:120]}"
+        rec.nda_zoho_contract_id = contract_id
+        rec.nda_draft_content = view_link  # store view link for later use
+        log_pipeline("NDA_CONTRACT_CREATED", company=company_name,
+                     detail=f"Zoho Contracts NDA created. contract_id={contract_id}")
+    except Exception as _ce:
+        logger.warning("nda_zoho_contracts_create_failed", error=str(_ce))
+        # Leave nda_draft_content empty; _send_nda_to_lead will fall back to HTML NDA
 
-    rec.nda_draft_content = (
-        f"=== NDA READY FOR TEAM REVIEW ===\n"
-        f"Company       : {company_name}\n"
-        f"Contact       : {kyc.contact_name} | {kyc.contact_number or '—'}\n"
-        f"Template Type : {nda_label} (Contract Type: {contract_type_id})\n"
-        f"Effective Date: {now.strftime('%d %B %Y')}\n"
-        f"Send To       : {lead.email if lead else '—'}\n\n"
-        f"Status: {contract_status}\n"
-        f"Preview in Zoho Contracts: {preview_url}\n\n"
-        f"Merge fields pre-filled:\n"
-        + "\n".join(f"  {k} = {v}" for k, v in merge_fields.items() if v)
-        + "\n\nClick Approve to send this NDA to the lead for e-signature."
-    )
     rec.nda_status = DocumentStatus.TEAM_REVIEW
     rec.nda_status_display = f"NDA Ready — Pending Team Review ({_fmt(now)})"
 
     log_pipeline("NDA_READY", company=company_name,
-                 detail=f"NDA ({nda_label}) draft created in Zoho Contracts | {contract_status}")
+                 detail=f"NDA ({nda_label}) draft ready for team review")
 
     await db.commit()
     await _export_to_sheets(db, onboarding_id)
@@ -465,73 +458,17 @@ async def _generate_nda_draft(db: AsyncSession, onboarding_id: str) -> None:
             lead_name=(lead.contact_name or company_name) if lead else company_name,
             company_name=company_name,
             onboarding_id=onboarding_id,
-            preview_url=preview_url,
-            contract_id=contract_api_name,
+            preview_url=view_link,
+            contract_id=contract_id,
         )
     except Exception as _e:
-        pass
+        logger.warning("notify_team_nda_draft_ready_failed", error=str(_e))
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
 def generate_nda_draft_task(self, onboarding_id: str) -> None:
     try:
         run_async(_generate_nda_draft, onboarding_id)
-    except Exception as exc:
-        raise self.retry(exc=exc)
-
-
-# ---------------------------------------------------------------------------
-# NDA: revise draft
-# ---------------------------------------------------------------------------
-
-async def _revise_nda_draft(db: AsyncSession, onboarding_id: str, notes: str) -> None:
-    rec = await db.get(OnboardingRecord, uuid.UUID(onboarding_id))
-    if not rec:
-        return
-
-    kyc_result = await db.execute(
-        select(KYCSubmission)
-        .where(KYCSubmission.onboarding_id == rec.id)
-        .order_by(KYCSubmission.attempt_number.desc())
-    )
-    kyc = kyc_result.scalars().first()
-    kyc_data = {
-        "company_name": kyc.company_name if kyc else "",
-        "contact_name": kyc.contact_name if kyc else "",
-        "contact_number": kyc.contact_number if kyc else "",
-        "company_type": rec.company_type or "indian",
-        "date": _now_ist().strftime("%d %B %Y"),
-    }
-
-    from app.services.onboarding_ai import revise_document
-    revised = revise_document(rec.nda_draft_content or "", notes, kyc_data, "NDA")
-
-    now = _now_ist()
-    rec.nda_draft_content = revised
-    rec.nda_status = DocumentStatus.TEAM_REVIEW
-    rec.nda_status_display = f"NDA Revised (v{rec.nda_draft_revision}) — Pending Team Review ({_fmt(now)})"
-
-    # Upload revised draft
-    if kyc:
-        try:
-            from app.services.zoho_workdrive import upload_file
-            file_id = upload_file(
-                revised.encode("utf-8"),
-                f"NDA_Draft_v{rec.nda_draft_revision}_{kyc.company_name}_{onboarding_id[:8]}.txt",
-                mime_type="text/plain",
-            )
-            rec.nda_draft_zoho_file_id = file_id
-        except Exception:
-            pass
-
-    await db.commit()
-    await _export_to_sheets(db, onboarding_id)
-
-
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
-def revise_nda_draft_task(self, onboarding_id: str, notes: str) -> None:
-    try:
-        run_async(_revise_nda_draft, onboarding_id, notes)
     except Exception as exc:
         raise self.retry(exc=exc)
 
@@ -549,7 +486,7 @@ async def _send_nda_to_lead(db: AsyncSession, onboarding_id: str) -> None:
         return
 
     now = _now_ist()
-    company_type = rec.company_type or "INDIAN"
+    company_type = rec.company_type or "indian"
     is_overseas = company_type.upper() in ("OVERSEAS", "FOREIGN", "INTERNATIONAL")
 
     kyc_result = await db.execute(
@@ -558,7 +495,6 @@ async def _send_nda_to_lead(db: AsyncSession, onboarding_id: str) -> None:
         .order_by(KYCSubmission.attempt_number.desc())
     )
     kyc = kyc_result.scalars().first()
-
     extra = (kyc.kyc_verification_result or {}).get("extra_fields", {}) if kyc else {}
 
     def _mf(*keys):
@@ -592,10 +528,8 @@ async def _send_nda_to_lead(db: AsyncSession, onboarding_id: str) -> None:
         merge_fields.update({k: v for k, v in {
             "country_of_incorporation": _mf("country_of_incorporation"),
             "company_reg_number":       _mf("company_reg_number"),
-            "country_of_tax_residence": _mf("country_of_tax_residence"),
             "tax_id_tin":               _mf("tax_id_tin"),
             "lei_number":               _mf("lei_number"),
-            "vat_gst_number":           _mf("vat_gst_number"),
             "country":                  _mf("country"),
             "signatory1_nationality":   _mf("signatory1_nationality"),
             "signatory1_passport_id":   _mf("signatory1_passport_id"),
@@ -604,24 +538,51 @@ async def _send_nda_to_lead(db: AsyncSession, onboarding_id: str) -> None:
     company_name = merge_fields["company_name"]
     contact_name = merge_fields["contact_name"]
 
-    # Generate NDA document and send via email
-    # (Zoho Contracts API contract-creation is not available on the current plan)
-    from app.services.nda_template import render_nda_html
-    from app.services.onboarding_email import send_nda_to_lead as _send_nda_email
-    nda_html = render_nda_html(merge_fields, is_overseas)
-    _send_nda_email(
-        to_email=lead.email,
-        lead_name=contact_name,
-        company_name=company_name,
-        nda_content_html=nda_html,
-    )
+    # Submit via Zoho Contracts and get signing link
+    contract_id = rec.nda_zoho_contract_id or ""
+    view_link = ""
+
+    if contract_id:
+        try:
+            from app.services.zoho_contracts import get_contract_view_link, submit_contract
+            submit_contract(contract_id)
+            view_link = get_contract_view_link(contract_id) or ""
+            if view_link:
+                rec.nda_draft_content = view_link
+            log_pipeline("NDA_CONTRACT_SUBMITTED", company=company_name,
+                         detail=f"Zoho Contracts NDA submitted. contract_id={contract_id}")
+        except Exception as _ce:
+            logger.warning("nda_zoho_contracts_submit_failed", error=str(_ce))
+
+    if contract_id and view_link:
+        from app.services.onboarding_email import send_nda_contract_link
+        send_nda_contract_link(
+            to_email=lead.email,
+            lead_name=contact_name,
+            company_name=company_name,
+            contract_link=view_link,
+        )
+    else:
+        # Fallback: render HTML NDA and email inline
+        from app.services.nda_template import render_nda_html
+        from app.services.onboarding_email import send_nda_to_lead as _send_nda_email
+        nda_html = render_nda_html(merge_fields, is_overseas)
+        _send_nda_email(
+            to_email=lead.email,
+            lead_name=contact_name,
+            company_name=company_name,
+            nda_content_html=nda_html,
+        )
 
     rec.nda_status = DocumentStatus.SENT_TO_LEAD
     rec.nda_sent_at = now
-    rec.nda_status_display = f"NDA sent via email for signature ({_fmt(now)})"
+    rec.nda_status_display = f"NDA Sent to Lead ({_fmt(now)}) — Awaiting Signature via Zoho Contracts"
     await db.commit()
+
     log_pipeline("NDA_SENT", company=company_name, email=lead.email,
-                 detail="NDA sent via email (sign and return). Awaiting signed copy.")
+                 detail="NDA sent via Zoho Contracts link.")
+
+    await _export_to_sheets(db, onboarding_id)
 
     from app.services.zoho_crm import sync_onboarding_stage
     sync_onboarding_stage(
@@ -629,9 +590,10 @@ async def _send_nda_to_lead(db: AsyncSession, onboarding_id: str) -> None:
         contact_name=contact_name,
         company_name=company_name,
         stage="NDA Sent for E-Sign",
-        detail="NDA sent via email for wet signature. Lead to sign and return.",
+        detail="NDA sent via email for signature.",
         company_type=rec.company_type or "",
         onboarding_id=onboarding_id,
+        nda_contract_id=contract_id or "",
     )
 
 
@@ -671,7 +633,7 @@ def send_nda_sign_rejection_task(self, onboarding_id: str, notes: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Customer Agreement: generate draft (mirrors NDA)
+# Customer Agreement: generate draft
 # ---------------------------------------------------------------------------
 
 async def _generate_agreement_draft(db: AsyncSession, onboarding_id: str) -> None:
@@ -692,14 +654,10 @@ async def _generate_agreement_draft(db: AsyncSession, onboarding_id: str) -> Non
 
     company_type = rec.company_type or "indian"
     is_overseas = company_type.upper() in ("OVERSEAS", "FOREIGN", "INTERNATIONAL")
-
-    from app.services.zoho_contracts import get_contract_type_id, create_contract
-    contract_type_id = get_contract_type_id("agreement", company_type)
-
     now = _now_ist()
     company_name = kyc.company_name
 
-    extra = (kyc.kyc_verification_result or {}).get("extra_fields", {}) if kyc else {}
+    extra = (kyc.kyc_verification_result or {}).get("extra_fields", {})
 
     def _mf(*keys):
         for k in keys:
@@ -709,25 +667,17 @@ async def _generate_agreement_draft(db: AsyncSession, onboarding_id: str) -> Non
         return ""
 
     merge_fields: dict = {
-        "company_name":             kyc.company_name,
-        "contact_name":             kyc.contact_name or (lead.contact_name if lead else "") or company_name,
-        "contact_number":           kyc.contact_number or "",
-        "effective_date":           now.strftime("%d %B %Y"),
-        "signatory_email":          lead.email if lead else "",
-        "entity_type":              _mf("entity_type"),
-        "date_of_incorporation":    _mf("date_of_incorporation"),
-        "registered_address":       _mf("registered_address"),
-        "city":                     _mf("city"),
-        "state":                    _mf("state"),
-        "nature_of_business":       _mf("nature_of_business"),
-        "annual_turnover":          _mf("annual_turnover"),
-        "signatory1_designation":   _mf("signatory1_designation"),
-        "escalation_contact_name":  _mf("escalation_contact_name"),
-        "escalation_contact_email": _mf("escalation_contact_email"),
-        "escalation_contact_phone": _mf("escalation_contact_phone"),
-        "escalation_contact_title": _mf("escalation_contact_title"),
+        "company_name":          kyc.company_name,
+        "contact_name":          kyc.contact_name or (lead.contact_name if lead else "") or company_name,
+        "contact_number":        kyc.contact_number or "",
+        "effective_date":        now.strftime("%d %B %Y"),
+        "signatory_email":       lead.email if lead else "",
+        "entity_type":           _mf("entity_type"),
+        "registered_address":    _mf("registered_address"),
+        "nature_of_business":    _mf("nature_of_business"),
+        "annual_turnover":       _mf("annual_turnover"),
+        "signatory1_designation":_mf("signatory1_designation"),
     }
-
     if not is_overseas:
         merge_fields.update({k: v for k, v in {
             "pan_number":   kyc.pan_number or "",
@@ -735,62 +685,42 @@ async def _generate_agreement_draft(db: AsyncSession, onboarding_id: str) -> Non
             "cin_number":   kyc.cin_number or "",
             "bank_name":    _mf("bank_name"),
             "ifsc_code":    _mf("ifsc_code"),
-            "account_type": _mf("account_type"),
         }.items() if v})
     else:
         merge_fields.update({k: v for k, v in {
-            "country_of_incorporation":  _mf("country_of_incorporation"),
-            "company_reg_number":        _mf("company_reg_number"),
-            "country_of_tax_residence":  _mf("country_of_tax_residence"),
-            "tax_id_tin":                _mf("tax_id_tin"),
-            "lei_number":                _mf("lei_number"),
-            "vat_gst_number":            _mf("vat_gst_number"),
-            "country":                   _mf("country"),
-            "signatory1_nationality":    _mf("signatory1_nationality"),
-            "signatory1_passport_id":    _mf("signatory1_passport_id"),
-            "swift_code":                _mf("swift_code"),
-            "iban_number":               _mf("iban_number"),
-            "bank_country":              _mf("bank_country"),
-            "account_currency":          _mf("account_currency"),
+            "country_of_incorporation": _mf("country_of_incorporation"),
+            "company_reg_number":       _mf("company_reg_number"),
+            "tax_id_tin":               _mf("tax_id_tin"),
+            "lei_number":               _mf("lei_number"),
+            "country":                  _mf("country"),
         }.items() if v})
 
-    # Create actual draft in Zoho Contracts (not sent yet — team reviews first)
-    contract_api_name = ""
-    preview_url = f"https://contracts.zoho.in/janeaerospace#/contracttypes/{contract_type_id}"
-    contract_status = "Draft pending creation"
+    # Create Zoho Contracts Agreement (without submitting — team reviews first)
+    agr_contract_id = ""
+    agr_view_link = ""
     try:
-        _cid, contract_api_name = create_contract(
-            contract_type_id=contract_type_id,
-            contract_name=f"Customer Agreement - {company_name}",
-            lead_name=kyc.contact_name or company_name,
-            lead_email=lead.email if lead else "",
+        from app.services.zoho_contracts import prepare_agreement_contract
+        agr_contract_id, agr_view_link = prepare_agreement_contract(
             merge_fields=merge_fields,
+            is_overseas=is_overseas,
+            signatory_name=merge_fields.get("contact_name") or company_name,
+            signatory_email=merge_fields.get("signatory_email") or (lead.email if lead else ""),
+            company_name=company_name,
         )
-        rec.agreement_zoho_contract_id = contract_api_name
-        preview_url = f"https://contracts.zoho.in/janeaerospace#/contracts/{contract_api_name}"
-        contract_status = f"Draft created in Zoho Contracts (ID: {contract_api_name})"
-    except Exception as e:
-        logger.warning("agreement_draft_create_failed", error=str(e), onboarding_id=onboarding_id)
-        contract_status = f"Draft creation failed: {str(e)[:120]}"
+        rec.agreement_zoho_contract_id = agr_contract_id
+        rec.agreement_draft_content = agr_view_link  # store view link for later use
+        log_pipeline("AGREEMENT_CONTRACT_CREATED", company=company_name,
+                     detail=f"Zoho Contracts Agreement created. contract_id={agr_contract_id}")
+    except Exception as _ce:
+        logger.warning("agreement_zoho_contracts_create_failed", error=str(_ce))
+        # Leave agreement_draft_content empty; _send_agreement_to_lead will fall back to HTML
 
-    rec.agreement_draft_content = (
-        f"=== CUSTOMER AGREEMENT READY FOR TEAM REVIEW ===\n"
-        f"Company       : {company_name}\n"
-        f"Contact       : {kyc.contact_name} | {kyc.contact_number or '—'}\n"
-        f"Template Type : Customer Agreement (Contract Type: {contract_type_id})\n"
-        f"Effective Date: {now.strftime('%d %B %Y')}\n"
-        f"Send To       : {lead.email if lead else '—'}\n\n"
-        f"Status: {contract_status}\n"
-        f"Preview in Zoho Contracts: {preview_url}\n\n"
-        f"Merge fields pre-filled:\n"
-        + "\n".join(f"  {k} = {v}" for k, v in merge_fields.items() if v)
-        + "\n\nClick Approve to send this Agreement to the lead for e-signature."
-    )
     rec.agreement_status = DocumentStatus.TEAM_REVIEW
     rec.agreement_status_display = f"Agreement Ready — Pending Team Review ({_fmt(now)})"
 
     log_pipeline("AGREEMENT_READY", company=company_name,
-                 detail=f"Customer Agreement draft created in Zoho Contracts | {contract_status}")
+                 detail="Customer Agreement draft ready for team review")
+
     await db.commit()
     await _export_to_sheets(db, onboarding_id)
 
@@ -800,8 +730,8 @@ async def _generate_agreement_draft(db: AsyncSession, onboarding_id: str) -> Non
             lead_name=(lead.contact_name or company_name) if lead else company_name,
             company_name=company_name,
             onboarding_id=onboarding_id,
-            preview_url=preview_url,
-            contract_id=contract_api_name,
+            preview_url=agr_view_link,
+            contract_id=agr_contract_id,
         )
     except Exception:
         pass
@@ -811,62 +741,6 @@ async def _generate_agreement_draft(db: AsyncSession, onboarding_id: str) -> Non
 def generate_agreement_draft_task(self, onboarding_id: str) -> None:
     try:
         run_async(_generate_agreement_draft, onboarding_id)
-    except Exception as exc:
-        raise self.retry(exc=exc)
-
-
-# ---------------------------------------------------------------------------
-# Customer Agreement: revise draft
-# ---------------------------------------------------------------------------
-
-async def _revise_agreement_draft(db: AsyncSession, onboarding_id: str, notes: str) -> None:
-    rec = await db.get(OnboardingRecord, uuid.UUID(onboarding_id))
-    if not rec:
-        return
-
-    kyc_result = await db.execute(
-        select(KYCSubmission)
-        .where(KYCSubmission.onboarding_id == rec.id)
-        .order_by(KYCSubmission.attempt_number.desc())
-    )
-    kyc = kyc_result.scalars().first()
-    kyc_data = {
-        "company_name": kyc.company_name if kyc else "",
-        "contact_name": kyc.contact_name if kyc else "",
-        "company_type": rec.company_type or "indian",
-        "date": _now_ist().strftime("%d %B %Y"),
-    }
-
-    from app.services.onboarding_ai import revise_document
-    revised = revise_document(rec.agreement_draft_content or "", notes, kyc_data, "Customer Agreement")
-
-    now = _now_ist()
-    rec.agreement_draft_content = revised
-    rec.agreement_status = DocumentStatus.TEAM_REVIEW
-    rec.agreement_status_display = (
-        f"Agreement Revised (v{rec.agreement_draft_revision}) — Pending Team Review ({_fmt(now)})"
-    )
-
-    if kyc:
-        try:
-            from app.services.zoho_workdrive import upload_file
-            file_id = upload_file(
-                revised.encode("utf-8"),
-                f"Agreement_Draft_v{rec.agreement_draft_revision}_{kyc.company_name}_{onboarding_id[:8]}.txt",
-                mime_type="text/plain",
-            )
-            rec.agreement_draft_zoho_file_id = file_id
-        except Exception:
-            pass
-
-    await db.commit()
-    await _export_to_sheets(db, onboarding_id)
-
-
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
-def revise_agreement_draft_task(self, onboarding_id: str, notes: str) -> None:
-    try:
-        run_async(_revise_agreement_draft, onboarding_id, notes)
     except Exception as exc:
         raise self.retry(exc=exc)
 
@@ -883,104 +757,111 @@ async def _send_agreement_to_lead(db: AsyncSession, onboarding_id: str) -> None:
     if not lead:
         return
 
-    from app.services.zoho_contracts import send_for_signature, create_and_send, get_contract_type_id
-
     now = _now_ist()
+    company_type = rec.company_type or "indian"
+    is_overseas = company_type.upper() in ("OVERSEAS", "FOREIGN", "INTERNATIONAL")
 
-    if rec.agreement_zoho_contract_id:
-        # Draft already created at preview step — just send for signature
-        send_for_signature(rec.agreement_zoho_contract_id)
-        contract_id = rec.agreement_zoho_contract_id
+    kyc_result = await db.execute(
+        select(KYCSubmission)
+        .where(KYCSubmission.onboarding_id == rec.id)
+        .order_by(KYCSubmission.attempt_number.desc())
+    )
+    kyc = kyc_result.scalars().first()
+    extra = (kyc.kyc_verification_result or {}).get("extra_fields", {}) if kyc else {}
+
+    def _mf(*keys):
+        for k in keys:
+            v = extra.get(k)
+            if v:
+                return v
+        return ""
+
+    company_name = (kyc.company_name if kyc else None) or lead.business_name
+    contact_name = (kyc.contact_name if kyc else None) or lead.contact_name or lead.business_name
+
+    merge_fields: dict = {
+        "company_name":          company_name,
+        "contact_name":          contact_name,
+        "contact_number":        (kyc.contact_number if kyc else "") or "",
+        "effective_date":        now.strftime("%d %B %Y"),
+        "signatory_email":       lead.email,
+        "entity_type":           _mf("entity_type"),
+        "registered_address":    _mf("registered_address"),
+        "nature_of_business":    _mf("nature_of_business"),
+        "annual_turnover":       _mf("annual_turnover"),
+        "signatory1_designation":_mf("signatory1_designation"),
+    }
+    if not is_overseas:
+        merge_fields.update({k: v for k, v in {
+            "pan_number":   (kyc.pan_number or "") if kyc else "",
+            "gstin_number": (kyc.gstin_number or "") if kyc else "",
+            "cin_number":   (kyc.cin_number or "") if kyc else "",
+            "bank_name":    _mf("bank_name"),
+            "ifsc_code":    _mf("ifsc_code"),
+        }.items() if v})
     else:
-        # Fallback: create + send in one step (draft creation had failed earlier)
-        kyc_result = await db.execute(
-            select(KYCSubmission)
-            .where(KYCSubmission.onboarding_id == rec.id)
-            .order_by(KYCSubmission.attempt_number.desc())
+        merge_fields.update({k: v for k, v in {
+            "country_of_incorporation": _mf("country_of_incorporation"),
+            "company_reg_number":       _mf("company_reg_number"),
+            "tax_id_tin":               _mf("tax_id_tin"),
+            "lei_number":               _mf("lei_number"),
+            "country":                  _mf("country"),
+        }.items() if v})
+
+    agr_contract_id = rec.agreement_zoho_contract_id or ""
+    agr_view_link = ""
+
+    if agr_contract_id:
+        try:
+            from app.services.zoho_contracts import get_contract_view_link, submit_contract
+            submit_contract(agr_contract_id)
+            agr_view_link = get_contract_view_link(agr_contract_id) or ""
+            if agr_view_link:
+                rec.agreement_draft_content = agr_view_link
+            log_pipeline("AGREEMENT_CONTRACT_SUBMITTED", company=company_name,
+                         detail=f"Zoho Contracts Agreement submitted. contract_id={agr_contract_id}")
+        except Exception as _ce:
+            logger.warning("agreement_zoho_contracts_submit_failed", error=str(_ce))
+
+    if agr_contract_id and agr_view_link:
+        from app.services.onboarding_email import send_agreement_contract_link
+        send_agreement_contract_link(
+            to_email=lead.email,
+            lead_name=contact_name,
+            company_name=company_name,
+            contract_link=agr_view_link,
         )
-        kyc = kyc_result.scalars().first()
-        company_type = rec.company_type or "INDIAN"
-        is_overseas = company_type.upper() in ("OVERSEAS", "FOREIGN", "INTERNATIONAL")
-        contract_type_id = get_contract_type_id("agreement", company_type)
-        extra = (kyc.kyc_verification_result or {}).get("extra_fields", {}) if kyc else {}
-
-        def _mf(*keys):
-            for k in keys:
-                v = extra.get(k)
-                if v:
-                    return v
-            return ""
-
-        merge_fields: dict = {
-            "company_name":             kyc.company_name if kyc else lead.business_name,
-            "contact_name":             kyc.contact_name if kyc else lead.contact_name or lead.business_name,
-            "contact_number":           kyc.contact_number if kyc else "",
-            "effective_date":           now.strftime("%d %B %Y"),
-            "signatory_email":          lead.email,
-            "entity_type":              _mf("entity_type"),
-            "date_of_incorporation":    _mf("date_of_incorporation"),
-            "registered_address":       _mf("registered_address"),
-            "city":                     _mf("city"),
-            "state":                    _mf("state"),
-            "nature_of_business":       _mf("nature_of_business"),
-            "annual_turnover":          _mf("annual_turnover"),
-            "signatory1_designation":   _mf("signatory1_designation"),
-            "escalation_contact_name":  _mf("escalation_contact_name"),
-            "escalation_contact_email": _mf("escalation_contact_email"),
-            "escalation_contact_phone": _mf("escalation_contact_phone"),
-            "escalation_contact_title": _mf("escalation_contact_title"),
-        }
-        if not is_overseas:
-            merge_fields.update({k: v for k, v in {
-                "pan_number":   (kyc.pan_number or "") if kyc else "",
-                "gstin_number": (kyc.gstin_number or "") if kyc else "",
-                "cin_number":   (kyc.cin_number or "") if kyc else "",
-                "bank_name":    _mf("bank_name"),
-                "ifsc_code":    _mf("ifsc_code"),
-                "account_type": _mf("account_type"),
-            }.items() if v})
-        else:
-            merge_fields.update({k: v for k, v in {
-                "country_of_incorporation":  _mf("country_of_incorporation"),
-                "company_reg_number":        _mf("company_reg_number"),
-                "country_of_tax_residence":  _mf("country_of_tax_residence"),
-                "tax_id_tin":                _mf("tax_id_tin"),
-                "lei_number":                _mf("lei_number"),
-                "vat_gst_number":            _mf("vat_gst_number"),
-                "country":                   _mf("country"),
-                "signatory1_nationality":    _mf("signatory1_nationality"),
-                "signatory1_passport_id":    _mf("signatory1_passport_id"),
-                "swift_code":                _mf("swift_code"),
-                "iban_number":               _mf("iban_number"),
-                "bank_country":              _mf("bank_country"),
-                "account_currency":          _mf("account_currency"),
-            }.items() if v})
-
-        contract_id = create_and_send(
-            contract_type_id=contract_type_id,
-            contract_name=f"Customer Agreement - {lead.business_name}",
-            lead_name=lead.contact_name or lead.business_name,
-            lead_email=lead.email,
-            merge_fields=merge_fields,
+    else:
+        from app.services.nda_template import render_nda_html
+        from app.services.onboarding_email import send_agreement_to_lead as _send_agr_email
+        agreement_html = render_nda_html(merge_fields, is_overseas)
+        _send_agr_email(
+            to_email=lead.email,
+            lead_name=contact_name,
+            company_name=company_name,
+            agreement_content_html=agreement_html,
         )
-        rec.agreement_zoho_contract_id = contract_id
 
     rec.agreement_status = DocumentStatus.SENT_TO_LEAD
     rec.agreement_sent_at = now
-    rec.agreement_status_display = f"Customer Agreement sent via Zoho Contracts for e-signature ({_fmt(now)})"
+    rec.agreement_status_display = f"Customer Agreement Sent ({_fmt(now)}) — Awaiting Signature via Zoho Contracts"
     await db.commit()
-    log_pipeline("AGREEMENT_SENT", company=lead.business_name, email=lead.email,
-                 detail=f"Customer Agreement sent via Zoho Contracts e-sign (contract_id={contract_id})")
+
+    log_pipeline("AGREEMENT_SENT", company=company_name, email=lead.email,
+                 detail="Customer Agreement sent via Zoho Contracts link.")
+
+    await _export_to_sheets(db, onboarding_id)
 
     from app.services.zoho_crm import sync_onboarding_stage
     sync_onboarding_stage(
         email=lead.email,
-        contact_name=lead.contact_name or lead.business_name,
-        company_name=lead.business_name,
+        contact_name=contact_name,
+        company_name=company_name,
         stage="Agreement Sent for E-Sign",
-        detail=f"Customer Agreement sent via Zoho Contracts. Contract ID: {contract_id}",
+        detail="Customer Agreement sent via email for signature.",
         company_type=rec.company_type or "",
         onboarding_id=onboarding_id,
+        agreement_contract_id=agr_contract_id or "",
     )
 
 
@@ -1020,11 +901,10 @@ def send_agreement_sign_rejection_task(self, onboarding_id: str, notes: str) -> 
 
 
 # ---------------------------------------------------------------------------
-# Daily reminder sweep (beat task — fires every 24h)
+# Daily reminder sweep (beat task)
 # ---------------------------------------------------------------------------
 
 async def _sweep_reminders(db: AsyncSession) -> int:
-    """Send daily reminders to leads who haven't responded."""
     now = _now_ist()
     sent = 0
 
@@ -1036,21 +916,17 @@ async def _sweep_reminders(db: AsyncSession) -> int:
         if not lead:
             continue
 
-        # KYC reminder: form sent but not submitted
+        # KYC reminder
         if rec.kyc_status in (KYCStatus.FORM_SENT, KYCStatus.REJECTED):
             last = rec.kyc_last_followup_at or rec.kyc_form_sent_at
-            if last and (now - last).total_seconds() >= 86400:  # 24h
+            if last and (now - last).total_seconds() >= 86400:
                 days = (now - rec.kyc_form_sent_at).days if rec.kyc_form_sent_at else 1
                 rec.kyc_followup_count = (rec.kyc_followup_count or 0) + 1
                 rec.kyc_last_followup_at = now
-                rec.kyc_status_display = (
-                    f"KYC Follow-up #{rec.kyc_followup_count} sent — Day {days} ({_fmt(now)})"
-                )
+                rec.kyc_status_display = f"KYC Follow-up #{rec.kyc_followup_count} — Day {days} ({_fmt(now)})"
 
                 from app.services.onboarding_ai import generate_kyc_reminder_email
-                from app.services.onboarding_email import (
-                    make_kyc_token, make_kyc_url, send_kyc_reminder_email
-                )
+                from app.services.onboarding_email import make_kyc_token, make_kyc_url, send_kyc_reminder_email
                 token = rec.kyc_form_token or make_kyc_token(str(rec.id))
                 kyc_url = make_kyc_url(str(rec.id), token)
                 body = generate_kyc_reminder_email(
@@ -1064,30 +940,26 @@ async def _sweep_reminders(db: AsyncSession) -> int:
                              detail=f"Follow-up #{rec.kyc_followup_count} — Day {days}")
                 sent += 1
 
-        # NDA reminder: sent to lead but not signed
+        # NDA reminder
         if rec.nda_status == DocumentStatus.SENT_TO_LEAD:
             last = rec.nda_last_followup_at or rec.nda_sent_at
             if last and (now - last).total_seconds() >= 86400:
                 days = (now - rec.nda_sent_at).days if rec.nda_sent_at else 1
                 rec.nda_followup_count = (rec.nda_followup_count or 0) + 1
                 rec.nda_last_followup_at = now
-                rec.nda_status_display = (
-                    f"NDA Follow-up #{rec.nda_followup_count} sent — Day {days} ({_fmt(now)})"
-                )
+                rec.nda_status_display = f"NDA Follow-up #{rec.nda_followup_count} — Day {days} ({_fmt(now)})"
 
                 from app.services.onboarding_ai import generate_doc_reminder_email
                 from app.services.onboarding_email import send_nda_reminder
                 body = generate_doc_reminder_email(
                     lead.contact_name or "", lead.business_name, rec.nda_followup_count, "NDA", days
                 )
-                send_nda_reminder(
-                    lead.email, lead.contact_name or "", lead.business_name, body, rec.nda_followup_count
-                )
+                send_nda_reminder(lead.email, lead.contact_name or "", lead.business_name, body, rec.nda_followup_count)
                 log_pipeline("NDA_REMINDER_SENT", company=lead.business_name, email=lead.email,
                              detail=f"Follow-up #{rec.nda_followup_count} — Day {days}")
                 sent += 1
 
-        # Agreement reminder: sent to lead but not signed
+        # Agreement reminder
         if rec.agreement_status == DocumentStatus.SENT_TO_LEAD:
             last = rec.agreement_last_followup_at or rec.agreement_sent_at
             if last and (now - last).total_seconds() >= 86400:
@@ -1095,7 +967,7 @@ async def _sweep_reminders(db: AsyncSession) -> int:
                 rec.agreement_followup_count = (rec.agreement_followup_count or 0) + 1
                 rec.agreement_last_followup_at = now
                 rec.agreement_status_display = (
-                    f"Agreement Follow-up #{rec.agreement_followup_count} sent — Day {days} ({_fmt(now)})"
+                    f"Agreement Follow-up #{rec.agreement_followup_count} — Day {days} ({_fmt(now)})"
                 )
 
                 from app.services.onboarding_ai import generate_doc_reminder_email
@@ -1125,123 +997,154 @@ def sweep_onboarding_reminders(self) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Zoho Contracts: poll pending signatures (webhook fallback)
+# Google Sheets export — single row per lead, all pipeline stages
 # ---------------------------------------------------------------------------
 
-async def _poll_contract_statuses(db: AsyncSession) -> int:
-    """Check Zoho Contracts for any NDA/Agreement that has been signed.
-
-    Runs every 2 hours. Finds all records where a contract was sent to the
-    lead but not yet marked as received. Polls the Zoho Contracts API for
-    each and updates the DB if signed.
-    """
-    from app.services.zoho_contracts import get_contract_status
-    from app.core.pipeline_logger import log_pipeline
-
-    result = await db.execute(select(OnboardingRecord))
-    records = result.scalars().all()
-
-    updated = 0
-    now = _now_ist()
-
-    for rec in records:
-        lead = await db.get(LeadV2, rec.lead_id)
-
-        # --- Poll NDA ---
-        if (
-            rec.nda_status == DocumentStatus.SENT_TO_LEAD
-            and rec.nda_zoho_contract_id
-        ):
-            try:
-                status = get_contract_status(rec.nda_zoho_contract_id)
-                if status["is_signed"]:
-                    rec.nda_status = DocumentStatus.SIGN_UNDER_REVIEW
-                    rec.nda_signed_received_at = now
-                    rec.nda_status_display = (
-                        f"NDA Signed (detected via poll) — Pending Team Review ({_fmt(now)})"
-                    )
-                    updated += 1
-                    log_pipeline(
-                        "NDA_SIGNED_RECEIVED",
-                        company=lead.business_name if lead else "—",
-                        email=lead.email if lead else "—",
-                        detail=f"Signed NDA detected via Zoho Contracts poll (stage={status['stage']})",
-                    )
-                    if lead:
-                        from app.services.onboarding_email import notify_team_signed_doc_received
-                        notify_team_signed_doc_received(
-                            lead.contact_name or "", lead.business_name,
-                            str(rec.id), "NDA",
-                        )
-            except Exception as _e:
-                logger.warning("nda_poll_failed", onboarding_id=str(rec.id), error=str(_e))
-
-        # --- Poll Agreement ---
-        if (
-            rec.agreement_status == DocumentStatus.SENT_TO_LEAD
-            and rec.agreement_zoho_contract_id
-        ):
-            try:
-                status = get_contract_status(rec.agreement_zoho_contract_id)
-                if status["is_signed"]:
-                    rec.agreement_status = DocumentStatus.SIGN_UNDER_REVIEW
-                    rec.agreement_signed_received_at = now
-                    rec.agreement_status_display = (
-                        f"Agreement Signed (detected via poll) — Pending Team Review ({_fmt(now)})"
-                    )
-                    updated += 1
-                    log_pipeline(
-                        "AGREEMENT_SIGNED_RECEIVED",
-                        company=lead.business_name if lead else "—",
-                        email=lead.email if lead else "—",
-                        detail=f"Signed Agreement detected via poll (stage={status['stage']})",
-                    )
-                    if lead:
-                        from app.services.onboarding_email import notify_team_signed_doc_received
-                        notify_team_signed_doc_received(
-                            lead.contact_name or "", lead.business_name,
-                            str(rec.id), "Customer Agreement",
-                        )
-            except Exception as _e:
-                logger.warning("agreement_poll_failed", onboarding_id=str(rec.id), error=str(_e))
-
-    if updated:
-        await db.commit()
-    return updated
-
-
-@celery_app.task(bind=True, max_retries=2)
-def poll_contract_statuses_task(self) -> int:
-    """Poll Zoho Contracts every 2 hours to detect signed NDA/Agreements."""
-    try:
-        return run_async(_poll_contract_statuses)
-    except Exception as exc:
-        raise self.retry(exc=exc)
-
-
 # ---------------------------------------------------------------------------
-# Google Sheets export
-# ---------------------------------------------------------------------------
-
-_SHEET_HEADERS = [
-    "Submission ID", "Submitted At", "Lead Email",
-    "Company Name", "Company Type", "Contact Name", "Contact Number",
-    # Indian fields
-    "GSTIN", "PAN", "CIN", "IFSC",
-    # Overseas fields
-    "Country of Incorporation", "Company Reg Number", "Tax ID / TIN", "LEI Number",
-    # Uploaded documents
-    "GST Certificate", "Incorporation Certificate",
-    # Verification result
-    "KYC Status", "KYC Issues",
-    "GSTIN Verified", "GSTIN Business Name (API)",
-    # OCR extracted text from certificates
-    "GST Certificate OCR Text", "Incorporation Certificate OCR Text",
+# Sheet1 — Pipeline Tracking headers
+# Col:   A              B               C         D               E              F
+# Sheet 1 — "Lead Information": basic lead + outreach pipeline columns
+_LEAD_INFO_HEADERS = [
+    "Lead Email", "Company Name", "Summary", "Company Type",
+    "Contact Name", "Contact Phone",
+    "Lead Status", "Sent At", "Replied At", "Booked At",
+    "Last Updated",
 ]
+
+# Sheet 3 — "Onboarding Track": KYC → NDA → Agreement pipeline
+_ONBOARDING_TRACK_HEADERS = [
+    "Lead Email", "Company Name",
+    "Overall Stage", "KYC Status", "KYC Submitted At", "KYC Approved At",
+    "NDA Status", "NDA Sent At", "Agreement Status", "Agreement Sent At",
+    "GSTIN", "PAN", "CIN", "Last Updated",
+]
+
+# Keep legacy alias so any remaining references compile
+_SHEET_HEADERS = _LEAD_INFO_HEADERS
+
+# Sheet 2 — "KYC Data": raw KYC submission data
+_KYC_HEADERS = [
+    "Lead Email", "Company Name", "Company Type", "Contact Name", "Contact Phone",
+    "GSTIN", "PAN", "CIN", "IFSC", "Bank Name",
+    "Registered Address", "City", "State", "Nature of Business", "Entity Type",
+    "Date of Incorporation", "Annual Turnover", "Signatory Designation",
+    "Country of Incorporation", "Company Reg No", "Tax ID / TIN", "LEI Number",
+    "KYC Format Check", "Issues Found", "Submitted At",
+]
+
+# Color palette for status cells
+_GREEN_DARK  = {"red": 0.420, "green": 0.655, "blue": 0.314}   # header text not used
+_GREEN_BG    = {"red": 0.714, "green": 0.843, "blue": 0.659}   # complete / approved
+_GREEN_LIGHT = {"red": 0.851, "green": 0.918, "blue": 0.827}   # sent / submitted
+_YELLOW_BG   = {"red": 1.0,   "green": 0.949, "blue": 0.8}     # pending / review
+_RED_BG      = {"red": 0.988, "green": 0.898, "blue": 0.886}   # rejected / fail
+_GREY_BG     = {"red": 0.95,  "green": 0.95,  "blue": 0.95}    # form sent / new
+_HEADER_BG   = {"red": 0.102, "green": 0.227, "blue": 0.420}   # dark navy
+_WHITE       = {"red": 1.0,   "green": 1.0,   "blue": 1.0}
+
+
+def _status_bg(value: str) -> dict:
+    v = (value or "").upper()
+    if any(x in v for x in ("COMPLETE", "APPROVED", "PROCEED", "PASS")):
+        return _GREEN_BG
+    if any(x in v for x in ("SENT", "SUBMITTED")):
+        return _GREEN_LIGHT
+    if any(x in v for x in ("REVIEW", "PENDING", "DRAFT", "NDA APPROVED")):
+        return _YELLOW_BG
+    if any(x in v for x in ("REJECT", "FAIL", "ISSUE")):
+        return _RED_BG
+    if v and v not in ("", "NONE"):
+        return _GREY_BG
+    return _WHITE
+
+
+def _overall_stage(rec: OnboardingRecord) -> str:
+    a = rec.agreement_status
+    if a in (DocumentStatus.APPROVED, DocumentStatus.PROCEED_NEXT):
+        return "Onboarding Complete"
+    if a == DocumentStatus.SENT_TO_LEAD:
+        return "Agreement Sent — Awaiting Signature"
+    if a in (DocumentStatus.TEAM_REVIEW, DocumentStatus.DRAFT_GENERATED):
+        return "Agreement Draft — Pending Review"
+    n = rec.nda_status
+    if n == DocumentStatus.APPROVED:
+        return "NDA Approved — Agreement Generation"
+    if n in (DocumentStatus.SIGN_UNDER_REVIEW, DocumentStatus.SIGNED_RECEIVED):
+        return "NDA Signed — Pending Review"
+    if n == DocumentStatus.SENT_TO_LEAD:
+        return "NDA Sent — Awaiting Signature"
+    if n in (DocumentStatus.TEAM_REVIEW, DocumentStatus.DRAFT_GENERATED):
+        return "NDA Draft — Pending Review"
+    k = rec.kyc_status
+    if k == KYCStatus.APPROVED:
+        return "KYC Approved — NDA Generation"
+    if k in (KYCStatus.SUBMITTED, KYCStatus.UNDER_REVIEW):
+        return "KYC Submitted — Under Review"
+    if k == KYCStatus.REJECTED:
+        return "KYC Rejected — Resubmission Needed"
+    return "KYC Form Sent"
+
+
+def _kyc_stage_label(rec: OnboardingRecord) -> str:
+    k = rec.kyc_status
+    if k == KYCStatus.APPROVED:
+        return "Approved"
+    if k in (KYCStatus.SUBMITTED, KYCStatus.UNDER_REVIEW):
+        return "Under Review"
+    if k == KYCStatus.REJECTED:
+        return "Rejected"
+    return "Form Sent"
+
+
+def _col(idx: int) -> str:
+    """0-based column index → A, B, … Z, AA, …"""
+    result = ""
+    idx += 1
+    while idx:
+        idx, rem = divmod(idx - 1, 26)
+        result = chr(65 + rem) + result
+    return result
+
+
+def _get_or_create_ws(sh, name: str, headers: list):
+    """Return worksheet by name, creating it with a frozen header row if missing."""
+    try:
+        import gspread as _gs
+        ws = sh.worksheet(name)
+    except Exception:
+        ws = sh.add_worksheet(title=name, rows=1000, cols=len(headers))
+        ws.append_row(headers)
+        try:
+            _setup_tracking_sheet(sh, ws)
+        except Exception:
+            pass
+    if not ws.get_all_values():
+        ws.append_row(headers)
+    return ws
+
+
+def _setup_tracking_sheet(sh, ws) -> None:
+    """Freeze header row and set column widths on Sheet1 (run once on creation)."""
+    sheet_id = ws.id
+    requests = [
+        {"updateSheetProperties": {
+            "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 1}},
+            "fields": "gridProperties.frozenRowCount",
+        }},
+        *[
+            {"updateDimensionProperties": {
+                "range": {"sheetId": sheet_id, "dimension": "COLUMNS",
+                          "startIndex": i, "endIndex": i + 1},
+                "properties": {"pixelSize": px},
+                "fields": "pixelSize",
+            }}
+            for i, px in enumerate([220, 180, 200, 90, 140, 110, 200, 120, 130, 130, 120, 130, 130, 130, 90, 80, 80, 130])
+        ],
+    ]
+    sh.batch_update({"requests": requests})
 
 
 async def _export_to_sheets(db: AsyncSession, onboarding_id: str) -> None:
-    """Append / update a KYC row in the Onboarding worksheet."""
     if not settings.GOOGLE_SHEETS_SPREADSHEET_ID or not settings.GOOGLE_SHEETS_CREDENTIALS_JSON:
         return
 
@@ -1259,49 +1162,58 @@ async def _export_to_sheets(db: AsyncSession, onboarding_id: str) -> None:
 
     _vr: dict = (kyc.kyc_verification_result or {}) if kyc else {}
     _extra = _vr.get("extra_fields") or {}
-    _gstin_chk = _vr.get("gstin_check") or {}
-    _ocr = _vr.get("ocr_result") or {}
 
-    # Extract OCR text per document type
-    _gst_ocr_text = ""
-    _inc_ocr_text = ""
-    for doc in _ocr.get("documents_processed", []):
-        raw = doc.get("raw_text") or doc.get("extracted_text") or ""
-        if doc.get("label", "").lower().startswith("gst") or doc.get("type", "").lower() == "gst_certificate":
-            _gst_ocr_text = raw[:2000]
-        else:
-            _inc_ocr_text = raw[:2000]
+    kyc_status_label = _kyc_stage_label(rec)
+    kyc_issues = "; ".join(_vr.get("issues", []))[:300]
 
-    row = [
-        str(kyc.id) if kyc else str(rec.id),
-        _fmt(kyc.created_at) if kyc else _fmt(rec.created_at),
-        lead.email if lead else "",
-        kyc.company_name if kyc else "",
+    overall = _overall_stage(rec)
+
+    _email = lead.email if lead else ""
+    _company = kyc.company_name if kyc else (lead.business_name if lead else "")
+
+    # ── Sheet 1 "Lead Information" row ──────────────────────────────────────
+    lead_info_row = [
+        _email,
+        _company,
+        (lead.summary or "") if lead else "",
         kyc.company_type if kyc else (rec.company_type or ""),
-        kyc.contact_name if kyc else "",
+        kyc.contact_name if kyc else (lead.contact_name if lead else ""),
         kyc.contact_number if kyc else "",
-        # Indian
+        lead.status.value if lead and lead.status else "",
+        _fmt(lead.sent_at) if lead else "",
+        _fmt(lead.replied_at) if lead else "",
+        _fmt(lead.booked_at) if lead else "",
+        _fmt(_now_ist()),
+    ]
+
+    # ── Sheet 3 "Onboarding Track" row ──────────────────────────────────────
+    onboarding_row = [
+        _email,
+        _company,
+        overall,
+        kyc_status_label,
+        _fmt(kyc.created_at) if kyc else "",
+        _fmt(rec.kyc_approved_at),
+        rec.nda_status or "",
+        _fmt(rec.nda_sent_at),
+        rec.agreement_status or "",
+        _fmt(rec.agreement_sent_at),
         kyc.gstin_number if kyc else "",
         kyc.pan_number if kyc else "",
         kyc.cin_number if kyc else "",
-        _extra.get("ifsc_code", ""),
-        # Overseas
-        _extra.get("country_of_incorporation", ""),
-        _extra.get("company_reg_number", ""),
-        _extra.get("tax_id_tin", ""),
-        _extra.get("lei_number", ""),
-        # Documents
-        kyc.gst_certificate_filename if kyc else "",
-        kyc.incorporation_filename if kyc else "",
-        # Verification
-        rec.kyc_status or "",
-        "; ".join(_vr.get("issues", []))[:500],
-        str(_gstin_chk.get("valid", "")),
-        _gstin_chk.get("business_name", ""),
-        # OCR text
-        _gst_ocr_text,
-        _inc_ocr_text,
+        _fmt(_now_ist()),
     ]
+
+    def _upsert_ws(ws, headers: list, row: list) -> None:
+        clean = [str(v) if v is not None else "" for v in row]
+        all_rows = ws.get_all_values()
+        nc = len(headers)
+        end_col = _col(nc - 1)
+        for i, r in enumerate(all_rows[1:], start=2):
+            if r and r[0].lower() == clean[0].lower():
+                ws.update([clean], f"A{i}:{end_col}{i}")
+                return
+        ws.append_row(clean)
 
     try:
         import json as _json
@@ -1309,29 +1221,86 @@ async def _export_to_sheets(db: AsyncSession, onboarding_id: str) -> None:
         from google.oauth2.service_account import Credentials
 
         creds_dict = _json.loads(settings.GOOGLE_SHEETS_CREDENTIALS_JSON)
-        scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        scopes = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/spreadsheets",
+        ]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(settings.GOOGLE_SHEETS_SPREADSHEET_ID)
 
-        try:
-            ws = sh.worksheet(settings.ONBOARDING_WORKSHEET_NAME)
-        except gspread.WorksheetNotFound:
-            ws = sh.add_worksheet(title=settings.ONBOARDING_WORKSHEET_NAME, rows=1000, cols=25)
-            ws.append_row(_SHEET_HEADERS)
+        ws1 = _get_or_create_ws(sh, "Lead Information", _LEAD_INFO_HEADERS)
+        _upsert_ws(ws1, _LEAD_INFO_HEADERS, lead_info_row)
 
-        clean_row = [str(v) if v is not None else "" for v in row]
+        ws3 = _get_or_create_ws(sh, "Onboarding Track", _ONBOARDING_TRACK_HEADERS)
+        _upsert_ws(ws3, _ONBOARDING_TRACK_HEADERS, onboarding_row)
 
-        # Update existing row or append new one
-        all_rows = ws.get_all_values()
-        for i, r in enumerate(all_rows[1:], start=2):
-            if r and r[0] == clean_row[0]:
-                ws.update([clean_row], f"A{i}:W{i}")
-                return
-
-        ws.append_row(clean_row)
     except Exception as exc:
         logger.warning("onboarding_sheets_export_failed", error=str(exc))
+
+    # ── KYC Data sheet ───────────────────────────────────────────────────────
+    if kyc:
+        try:
+            import json as _json
+            import gspread
+            from google.oauth2.service_account import Credentials
+
+            creds_dict = _json.loads(settings.GOOGLE_SHEETS_CREDENTIALS_JSON)
+            scopes = [
+                "https://spreadsheets.google.com/feeds",
+                "https://www.googleapis.com/auth/drive",
+                "https://www.googleapis.com/auth/spreadsheets",
+            ]
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            gc = gspread.authorize(creds)
+            sh = gc.open_by_key(settings.GOOGLE_SHEETS_SPREADSHEET_ID)
+
+            kws = _get_or_create_ws(sh, "KYC Data", _KYC_HEADERS)
+            kyc_all = kws.get_all_values()
+            if not kyc_all:
+                kws.append_row(_KYC_HEADERS)
+                kyc_all = [_KYC_HEADERS]
+
+            lead_email_val = lead.email if lead else ""
+            kyc_row = [
+                lead_email_val,
+                kyc.company_name or "",
+                kyc.company_type or "",
+                kyc.contact_name or "",
+                kyc.contact_number or "",
+                kyc.gstin_number or "",
+                kyc.pan_number or "",
+                kyc.cin_number or "",
+                _extra.get("ifsc_code", ""),
+                _extra.get("bank_name", ""),
+                _extra.get("registered_address", ""),
+                _extra.get("city", ""),
+                _extra.get("state", ""),
+                _extra.get("nature_of_business", ""),
+                _extra.get("entity_type", ""),
+                _extra.get("date_of_incorporation", ""),
+                _extra.get("annual_turnover", ""),
+                _extra.get("signatory1_designation", ""),
+                _extra.get("country_of_incorporation", ""),
+                _extra.get("company_reg_number", ""),
+                _extra.get("tax_id_tin", ""),
+                _extra.get("lei_number", ""),
+                "Pass" if _vr.get("overall_passed") else ("Fail" if _vr.get("issues") else "Pending"),
+                kyc_issues,
+                _fmt(kyc.created_at),
+            ]
+            clean_kyc = [str(v) if v is not None else "" for v in kyc_row]
+
+            # Upsert by Lead Email
+            for i, r in enumerate(kyc_all[1:], start=2):
+                if r and r[0] == lead_email_val:
+                    kws.update([clean_kyc], f"A{i}:Y{i}")
+                    return
+
+            kws.append_row(clean_kyc, value_input_option="USER_ENTERED")
+        except Exception as exc:
+            logger.warning("kyc_sheets_export_failed", error=str(exc))
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=30)
@@ -1342,165 +1311,75 @@ def export_onboarding_to_sheets(self, onboarding_id: str) -> None:
         raise self.retry(exc=exc)
 
 
-# ---------------------------------------------------------------------------
-# IMAP: detect signed document replies
-# ---------------------------------------------------------------------------
-
-async def _process_signed_doc_reply(
-    db: AsyncSession,
-    from_email: str,
-    attachment_bytes: bytes,
-    attachment_filename: str,
+def write_csv_lead_to_sheet(
+    email: str,
+    company_name: str,
+    summary: str = "",
+    contact_name: str = "",
+    phone: str = "",
 ) -> None:
-    """Called when IMAP detects a reply with an attachment from a lead."""
-    # Find lead by email
-    lead_result = await db.execute(
-        select(LeadV2).where(LeadV2.email == from_email.lower().strip())
-    )
-    lead = lead_result.scalar_one_or_none()
-    if not lead:
+    """Write a CSV-imported lead directly to Sheet1 (no OnboardingRecord needed).
+
+    Called synchronously from the import-csv endpoint so the lead appears in the
+    tracking sheet immediately — before the Celery worker creates an OnboardingRecord.
+    If the lead already exists in the sheet (matched by email) its row is updated.
+    """
+    if not settings.GOOGLE_SHEETS_SPREADSHEET_ID or not settings.GOOGLE_SHEETS_CREDENTIALS_JSON:
         return
-
-    # Find their onboarding record
-    rec_result = await db.execute(
-        select(OnboardingRecord).where(OnboardingRecord.lead_id == lead.id)
-    )
-    rec = rec_result.scalar_one_or_none()
-    if not rec:
-        return
-
-    now = _now_ist()
-    doc_type = None
-
-    if rec.nda_status == DocumentStatus.SENT_TO_LEAD:
-        doc_type = "NDA"
-        try:
-            from app.services.zoho_workdrive import upload_file
-            file_id = upload_file(
-                attachment_bytes,
-                f"NDA_Signed_{lead.business_name}_{str(rec.id)[:8]}_{attachment_filename}",
-                mime_type="application/pdf",
-            )
-            rec.nda_signed_zoho_file_id = file_id
-        except Exception as exc:
-            logger.warning("signed_nda_upload_failed", error=str(exc))
-
-        rec.nda_status = DocumentStatus.SIGN_UNDER_REVIEW
-        rec.nda_signed_received_at = now
-        rec.nda_status_display = f"Signed NDA Received — Pending Team Review ({_fmt(now)})"
-
-    elif rec.agreement_status == DocumentStatus.SENT_TO_LEAD:
-        doc_type = "Customer Agreement"
-        try:
-            from app.services.zoho_workdrive import upload_file
-            file_id = upload_file(
-                attachment_bytes,
-                f"Agreement_Signed_{lead.business_name}_{str(rec.id)[:8]}_{attachment_filename}",
-                mime_type="application/pdf",
-            )
-            rec.agreement_signed_zoho_file_id = file_id
-        except Exception as exc:
-            logger.warning("signed_agreement_upload_failed", error=str(exc))
-
-        rec.agreement_status = DocumentStatus.SIGN_UNDER_REVIEW
-        rec.agreement_signed_received_at = now
-        rec.agreement_status_display = f"Signed Agreement Received — Pending Team Review ({_fmt(now)})"
-
-    if doc_type:
-        await db.commit()
-        event_type = "NDA_SIGNED_RECEIVED" if doc_type == "NDA" else "AGREEMENT_SIGNED_RECEIVED"
-        log_pipeline(event_type, company=lead.business_name, email=from_email,
-                     detail=f"Signed {doc_type} received — pending team review")
-        from app.services.onboarding_email import notify_team_signed_doc_received
-        notify_team_signed_doc_received(lead.contact_name or "", lead.business_name, str(rec.id), doc_type)
-        await _export_to_sheets(db, str(rec.id))
-
-
-@celery_app.task(bind=True, max_retries=2)
-def process_signed_doc_reply(
-    self,
-    from_email: str,
-    attachment_bytes: bytes,
-    attachment_filename: str,
-) -> None:
     try:
-        run_async(_process_signed_doc_reply, from_email, attachment_bytes, attachment_filename)
+        import json as _json
+        import gspread
+        from google.oauth2.service_account import Credentials
+
+        creds_dict = _json.loads(settings.GOOGLE_SHEETS_CREDENTIALS_JSON)
+        scopes = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/spreadsheets",
+        ]
+        creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(settings.GOOGLE_SHEETS_SPREADSHEET_ID)
+
+        ws = _get_or_create_ws(sh, "Lead Information", _LEAD_INFO_HEADERS)
+
+        # Row matches _LEAD_INFO_HEADERS (11 cols)
+        row = [
+            email,         # Lead Email
+            company_name,  # Company Name
+            summary,       # Summary
+            "",            # Company Type (unknown at import)
+            contact_name,  # Contact Name
+            phone,         # Contact Phone
+            "new",         # Lead Status
+            "",            # Sent At
+            "",            # Replied At
+            "",            # Booked At
+            _fmt(_now_ist()),  # Last Updated
+        ]
+        nc = len(_LEAD_INFO_HEADERS)
+        end_col = _col(nc - 1)
+        all_rows = ws.get_all_values()
+
+        row_num = None
+        for i, r in enumerate(all_rows[1:], start=2):
+            if r and r[0].lower() == email.lower():
+                row_num = i
+                break
+
+        if row_num:
+            existing = all_rows[row_num - 1]
+            merged = list(existing) + [""] * (nc - len(existing))
+            for idx, val in enumerate(row):
+                if idx >= nc:
+                    break
+                if not merged[idx] and val:
+                    merged[idx] = val
+            merged[10] = row[10]  # always refresh Last Updated
+            ws.update([merged], f"A{row_num}:{end_col}{row_num}")
+        else:
+            ws.append_row(row)
+
+        logger.info("csv_lead_written_to_sheet", email=email)
     except Exception as exc:
-        raise self.retry(exc=exc)
-
-
-# ---------------------------------------------------------------------------
-# Default templates (fallback when no Zoho template is configured)
-# ---------------------------------------------------------------------------
-
-def _default_nda_template(company_type: str) -> str:
-    gst_clause = (
-        "\n5. GST Registration: {{company_name}} confirms its GST number is on file with Jane Aerospace.\n"
-        if company_type == "indian" else ""
-    )
-    return f"""NON-DISCLOSURE AGREEMENT
-
-This Non-Disclosure Agreement ("Agreement") is entered into as of {{date}},
-between Jane Aerospace ("Disclosing Party") and {{company_name}} ("Receiving Party").
-
-1. Parties
-   Disclosing Party: Jane Aerospace
-   Receiving Party: {{company_name}}
-   Contact: {{contact_name}}, {{contact_number}}
-
-2. Confidential Information
-   The Receiving Party agrees to keep confidential all technical, commercial, and business
-   information shared by Jane Aerospace in connection with a potential partnership.
-
-3. Obligations
-   The Receiving Party shall not disclose Confidential Information to any third party
-   without prior written consent from Jane Aerospace.
-
-4. Term
-   This Agreement shall remain in effect for a period of two (2) years from the date above.
-{gst_clause}
-IN WITNESS WHEREOF, the parties have executed this Agreement as of the date first written above.
-
-Jane Aerospace                          {{company_name}}
-Signature: ___________________          Signature: ___________________
-Name: {settings.ORGANIZER_NAME}        Name: {{contact_name}}
-Title: Founder & Managing Director      Title: ___________________
-Date: {{date}}                          Date: ___________________
-"""
-
-
-def _default_agreement_template(company_type: str) -> str:
-    return f"""CUSTOMER AGREEMENT
-
-This Customer Agreement ("Agreement") is entered into as of {{date}},
-between Jane Aerospace ("Service Provider") and {{company_name}} ("Customer").
-
-1. Parties
-   Service Provider: Jane Aerospace
-   Customer: {{company_name}}
-   Contact: {{contact_name}}, {{contact_number}}
-
-2. Services
-   Jane Aerospace agrees to provide aerospace component supply and related services
-   as mutually agreed upon in the Statement of Work (SOW).
-
-3. Payment Terms
-   Payment terms shall be as specified in individual purchase orders.
-
-4. Confidentiality
-   Both parties agree to maintain confidentiality as per the previously executed NDA.
-
-5. Term
-   This Agreement shall remain in effect until terminated by either party with 30 days written notice.
-
-6. Governing Law
-   {"This Agreement shall be governed by the laws of India." if company_type == "indian" else "This Agreement shall be governed by applicable international commercial law."}
-
-IN WITNESS WHEREOF, the parties have executed this Agreement.
-
-Jane Aerospace                          {{company_name}}
-Signature: ___________________          Signature: ___________________
-Name: {settings.ORGANIZER_NAME}        Name: {{contact_name}}
-Title: Founder & Managing Director      Title: ___________________
-Date: {{date}}                          Date: ___________________
-"""
+        logger.warning("csv_lead_sheet_write_failed", email=email, error=str(exc))

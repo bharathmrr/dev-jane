@@ -617,6 +617,40 @@ async def confirm_booking(
         lead.business_name, lead.email, selected_str, meeting_link,
     )
 
+    # Update Zoho CRM lead status to VC Booking Stage
+    _lead_email = lead.email
+    _lead_phone = lead.phone_number
+    _lead_name = lead.contact_name or lead.business_name
+    _biz_name = lead.business_name
+    _booking_id = booking_id
+
+    def _sync_crm_booking():
+        try:
+            from app.services.zoho_crm import find_lead_by_email, update_lead, add_note, upsert_lead
+            _crm_id = find_lead_by_email(_lead_email)
+            if _crm_id:
+                _upd = {
+                    "Lead_Status": "VC Booking Stage",
+                    "Description": f"Meeting booked: {selected_str}\nBooking ID: {_booking_id}",
+                }
+                if _lead_phone:
+                    _upd["Phone"] = _lead_phone
+                update_lead(_crm_id, _upd)
+                add_note(_crm_id, f"Meeting Booked — {_biz_name}",
+                         f"Slot: {selected_str}\nBooking ID: {_booking_id}\nMeeting Link: {meeting_link or '—'}")
+            else:
+                upsert_lead(
+                    email=_lead_email,
+                    contact_name=_lead_name,
+                    company_name=_biz_name,
+                    phone=_lead_phone or "",
+                    summary=f"Meeting booked: {selected_str}",
+                )
+        except Exception:
+            pass
+
+    background_tasks.add_task(_sync_crm_booking)
+
     greeting_name = (lead.contact_name or lead.business_name).split()[0]
     return HTMLResponse(_confirmed_page(greeting_name, selected_str, meeting_link))
 

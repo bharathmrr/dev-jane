@@ -34,9 +34,29 @@ class GoogleSheetsService:
         try:
             sheet = self.client.open_by_key(settings.GOOGLE_SHEETS_SPREADSHEET_ID)
             worksheet = sheet.worksheet(settings.GOOGLE_SHEETS_WORKSHEET_NAME)
-            # Fetch all records as a list of dicts.
-            # Assuming headers are "business_name" and "email".
-            records = worksheet.get_all_records()
+            rows = worksheet.get_all_values()
+            if not rows:
+                return []
+            # Build header map — skip blank or duplicate columns
+            raw_headers = [h.strip().lower().replace(" ", "_") for h in rows[0]]
+            seen: set = set()
+            headers: list[str] = []
+            for h in raw_headers:
+                if h and h not in seen:
+                    headers.append(h)
+                    seen.add(h)
+                else:
+                    headers.append("")  # placeholder for skipped column
+            records = []
+            for row in rows[1:]:
+                if not any(row):
+                    continue
+                rec: dict = {}
+                for i, val in enumerate(row):
+                    if i < len(headers) and headers[i]:
+                        rec[headers[i]] = val.strip()
+                if rec:
+                    records.append(rec)
             return records
         except Exception as e:
             logger.error(f"Failed to fetch leads from Google Sheets: {str(e)}")

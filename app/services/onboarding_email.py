@@ -51,6 +51,21 @@ def verify_kyc_token(onboarding_id: str, token: str) -> bool:
     return _hmac.compare_digest(expected, token)
 
 
+def make_kyc_view_token(onboarding_id: str) -> str:
+    msg = f"kyc_view:{onboarding_id}".encode()
+    return _hmac.new(settings.ONBOARDING_HMAC_SECRET.encode(), msg, hashlib.sha256).hexdigest()[:32]
+
+
+def verify_kyc_view_token(onboarding_id: str, token: str) -> bool:
+    expected = make_kyc_view_token(onboarding_id)
+    return _hmac.compare_digest(expected, token)
+
+
+def make_kyc_view_url(onboarding_id: str) -> str:
+    token = make_kyc_view_token(onboarding_id)
+    return f"{settings.APP_URL.rstrip('/')}/api/v1/onboarding/kyc/view/{onboarding_id}/{token}"
+
+
 # ---------------------------------------------------------------------------
 # Email send helpers
 # ---------------------------------------------------------------------------
@@ -248,6 +263,38 @@ def send_nda_to_lead(
     )
 
 
+def send_nda_contract_link(
+    to_email: str,
+    lead_name: str,
+    company_name: str,
+    contract_link: str,
+) -> bool:
+    """Send the Zoho Contracts NDA link to the lead for e-signature."""
+    subject = f"Non-Disclosure Agreement — Jane Aerospace × {company_name}"
+    html = _wrap(f"""
+        <p>Dear {lead_name},</p>
+        <p>Thank you for completing your KYC verification. We are pleased to move forward
+        with the partnership process between <strong>Jane Aerospace</strong> and
+        <strong>{company_name}</strong>.</p>
+        <p>As the next step, please review and e-sign the <strong>Non-Disclosure Agreement (NDA)</strong>
+        using the secure link below. The document has been pre-filled with your company details.</p>
+        <p style="margin:28px 0;">
+            <a href="{contract_link}"
+               style="background:#1a56db;color:#fff;padding:13px 30px;border-radius:7px;
+                      text-decoration:none;font-size:16px;font-weight:bold;display:inline-block;">
+                Review &amp; Sign NDA
+            </a>
+        </p>
+        <p style="color:#555;font-size:13px;">
+            If the button above doesn't work, copy and paste this link into your browser:<br>
+            <a href="{contract_link}" style="color:#1155cc;">{contract_link}</a>
+        </p>
+        <p>Please complete the signing process at your earliest convenience.
+        If you have any questions regarding the terms, do not hesitate to reach out.</p>
+    """)
+    return _send_html_email(to_email, subject, html)
+
+
 def send_nda_reminder(
     to_email: str,
     lead_name: str,
@@ -318,6 +365,39 @@ def send_agreement_to_lead(
         attachment_bytes=agreement_pdf_bytes,
         attachment_name=f"Agreement_{company_name.replace(' ', '_')}.pdf" if agreement_pdf_bytes else None,
     )
+
+
+def send_agreement_contract_link(
+    to_email: str,
+    lead_name: str,
+    company_name: str,
+    contract_link: str,
+) -> bool:
+    """Send the Zoho Contracts Customer Agreement link to the lead for e-signature."""
+    subject = f"Customer Agreement — Jane Aerospace × {company_name}"
+    html = _wrap(f"""
+        <p>Dear {lead_name},</p>
+        <p>We are pleased to confirm that your NDA has been reviewed and approved.
+        As the final step in the onboarding process, please review and e-sign the
+        <strong>Customer Agreement</strong> between <strong>Jane Aerospace</strong>
+        and <strong>{company_name}</strong>.</p>
+        <p>The agreement has been pre-filled with your verified company information.
+        Please use the secure link below to review all terms and complete the signature.</p>
+        <p style="margin:28px 0;">
+            <a href="{contract_link}"
+               style="background:#1a56db;color:#fff;padding:13px 30px;border-radius:7px;
+                      text-decoration:none;font-size:16px;font-weight:bold;display:inline-block;">
+                Review &amp; Sign Customer Agreement
+            </a>
+        </p>
+        <p style="color:#555;font-size:13px;">
+            If the button above doesn't work, copy and paste this link into your browser:<br>
+            <a href="{contract_link}" style="color:#1155cc;">{contract_link}</a>
+        </p>
+        <p>Once the agreement is signed, our team will reach out to schedule your onboarding session.
+        We look forward to a long and successful partnership.</p>
+    """)
+    return _send_html_email(to_email, subject, html)
 
 
 def send_agreement_reminder(

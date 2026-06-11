@@ -1,6 +1,6 @@
 x-app-env: &app-env
   ENV: ${ENV:-dev}
-  DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://scheduler:scheduler@postgres:5432/scheduler}
+  DATABASE_URL: postgresql+asyncpg://scheduler:scheduler@postgres:5432/scheduler
   REDIS_URL: redis://redis:6379/0
   JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set in .env}
   EMAIL_HMAC_SECRET: ${EMAIL_HMAC_SECRET:?set in .env}
@@ -55,6 +55,7 @@ services:
       POSTGRES_PASSWORD: scheduler
       POSTGRES_DB: scheduler
     volumes: ["pgdata:/var/lib/postgresql/data"]
+    ports: ["5432:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U scheduler"]
       interval: 5s

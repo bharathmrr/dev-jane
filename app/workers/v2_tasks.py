@@ -172,10 +172,10 @@ async def _sync_google_sheet(db):
             or row.get("Full Name") or row.get("name") or ""
         ).strip() or None
         business_name = (
-            row.get("name of the company") or row.get("Name of the Company")
-            or row.get("Name of Company") or row.get("name_of_company")
-            or row.get("Company") or row.get("business_name")
-            or row.get("Business Name") or ""
+            row.get("name_of_the_company") or row.get("name of the company")
+            or row.get("Name of the Company") or row.get("Name of Company")
+            or row.get("name_of_company") or row.get("Company")
+            or row.get("business_name") or row.get("Business Name") or ""
         ).strip() or contact_name
         designation = (row.get("Designation") or row.get("designation") or "").strip()
         raw_summary = (row.get("Summary") or row.get("summary") or "").strip()
@@ -184,6 +184,10 @@ async def _sync_google_sheet(db):
             summary = f"{designation}. {summary}".strip(" .")
         if not summary:
             summary = None
+        phone = (
+            row.get("phone_number") or row.get("phone number")
+            or row.get("Phone") or row.get("phone") or ""
+        ).strip() or None
         if not email or not re.match(r"^[^@]+@[^@]+\.[^@]+$", email):
             logger.warning("sheet_row_invalid_email", email=email)
             skipped_missing += 1
@@ -205,6 +209,7 @@ async def _sync_google_sheet(db):
                 summary=summary,
                 designation=designation or None,
                 location=location,
+                phone_number=phone,
                 status=LeadStatus.NEW,
             ))
             logger.info("added_lead_from_sheet", email=email, contact=contact_name, summary=summary)
@@ -213,18 +218,23 @@ async def _sync_google_sheet(db):
             skipped_existing += 1
             continue
 
-        # Push new lead to Zoho CRM
+        # Push new lead to Zoho CRM with all available fields
         try:
-            from app.services.zoho_crm import sync_onboarding_stage
-            phone = (row.get("phone number") or row.get("Phone") or row.get("phone") or "").strip()
-            sync_onboarding_stage(
+            from app.services.zoho_crm import upsert_lead, add_note
+            crm_id = upsert_lead(
                 email=email,
                 contact_name=contact_name or business_name,
                 company_name=business_name,
-                stage="Lead Imported from Google Sheet",
-                detail=f"Designation: {designation}" if designation else "",
-                phone=phone,
+                phone=phone or "",
+                summary=summary or "",
+                designation=designation or "",
+                city=location or "",
             )
+            if crm_id:
+                add_note(crm_id, f"Lead Imported — {business_name}",
+                         f"Source: Google Sheet\nEmail: {email}\nContact: {contact_name or '—'}"
+                         f"\nPhone: {phone or '—'}\nDesignation: {designation or '—'}"
+                         f"\nSummary: {summary or '—'}")
         except Exception as exc:
             logger.warning("crm_sheet_sync_failed", email=email, error=str(exc))
 
@@ -297,7 +307,7 @@ async def _sync_csv_leads(db):
             await db.execute(select(LeadV2).where(LeadV2.email == email))
         ).scalar_one_or_none()
         if not existing:
-            db.add(LeadV2(
+            new_lead = LeadV2(
                 business_name=business_name,
                 contact_name=contact_name,
                 email=email,
@@ -305,9 +315,32 @@ async def _sync_csv_leads(db):
                 designation=designation or None,
                 location=location,
                 status=LeadStatus.NEW,
-            ))
+            )
+            db.add(new_lead)
+            await db.flush()
             logger.info("added_lead_from_csv", email=email, contact=contact_name)
             added += 1
+            # Push to Zoho CRM with all available fields
+            try:
+                from app.services.zoho_crm import upsert_lead, add_note
+                phone_csv = (row.get("phone") or row.get("Phone") or row.get("mobile") or "").strip()
+                crm_id = upsert_lead(
+                    email=email,
+                    contact_name=contact_name or business_name,
+                    company_name=business_name,
+                    phone=phone_csv,
+                    summary=summary or "",
+                    designation=designation or "",
+                    city=location or "",
+                )
+                if crm_id:
+                    add_note(crm_id, f"Lead Imported — {business_name}",
+                             f"Source: CSV\nEmail: {email}\nContact: {contact_name or '—'}"
+                             f"\nPhone: {phone_csv or '—'}\nDesignation: {designation or '—'}"
+                             f"\nSummary: {summary or '—'}")
+            except Exception as _crm_err:
+                logger.warning("csv_crm_sync_failed", email=email, error=str(_crm_err))
+
         else:
             skipped_existing += 1
 
@@ -387,7 +420,11 @@ async def _process_new_leads(db):
         return "SMTP daily limit reached — deferred to tomorrow"
 
     leads = (
-        await db.execute(select(LeadV2).where(LeadV2.status == LeadStatus.NEW))
+        await db.execute(
+            select(LeadV2)
+            .where(LeadV2.status == LeadStatus.NEW)
+            .with_for_update(skip_locked=True)
+        )
     ).scalars().all()
     if not leads:
         return "No new leads."
@@ -444,12 +481,12 @@ async def _process_new_leads(db):
         time_variant = _random.choice(["morning", "afternoon", "evening"])
         lead.send_time_variant = time_variant
 
-        # Mark SENT before sending to prevent double-processing
+        # Commit SENT status immediately — prevents concurrent workers sending the same email
         lead.status = LeadStatus.SENT
         lead.sent_at = datetime.now(timezone.utc)
         lead.follow_up_count = 0
         lead.reminder_sent_at = None
-        await db.flush()
+        await db.commit()
 
         outreach = generate_outreach(
             business_name=lead.business_name,
@@ -485,6 +522,21 @@ async def _process_new_leads(db):
                         variant=outreach["variant"], subject_variant=outreach["subject_variant"],
                         time_variant=time_variant, segment=seg)
             sent += 1
+            # Update CRM — outreach email sent + sync phone if available
+            try:
+                from app.services.zoho_crm import update_lead, add_note, find_lead_by_email
+                crm_id = find_lead_by_email(lead.email)
+                if crm_id:
+                    crm_fields: dict = {"Lead_Status": "Contacted"}
+                    if lead.phone_number:
+                        crm_fields["Phone"] = lead.phone_number
+                    update_lead(crm_id, crm_fields)
+                    add_note(crm_id, f"Outreach Email Sent — {lead.business_name}",
+                             f"Subject: {subject}\nSlot selection email sent.\n"
+                             f"Variant: {outreach['variant']} | Score: {lead_score}"
+                             + (f"\nPhone: {lead.phone_number}" if lead.phone_number else ""))
+            except Exception as _crm_e:
+                logger.warning("crm_email_sent_sync_failed", email=lead.email, error=str(_crm_e))
         else:
             lead.status = LeadStatus.NEW
             lead.sent_at = None
@@ -747,16 +799,31 @@ async def _do_booking(db, lead, date_str: str, time_str: str, display_str: str) 
     except Exception as exc:
         logger.warning("start_onboarding_email_failed", email=lead.email, error=str(exc))
 
-    # Sync booking to Zoho CRM
+    # Sync booking to Zoho CRM — update Lead status and add full booking note
     try:
-        from app.services.zoho_crm import sync_onboarding_stage
-        sync_onboarding_stage(
-            email=lead.email,
-            contact_name=lead.contact_name or lead.business_name,
-            company_name=lead.business_name,
-            stage="Meeting Booked",
-            detail=f"Slot: {display_str} | Booking ID: {booking_id} | Link: {meeting_link}",
-        )
+        from app.services.zoho_crm import find_lead_by_email, update_lead, add_note
+        _crm_id = find_lead_by_email(lead.email)
+        if _crm_id:
+            _booking_upd: dict = {
+                "Lead_Status": "VC Booking Stage",
+                "Description": f"Meeting booked: {display_str}\nBooking ID: {booking_id}",
+            }
+            if lead.phone_number:
+                _booking_upd["Phone"] = lead.phone_number
+            update_lead(_crm_id, _booking_upd)
+            add_note(_crm_id, f"Meeting Booked — {lead.business_name}",
+                     f"Slot: {display_str}\nBooking ID: {booking_id}\nMeeting Link: {meeting_link or '—'}\n"
+                     f"Contact: {lead.contact_name or '—'} | Company: {lead.business_name}")
+        else:
+            # Lead not in CRM yet — create it now
+            from app.services.zoho_crm import upsert_lead
+            upsert_lead(
+                email=lead.email,
+                contact_name=lead.contact_name or lead.business_name,
+                company_name=lead.business_name,
+                phone=lead.phone_number or "",
+                summary=f"Meeting booked: {display_str}",
+            )
     except Exception as exc:
         logger.warning("crm_booking_sync_failed", email=lead.email, error=str(exc))
 
@@ -1080,6 +1147,17 @@ async def _process_reply_v2(db, reply: dict) -> str:
     if lead.send_time_variant:
         record_send_time_reply(lead.send_time_variant)
 
+    # CRM — log reply received
+    try:
+        from app.services.zoho_crm import find_lead_by_email, update_lead, add_note
+        _crm_id = find_lead_by_email(lead.email)
+        if _crm_id:
+            update_lead(_crm_id, {"Lead_Status": "Contacted"})
+            add_note(_crm_id, f"Reply Received — {lead.business_name}",
+                     f"Lead replied to outreach email.\nSnippet: {body[:300]}")
+    except Exception as _re:
+        logger.warning("crm_reply_sync_failed", email=lead.email, error=str(_re))
+
     # Priority 1: If Stage 2 (has offered slots), try matching them simple-first
     selected_display = None
     if lead.offered_slots_json:
@@ -1378,6 +1456,13 @@ async def _process_reply_v2(db, reply: dict) -> str:
                 phone = phone_match.group(0).strip()
         if phone:
             lead.phone_number = phone
+            try:
+                from app.services.zoho_crm import find_lead_by_email, update_lead
+                _pid = find_lead_by_email(lead.email)
+                if _pid:
+                    update_lead(_pid, {"Phone": phone})
+            except Exception:
+                pass
         display_phone = phone or "the number you provided"
         _simple_reply("Re: Partnership Opportunity — Jane Aerospace", [
             f"Hi {greeting_name},",
