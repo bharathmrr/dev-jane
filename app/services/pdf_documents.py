@@ -448,8 +448,8 @@ def extract_editable_html(doc_type: str, is_overseas: bool,
                 for ri, row in enumerate(cells):
                     lines.append("<tr>")
                     for ci, cell in enumerate(row):
-                        txt = (_htmllib.escape(_PUA_RE.sub("•", str(cell).strip()))
-                               if cell is not None else "")
+                        raw = _PUA_RE.sub("•", str(cell).strip()) if cell is not None else ""
+                        txt = _htmllib.escape(raw).replace("\n", "<br>")
                         wstyle = f"width:{pcts[ci]:.0f}%;" if ri == 0 and ci < len(pcts) else ""
                         lines.append(
                             f'<td style="{wstyle}border:1px solid #999;padding:4pt 6pt;'
