@@ -12,10 +12,12 @@ shrinking the font until it fits.
 """
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import html as _htmllib
 import io
 import re
+import statistics
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -230,7 +232,604 @@ def fill_document(doc_type: str, is_overseas: bool, replacements: list[dict]) ->
 
 
 # ---------------------------------------------------------------------------
-# HTML document flow — template PDF → editable HTML → final PDF
+# Live Document Editor flow — template PDF → faithful editable HTML → final PDF
+# ---------------------------------------------------------------------------
+
+_NOISE_PAGE_NO = re.compile(r"^\d{1,3}(?:\s*\|\s*\d{1,3})?$")  # "8" or "28 | 31"
+_NOISE_HEADERS = {"private and confidential", "privileged & confidential",
+                  "privileged and confidential"}
+# "1." / "14.1" / "A." / "(a)" / "(iv)" / "•" … at the start of a line
+_ENUM_MARKER = re.compile(
+    r"^(?:\d+(?:\.\d+)*[.)]?|[A-Z][.)]|\([a-zA-Z0-9]{1,4}\)|[•●▪○–—-])\s+\S")
+_DOT_LEADER = re.compile(r"\.{8,}")  # TOC dot leaders
+# Symbol-font bullets come through as Private Use Area codepoints (e.g. U+F097)
+_PUA_RE = re.compile("[-]")
+
+
+def _rect_overlap_area(r1: "fitz.Rect", x0: float, y0: float, x1: float, y1: float) -> float:
+    """Area of the intersection between fitz.Rect r1 and the given bbox."""
+    ix0 = max(r1.x0, x0); iy0 = max(r1.y0, y0)
+    ix1 = min(r1.x1, x1); iy1 = min(r1.y1, y1)
+    if ix1 <= ix0 or iy1 <= iy0:
+        return 0.0
+    return (ix1 - ix0) * (iy1 - iy0)
+
+
+def _span_to_html(span: dict) -> str:
+    t = _htmllib.escape(_PUA_RE.sub("•", span.get("text", "")))
+    flags = span.get("flags", 0)
+    fname = span.get("font", "").lower()
+    if flags & 16 or "bold" in fname:
+        t = f"<b>{t}</b>"
+    if flags & 2 or "italic" in fname:
+        t = f"<i>{t}</i>"
+    return t
+
+
+def _collect_rows(page: "fitz.Page", skip_rects: list) -> list[dict]:
+    """Every visual text row on the page, in reading order.
+
+    PDF text *blocks* don't match logical paragraphs (a block can merge two
+    list items or split one mid-sentence), so we work line-by-line instead:
+    fragments sharing a baseline are merged into one row, and running headers,
+    bare page numbers and lines already captured by a table are dropped.
+    """
+    lines: list[dict] = []
+    for b in page.get_text("dict")["blocks"]:
+        if b.get("type") != 0:
+            continue
+        for ln in b.get("lines", []):
+            spans = [s for s in ln.get("spans", []) if s.get("text", "")]
+            text = "".join(s.get("text", "") for s in spans).strip()
+            if not text:
+                continue
+            x0, y0, x1, y1 = ln["bbox"]
+            area = max((x1 - x0) * (y1 - y0), 1.0)
+            if any(_rect_overlap_area(fitz.Rect(r), x0, y0, x1, y1) > 0.5 * area
+                   for r in skip_rects):
+                continue
+            sizes = [float(s.get("size", 11.0)) for s in spans if s.get("text", "").strip()]
+            lines.append({"x0": x0, "x1": x1, "y0": y0, "y1": y1,
+                          "size": statistics.median(sizes) if sizes else 11.0,
+                          "spans": spans, "text": text})
+    lines.sort(key=lambda r: (r["y0"], r["x0"]))
+
+    rows: list[dict] = []
+    for ln in lines:
+        if rows:
+            r = rows[-1]
+            ov = min(r["y1"], ln["y1"]) - max(r["y0"], ln["y0"])
+            if ov > 0.5 * min(r["y1"] - r["y0"], ln["y1"] - ln["y0"]):
+                r["frags"].append(ln)
+                r["x0"] = min(r["x0"], ln["x0"]); r["x1"] = max(r["x1"], ln["x1"])
+                r["y0"] = min(r["y0"], ln["y0"]); r["y1"] = max(r["y1"], ln["y1"])
+                r["text"] = " ".join(f["text"] for f in sorted(r["frags"], key=lambda f: f["x0"]))
+                continue
+        rows.append({**{k: ln[k] for k in ("x0", "x1", "y0", "y1", "size", "text")},
+                     "frags": [ln]})
+    return [r for r in rows
+            if not (_NOISE_PAGE_NO.fullmatch(r["text"]) or r["text"].lower() in _NOISE_HEADERS)]
+
+
+def _row_html(row: dict, single_line: bool) -> str:
+    """One row's inline HTML. In single-line paragraphs (headings, TOC rows)
+    wide gaps between fragments are kept as nbsp runs so e.g. '14   NOTICES'
+    and 'title …… page' keep their visual spacing."""
+    parts: list[str] = []
+    prev_x1 = None
+    for f in sorted(row["frags"], key=lambda f: f["x0"]):
+        if prev_x1 is not None:
+            gap = f["x0"] - prev_x1
+            if single_line and gap > 4.0:
+                parts.append("&nbsp;" * max(1, min(int(gap / 2.8), 30)))
+            else:
+                parts.append(" ")
+        parts.append("".join(_span_to_html(s) for s in f["spans"]))
+        prev_x1 = f["x1"]
+    return "".join(parts).strip()
+
+
+def _group_paras(rows: list[dict]) -> list[list[dict]]:
+    """Group rows into logical paragraphs: a new paragraph starts on a clear
+    vertical gap, an outdent, a font-size jump, or an enumeration marker
+    ('A.', '14.1', '(a)' …) that sits left of the previous row (hanging indent)."""
+    paras: list[list[dict]] = []
+    cur: list[dict] = []
+    for r in rows:
+        if cur:
+            p = cur[-1]
+            gap = r["y0"] - p["y1"]
+            size = max(r["size"], 6.0)
+            new = (gap > max(3.0, 0.30 * size) or gap < -2.0
+                   or r["x0"] < p["x0"] - 6.0
+                   or abs(r["size"] - cur[0]["size"]) > 1.6
+                   or bool(_ENUM_MARKER.match(r["text"]) and r["x0"] < p["x0"] - 1.5))
+            if new:
+                paras.append(cur)
+                cur = []
+        cur.append(r)
+    if cur:
+        paras.append(cur)
+    return paras
+
+
+def _para_html(rows: list[dict], body_left: float, body_right: float,
+               prev_bottom: float | None) -> str:
+    """Render one logical paragraph to a styled <p>, preserving font size,
+    alignment, hanging indent, left offset and the gap above it."""
+    first = rows[0]
+    multi = len(rows) > 1
+    size = round(statistics.median([r["size"] for r in rows]), 1)
+    dotlead = any(_DOT_LEADER.search(r["text"]) for r in rows)
+
+    # Centered text sits inset from BOTH content-box edges; in a multi-line
+    # centered block each line also starts at its own x0 (justified/left lines
+    # share x0 and reach the right edge).
+    def _insets(r: dict) -> tuple[float, float]:
+        return r["x0"] - body_left, body_right - r["x1"]
+
+    if multi:
+        xs = [r["x0"] for r in rows]
+        centered = (max(xs) - min(xs) > 18
+                    and all(min(_insets(r)) >= 24 for r in rows))
+    else:
+        li, ri = _insets(first)
+        centered = li >= 50 and ri >= 50 and min(li, ri) > 0.5 * max(li, ri)
+
+    if centered:
+        align = "center"
+    elif (multi and not dotlead
+          and any(body_right - r["x1"] < 15 for r in rows[:-1])):
+        align = "justify"   # at least one non-last line runs flush right
+    else:
+        align = "left"
+
+    if multi:
+        inner = " ".join(_row_html(r, single_line=False) for r in rows)
+    else:
+        inner = _row_html(first, single_line=True)
+    if dotlead:
+        inner = _DOT_LEADER.sub("." * 20, inner)
+
+    mt = 6.0 if prev_bottom is None else min(max(first["y0"] - prev_bottom, 0.0), 18.0)
+    style = f"font-size:{size:.1f}pt;text-align:{align};margin:{mt:.1f}pt 0 0 0;"
+    if not centered:
+        cont = min(r["x0"] for r in rows[1:]) if multi else first["x0"]
+        pad = cont - body_left          # offset of the wrap/continuation lines
+        ti = first["x0"] - cont         # negative → hanging indent
+        if pad > 2.5:
+            style += f"padding-left:{pad:.0f}pt;"
+        if abs(ti) > 2.5:
+            style += f"text-indent:{ti:.0f}pt;"
+    return f'<p style="{style}">{inner}</p>'
+
+
+def extract_editable_html(doc_type: str, is_overseas: bool,
+                          replacements: list[dict] | None = None) -> str:
+    """Extract the full template as editable HTML that mirrors the original
+    layout: logical paragraphs (rebuilt line-by-line), font sizes, bold/italic
+    runs, justification, hanging indents, indent hierarchy, inter-paragraph
+    spacing, TOC dot leaders, and real ruled tables as <table> elements.
+
+    find_tables(strategy='lines_strict') only uses genuinely stroked ruling
+    lines, so the yellow highlight rectangles behind placeholders are no longer
+    misread as tables. Running headers and page numbers are dropped (the PDF
+    renderer stamps its own footer back on).
+    """
+    doc = fitz.open(template_path(doc_type, is_overseas))
+    pages: list[tuple[list[dict], list[tuple[float, float, str]]]] = []
+    body_left: float | None = None
+    body_right: float | None = None
+    for page in doc:
+        # ── real ruled tables only ─────────────────────────────────────────
+        table_items: list[tuple[float, float, str]] = []  # (y0, y1, html)
+        table_rects: list[tuple[float, float, float, float]] = []
+        try:
+            tab_finder = page.find_tables(strategy="lines_strict")
+            for tab in (tab_finder.tables if tab_finder else []):
+                if tab.col_count < 2 or tab.row_count < 2:
+                    continue
+                cells = tab.extract() or []
+                filled = sum(1 for row in cells for c in row if c and str(c).strip())
+                if filled < 2:
+                    continue
+                # column widths ∝ sqrt(longest cell) — stamped on the first row
+                # so the browser table and the PDF grid use the same columns
+                ncols = max(len(r) for r in cells)
+                weights = []
+                for c in range(ncols):
+                    longest = max((len(str(r[c]).strip()) for r in cells
+                                   if c < len(r) and r[c]), default=1)
+                    weights.append(max(longest, 4) ** 0.5)
+                total_w = sum(weights)
+                pcts = [100.0 * wt / total_w for wt in weights]
+                lines = ['<table style="border-collapse:collapse;width:100%;'
+                         'margin:8pt 0;font-size:10pt;">']
+                for ri, row in enumerate(cells):
+                    lines.append("<tr>")
+                    for ci, cell in enumerate(row):
+                        txt = (_htmllib.escape(_PUA_RE.sub("•", str(cell).strip()))
+                               if cell is not None else "")
+                        wstyle = f"width:{pcts[ci]:.0f}%;" if ri == 0 and ci < len(pcts) else ""
+                        lines.append(
+                            f'<td style="{wstyle}border:1px solid #999;padding:4pt 6pt;'
+                            f'vertical-align:top;">{txt}</td>')
+                    lines.append("</tr>")
+                lines.append("</table>")
+                bx0, by0, bx1, by1 = tab.bbox
+                table_items.append((by0, by1, "".join(lines)))
+                table_rects.append((bx0, by0, bx1, by1))
+        except Exception:
+            pass
+
+        rows = _collect_rows(page, table_rects)
+        if rows:
+            page_min = min(r["x0"] for r in rows)
+            page_max = max(r["x1"] for r in rows)
+            body_left = page_min if body_left is None else min(body_left, page_min)
+            body_right = page_max if body_right is None else max(body_right, page_max)
+        pages.append((rows, table_items))
+    doc.close()
+
+    left = body_left or 0.0
+    right = body_right or left
+    paras: list[str] = []
+    for rows, table_items in pages:
+        items: list[tuple[float, float, str | None, list[dict] | None]] = [
+            (y0, y1, html, None) for (y0, y1, html) in table_items]
+        items.extend((grp[0]["y0"], max(r["y1"] for r in grp), None, grp)
+                     for grp in _group_paras(rows))
+        items.sort(key=lambda t: t[0])
+        prev_bottom: float | None = None
+        for y0, y1, table_html, grp in items:
+            paras.append(table_html if table_html is not None
+                         else _para_html(grp, left, right, prev_bottom))
+            prev_bottom = y1
+
+    body = "\n".join(paras)
+    if replacements:
+        body = apply_replacements_html(body, replacements)
+    logger.info("editable_html_extracted", doc_type=doc_type, overseas=is_overseas,
+                paragraphs=len(paras), size=len(body))
+    return body
+
+
+_ALLOWED_TAGS = {"p", "b", "strong", "i", "em", "u", "s", "strike", "br", "span",
+                 "div", "mark", "ul", "ol", "li", "h1", "h2", "h3", "h4", "font",
+                 "blockquote", "sub", "sup", "hr", "img",
+                 "table", "thead", "tbody", "tfoot", "tr", "th", "td"}
+# inline signature/image data URLs — png/jpeg only, capped size
+_DATA_IMG_SRC = re.compile(
+    r'src\s*=\s*"(data:image/(?:png|jpeg);base64,[A-Za-z0-9+/=]{40,800000})"', re.I)
+_ALLOWED_STYLE = ("font-size", "text-align", "padding-left", "text-indent", "color",
+                  "background-color", "font-weight", "font-style", "text-decoration",
+                  "margin", "margin-top", "margin-bottom", "margin-left",
+                  "border-collapse", "width", "vertical-align",
+                  "border", "border-top", "border-bottom", "border-left", "border-right",
+                  "padding")
+_FONT_SIZE_MAP = {"1": "8pt", "2": "10pt", "3": "11pt", "4": "13pt",
+                  "5": "16pt", "6": "20pt", "7": "26pt"}
+
+
+def sanitize_live_html(html: str) -> str:
+    """Whitelist-clean browser contenteditable output so it is safe to store
+    and renders predictably in the PDF engine."""
+    html = re.sub(r"<(script|style|iframe|object|embed)[^>]*>.*?</\1>",
+                  "", html, flags=re.S | re.I)
+    html = re.sub(r"<!--.*?-->", "", html, flags=re.S)
+
+    def _clean(m: "re.Match[str]") -> str:
+        closing, name, attrs = m.group(1), m.group(2).lower(), m.group(3) or ""
+        if name not in _ALLOWED_TAGS:
+            return ""
+        if name == "font":  # execCommand('fontSize') legacy output → span
+            if closing:
+                return "</span>"
+            sz = re.search(r"size\s*=\s*['\"]?(\d)", attrs, re.I)
+            pt = _FONT_SIZE_MAP.get(sz.group(1) if sz else "3", "11pt")
+            return f'<span style="font-size:{pt}">'
+        if name == "img":  # signature pictures — validated data URLs only
+            if closing:
+                return ""
+            src_m = _DATA_IMG_SRC.search(attrs)
+            if not src_m:
+                return ""
+            keep_img = ""
+            st = re.search(r"style\s*=\s*\"([^\"]*)\"|style\s*=\s*'([^']*)'", attrs, re.I)
+            if st:
+                props = []
+                for part in (st.group(1) or st.group(2) or "").split(";"):
+                    if ":" not in part:
+                        continue
+                    k, v = part.split(":", 1)
+                    k, v = k.strip().lower(), v.strip()
+                    if (k in ("width", "height", "margin", "margin-left", "vertical-align")
+                            and re.fullmatch(r"[#%().,\w\s-]*", v)):
+                        props.append(f"{k}:{v}")
+                if props:
+                    keep_img = f' style="{";".join(props)}"'
+            return f'<img src="{src_m.group(1)}"{keep_img}/>'
+        if closing:
+            return f"</{name}>"
+        keep = ""
+        style_m = re.search(r"style\s*=\s*\"([^\"]*)\"|style\s*=\s*'([^']*)'", attrs, re.I)
+        if style_m:
+            props = []
+            for part in (style_m.group(1) or style_m.group(2) or "").split(";"):
+                if ":" not in part:
+                    continue
+                k, v = part.split(":", 1)
+                k, v = k.strip().lower(), v.strip()
+                if k in _ALLOWED_STYLE and re.fullmatch(r"[#%().,\w\s-]*", v):
+                    props.append(f"{k}:{v}")
+            if props:
+                keep = f' style="{";".join(props)}"'
+        if name == "br":
+            return "<br/>"
+        return f"<{name}{keep}>"
+
+    return re.sub(r"<\s*(/?)\s*([a-zA-Z0-9]+)((?:\s[^<>]*)?)/?>", _clean, html)
+
+
+_LIVE_CSS_BASE = """
+body { font-family: __FAMILY__; font-size: 10.5pt; line-height: 1.24; color: #111; }
+p, div { margin: 3pt 0; }
+mark { background-color: #fde047; }
+b, strong { font-weight: bold; }
+ul, ol { margin: 6pt 0 6pt 20pt; }
+h1, h2, h3, h4 { margin: 10pt 0 5pt; }
+"""
+
+FONT_DIR = Path(__file__).resolve().parent.parent / "templates" / "fonts"
+
+# Carlito is metrically identical to Calibri (the font the JAPL templates use),
+# so rendering with it keeps line breaks and the overall look of the original.
+_CARLITO_FACES = (
+    ("Carlito-Regular.ttf", ""),
+    ("Carlito-Bold.ttf", "font-weight: bold;"),
+    ("Carlito-Italic.ttf", "font-style: italic;"),
+    ("Carlito-BoldItalic.ttf", "font-weight: bold; font-style: italic;"),
+)
+
+
+def _live_font_assets() -> tuple["fitz.Archive | None", str]:
+    """(archive, css) for the live PDF renderer — Carlito when bundled,
+    base-14 helvetica otherwise."""
+    if all((FONT_DIR / name).exists() for name, _ in _CARLITO_FACES):
+        faces = "".join(
+            f"@font-face {{ font-family: carlito; src: url({name}); {extra} }}\n"
+            for name, extra in _CARLITO_FACES)
+        return (fitz.Archive(str(FONT_DIR)),
+                faces + _LIVE_CSS_BASE.replace("__FAMILY__", "carlito, sans-serif"))
+    return None, _LIVE_CSS_BASE.replace("__FAMILY__", "helvetica, sans-serif")
+
+
+def _tables_to_paragraphs(html: str) -> str:
+    """Convert <table> elements to bordered <p> rows for reliable fitz.Story rendering.
+
+    fitz.Story/MuPDF has limited table column-layout support — cells in the same
+    row render inline rather than in a proper grid.  We keep <table> in the stored
+    HTML (so the browser editor shows a real table) and only call this function in
+    the PDF render path.  For each row, cells are joined with " | " separators
+    inside a single bordered paragraph.
+    """
+    def _replace_table(m: "re.Match") -> str:
+        table_html = m.group(0)
+        rows_html = re.findall(r"<tr[^>]*>(.*?)</tr>", table_html, re.S | re.I)
+        parts: list[str] = []
+        for row_html in rows_html:
+            cells_html = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row_html, re.S | re.I)
+            cells_text: list[str] = []
+            for c in cells_html:
+                text = re.sub(r"<br\s*/?>", " ", c, flags=re.I)
+                text = re.sub(r"<[^>]+>", "", text)
+                text = re.sub(r"\s+", " ", text).strip()
+                cells_text.append(text)
+            cells_text = [c for c in cells_text if c]
+            if not cells_text:
+                continue
+            row_content = " &nbsp;|&nbsp; ".join(_htmllib.escape(c) for c in cells_text)
+            parts.append(
+                f'<p style="border:1px solid #aaa;padding:5pt 8pt;'
+                f'margin:0pt 0pt 2pt 0pt;font-size:10pt;">{row_content}</p>'
+            )
+        return "\n".join(parts)
+
+    return re.sub(r"<table[^>]*>.*?</table>", _replace_table, html, flags=re.S | re.I)
+
+
+_TABLE_SPLIT_RE = re.compile(r"<table[^>]*>.*?</table>", re.S | re.I)
+
+
+def _parse_table_html(table_html: str) -> tuple[list[list[str]], list[float]]:
+    """<table> HTML → (rows of cell inner-HTML, column width percents).
+
+    Width percents come from width:NN% styles on the first row's cells (as
+    stamped by extract_editable_html); empty when absent/inconsistent."""
+    rows: list[list[str]] = []
+    pcts: list[float] = []
+    for row_html in re.findall(r"<tr[^>]*>(.*?)</tr>", table_html, re.S | re.I):
+        cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row_html, re.S | re.I)
+        if not cells:
+            continue
+        if not rows:  # first row — try to read stamped column widths
+            attrs = re.findall(r"<t[dh]([^>]*)>", row_html, re.I)
+            for a in attrs:
+                m = re.search(r"width\s*:\s*([\d.]+)\s*%", a)
+                pcts.append(float(m.group(1)) if m else 0.0)
+        rows.append(cells)
+    ncols = max((len(r) for r in rows), default=0)
+    if not ncols:
+        return [], []
+    rows = [r + [""] * (ncols - len(r)) for r in rows]
+    if len(pcts) != ncols or not all(p > 0 for p in pcts):
+        pcts = []
+    return rows, pcts
+
+
+def _place_chunk(html: str, w: float, h: float, css: str,
+                 arch: "fitz.Archive | None") -> tuple["fitz.Story", "fitz.Document | None", float, bool]:
+    """Render (part of) an HTML chunk into a w×h mini-PDF.
+
+    Returns (story, mini_doc, used_height, has_more). Pass the returned story
+    back in to continue placing the remainder on the next page."""
+    story = fitz.Story(html=f"<body>{html}</body>", user_css=css, archive=arch)
+    mini, used, more = _place_story(story, w, h)
+    return story, mini, used, more
+
+
+def _place_story(story: "fitz.Story", w: float, h: float) -> tuple["fitz.Document | None", float, bool]:
+    buf = io.BytesIO()
+    writer = fitz.DocumentWriter(buf)
+    rect = fitz.Rect(0, 0, w, h)
+    dev = writer.begin_page(rect)
+    more, filled = story.place(rect)
+    story.draw(dev)
+    writer.end_page()
+    writer.close()
+    used = float(filled[3]) if filled else 0.0
+    if used <= 0:
+        return None, 0.0, bool(more)
+    buf.seek(0)
+    return fitz.open(stream=buf.getvalue(), filetype="pdf"), used, bool(more)
+
+
+def live_html_to_pdf(body_html: str) -> bytes:
+    """Lay live-edited document HTML out as an A4 PDF.
+
+    Text flows via fitz.Story using Carlito (metric clone of the templates'
+    Calibri) so line breaks match the original. <table> elements are drawn as
+    real ruled grids — column widths weighted by content, one row at a time,
+    page-breaking between rows. The standard running footer is stamped on."""
+    body_html = sanitize_live_html(body_html)
+    body_html = body_html.replace("●", "•")  # U+25CF has no glyph in base helvetica
+    arch, css = _live_font_assets()
+
+    # inline data-URL images (signatures) → in-memory archive entries
+    _img_n = [0]
+
+    def _img_to_archive(m: "re.Match[str]") -> str:
+        nonlocal arch
+        try:
+            data = base64.b64decode(m.group(1).split(",", 1)[1])
+        except Exception:
+            return 'src=""'
+        if arch is None:
+            arch = fitz.Archive()
+        _img_n[0] += 1
+        name = f"_live_img_{_img_n[0]}"
+        arch.add(data, name)
+        return f'src="{name}"'
+
+    body_html = _DATA_IMG_SRC.sub(_img_to_archive, body_html)
+
+    # split into text / table segments
+    segments: list[tuple[str, str]] = []
+    pos = 0
+    for m in _TABLE_SPLIT_RE.finditer(body_html):
+        if m.start() > pos:
+            segments.append(("html", body_html[pos:m.start()]))
+        segments.append(("table", m.group(0)))
+        pos = m.end()
+    if pos < len(body_html):
+        segments.append(("html", body_html[pos:]))
+
+    mediabox = fitz.paper_rect("a4")
+    x0, y_top = 52.0, 54.0
+    x1, y_bot = mediabox.width - 52.0, mediabox.height - 66.0
+    doc = fitz.open()
+    page = doc.new_page(width=mediabox.width, height=mediabox.height)
+    cy = y_top
+
+    def _new_page():
+        nonlocal page, cy
+        page = doc.new_page(width=mediabox.width, height=mediabox.height)
+        cy = y_top
+
+    for kind, content in segments:
+        if kind == "html":
+            if not content.strip():
+                continue
+            story = fitz.Story(html=f"<body>{content}</body>", user_css=css, archive=arch)
+            guard = 0
+            while True:
+                guard += 1
+                if guard > 500:  # safety against a non-advancing story
+                    break
+                if y_bot - cy < 40:
+                    _new_page()
+                avail_h = y_bot - cy
+                mini, used, more = _place_story(story, x1 - x0, avail_h)
+                if mini is not None:
+                    page.show_pdf_page(fitz.Rect(x0, cy, x1, cy + used), mini, 0,
+                                       clip=fitz.Rect(0, 0, x1 - x0, used))
+                    mini.close()
+                    cy += used
+                if not more:
+                    break
+                if used <= 1.0 and avail_h >= (y_bot - y_top) - 1:
+                    break    # content that never fits — drop instead of looping
+                _new_page()
+        else:
+            rows, pcts = _parse_table_html(content)
+            if not rows:
+                continue
+            pad = 3.5
+            avail_w = x1 - x0
+            ncols = len(rows[0])
+            if pcts:   # widths stamped at extraction — match the editor exactly
+                total_p = sum(pcts)
+                widths = [avail_w * p / total_p for p in pcts]
+            else:
+                weights = []
+                for c in range(ncols):
+                    longest = max((len(re.sub(r"<[^>]+>", "", r[c])) for r in rows), default=1)
+                    weights.append(max(longest, 4) ** 0.5)
+                total_w = sum(weights)
+                widths = [avail_w * wt / total_w for wt in weights]
+            cell_css = css + " body { font-size: 10pt; } p, div { margin: 1pt 0; }"
+            cy += 4
+            for row in rows:
+                rendered: list[tuple["fitz.Document | None", float]] = []
+                row_h = 0.0
+                for c, cell in enumerate(row):
+                    inner = cell.strip() or "&nbsp;"
+                    _s, mini, used, _m = _place_chunk(inner, widths[c] - 2 * pad, 1400.0,
+                                                      cell_css, arch)
+                    rendered.append((mini, used))
+                    row_h = max(row_h, used)
+                row_h += 2 * pad
+                if cy + row_h > y_bot and cy > y_top:
+                    _new_page()
+                cx = x0
+                for c, (mini, used) in enumerate(rendered):
+                    cell_rect = fitz.Rect(cx, cy, cx + widths[c], cy + row_h)
+                    page.draw_rect(cell_rect, color=(0.55, 0.55, 0.55), width=0.7)
+                    if mini is not None:
+                        page.show_pdf_page(
+                            fitz.Rect(cx + pad, cy + pad, cx + widths[c] - pad, cy + pad + used),
+                            mini, 0, clip=fitz.Rect(0, 0, widths[c] - 2 * pad, used))
+                        mini.close()
+                    cx += widths[c]
+                cy += row_h
+            cy += 4
+
+    for i in range(doc.page_count):
+        pg = doc[i]
+        w, h = pg.rect.width, pg.rect.height
+        pg.insert_text((52, h - 32), "Private and confidential",
+                       fontsize=8, fontname="helv", color=(0.45, 0.45, 0.45))
+        tail = str(i + 1)
+        tw = fitz.get_text_length(tail, fontname="helv", fontsize=8)
+        pg.insert_text((w - 52 - tw, h - 32), tail,
+                       fontsize=8, fontname="helv", color=(0.45, 0.45, 0.45))
+    out = doc.tobytes(deflate=True, garbage=3)
+    doc.close()
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Legacy HTML helpers (template_html / html_to_pdf kept for compatibility)
 # ---------------------------------------------------------------------------
 
 _HTML_CACHE: dict[tuple[str, bool], str] = {}
@@ -263,7 +862,7 @@ def template_html(doc_type: str, is_overseas: bool) -> str:
     # headers ("Private and confidential") picked up from each PDF page.
     def _drop_noise(m: "re.Match[str]") -> str:
         txt = re.sub(r"<[^>]+>", "", m.group()).replace("&#xa0;", " ").strip()
-        if not txt or re.fullmatch(r"\d{1,3}", txt) or txt.lower() == "private and confidential":
+        if not txt or _NOISE_PAGE_NO.fullmatch(txt) or txt.lower() in _NOISE_HEADERS:
             return ""
         return m.group()
 
@@ -318,54 +917,134 @@ def html_to_pdf(body_html: str, title: str = "") -> bytes:
     return buf.getvalue()
 
 
-def append_signature_page(pdf_bytes: bytes, doc_type: str, sig: dict) -> bytes:
-    """Append an e-signature certificate page to the filled PDF.
+def append_signature_page(pdf_bytes: bytes, doc_type: str, sig: dict | None = None,
+                          internal_sig: dict | None = None) -> bytes:
+    """Append an e-signature certificate page.
 
-    sig keys: signed_name, designation, email, company_name, signed_at, ip, user_agent
+    Renders a 2-column table layout:
+      | For and on behalf of the Company  | For and on behalf of [Customer]  |
+      | <signature image or styled name>  | <signature image or styled name> |
+      | Name: ...                         | Name: ...                        |
+      | Title: ...                        | Title: ...                       |
+    Plus a small audit trail block below.
     """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     page = doc.new_page()
     w = page.rect.width
+    ML, MR = 72.0, w - 72.0
+    MID = (ML + MR) / 2
+    BLACK = (0.0, 0.0, 0.0)
+    BLUE  = (0.1, 0.23, 0.42)
+    GREY  = (0.4, 0.4, 0.4)
 
-    def _line(y: float, text: str, size: float = 11, bold: bool = False, color=(0, 0, 0)):
-        page.insert_text((72, y), text, fontsize=size,
+    def _txt(x, y, text, size=10, bold=False, color=BLACK):
+        page.insert_text((x, y), text[:80], fontsize=size,
                          fontname="hebo" if bold else "helv", color=color)
 
-    title = f"Electronic Signature Certificate — {DOC_LABELS.get(doc_type, doc_type.upper())}"
-    _line(90, title, 15, bold=True, color=(0.1, 0.23, 0.42))
-    page.draw_line((72, 102), (w - 72, 102), color=(0.1, 0.23, 0.42), width=1.2)
+    def _box(rect, text, size=10, bold=False, color=BLACK, align=0):
+        page.insert_textbox(rect, text, fontsize=size,
+                            fontname="hebo" if bold else "helv",
+                            color=color, align=align)
 
-    y = 140
-    rows = [
-        ("Signed by",        sig.get("signed_name", "")),
-        ("Designation",      sig.get("designation", "") or "—"),
-        ("Email",            sig.get("email", "")),
-        ("On behalf of",     sig.get("company_name", "")),
-        ("Signed at",        sig.get("signed_at", "")),
-        ("IP address",       sig.get("ip", "") or "—"),
-    ]
-    for label, value in rows:
-        _line(y, f"{label}:", 11, bold=True)
-        _line(y + 16, str(value), 11)
-        y += 44
+    # ── title bar ────────────────────────────────────────────────────────────
+    _box(fitz.Rect(ML, 54, MR, 80),
+         f"Electronic Signature Certificate - {DOC_LABELS.get(doc_type, doc_type.upper())}",
+         size=13, bold=True, color=BLUE)
+    page.draw_line((ML, 82), (MR, 82), color=BLUE, width=1.2)
 
-    y += 10
-    page.insert_textbox(
-        fitz.Rect(72, y, w - 72, y + 120),
-        "The signatory confirmed acceptance of this document via the Jane Aerospace "
-        "secure signing link by entering their full legal name and clicking "
-        "'I Agree & Sign'. This record, including the timestamp and originating "
-        "IP address above, constitutes the audit trail of the electronic signature.",
-        fontsize=10, fontname="helv", color=(0.25, 0.25, 0.25),
-    )
+    # ── "IN WITNESS WHEREOF" preamble ────────────────────────────────────────
+    _box(fitz.Rect(ML, 90, MR, 134),
+         "IN WITNESS WHEREOF the Parties have caused this Agreement to be executed "
+         "by their duly authorized representatives on the date stated above.",
+         size=10, color=BLACK)
 
-    # Typed signature representation (cursive styles render as serif italic in PDF)
-    y += 110
-    sig_font = "helv" if sig.get("sig_font") == "standard" else "tiit"
-    page.insert_text((72, y), sig.get("signed_name", ""), fontsize=22,
-                     fontname=sig_font, color=(0.06, 0.14, 0.36))
-    page.draw_line((72, y + 8), (300, y + 8), color=(0.3, 0.3, 0.3), width=0.8)
-    _line(y + 22, "Authorised Signatory", 9, color=(0.4, 0.4, 0.4))
+    # ── table geometry ───────────────────────────────────────────────────────
+    SIG_H  = 130   # signature + header row
+    NAME_H = 28
+    TTL_H  = 28
+    TY = 142.0                       # table top-y
+    rows_y = [TY, TY + SIG_H, TY + SIG_H + NAME_H, TY + SIG_H + NAME_H + TTL_H]
+
+    def _cell_rect(col, row_idx):
+        x0 = ML if col == 0 else MID
+        x1 = MID if col == 0 else MR
+        return fitz.Rect(x0, rows_y[row_idx], x1, rows_y[row_idx + 1])
+
+    # draw outer rect + all grid lines
+    table_bot = rows_y[-1]
+    page.draw_rect(fitz.Rect(ML, TY, MR, table_bot), color=BLACK, width=0.8)
+    page.draw_line((MID, TY), (MID, table_bot), color=BLACK, width=0.8)
+    for ry in rows_y[1:-1]:
+        page.draw_line((ML, ry), (MR, ry), color=BLACK, width=0.8)
+
+    # ── helper: fill one signature cell ──────────────────────────────────────
+    def _fill_sig_cell(col: int, party_label: str, s: dict | None):
+        cr = _cell_rect(col, 0)
+        pad = 6.0
+        if s is None:
+            _box(fitz.Rect(cr.x0 + pad, cr.y0 + 6, cr.x1 - pad, cr.y0 + 26),
+                 party_label, size=9, bold=True)
+            _txt(cr.x0 + pad, cr.y0 + 50, "(Pending)", size=9, color=GREY)
+            return
+
+        # header text
+        _box(fitz.Rect(cr.x0 + pad, cr.y0 + 6, cr.x1 - pad, cr.y0 + 26),
+             party_label, size=9, bold=True)
+
+        # signature image or cursive name
+        img_rect = fitz.Rect(cr.x0 + pad, cr.y0 + 28, cr.x1 - pad, cr.y1 - 22)
+        img = s.get("sig_image") or ""
+        drew = False
+        if img.startswith("data:image"):
+            try:
+                data = base64.b64decode(img.split(",", 1)[1])
+                page.insert_image(img_rect, stream=data, keep_proportion=True)
+                drew = True
+            except Exception:
+                pass
+        if not drew:
+            sig_font = "helv" if s.get("sig_font") == "standard" else "tiit"
+            page.insert_text((cr.x0 + pad, cr.y0 + 72),
+                             s.get("signed_name", ""), fontsize=18,
+                             fontname=sig_font, color=(0.06, 0.14, 0.36))
+
+        # date below signature
+        signed_at = s.get("signed_at", "")
+        if signed_at and "T" in signed_at:
+            signed_at = signed_at.split("T")[0]
+        _txt(cr.x0 + pad, cr.y1 - 8, signed_at, size=9, bold=True)
+
+    # ── fill signature row ────────────────────────────────────────────────────
+    japl_label  = "For and on behalf of the Company"
+    cust_name   = (sig or {}).get("company_name", "Counterparty") if sig else "Counterparty"
+    lead_label  = f"For and on behalf of {cust_name}"
+
+    _fill_sig_cell(0, japl_label,  internal_sig)
+    _fill_sig_cell(1, lead_label,  sig)
+
+    # ── name row ─────────────────────────────────────────────────────────────
+    for col, s in enumerate([internal_sig, sig]):
+        cr = _cell_rect(col, 1)
+        nm = (s or {}).get("signed_name", "-")
+        _txt(cr.x0 + 6, cr.y0 + 18, f"Name: {nm}", size=10)
+
+    # ── title row ─────────────────────────────────────────────────────────────
+    for col, s in enumerate([internal_sig, sig]):
+        cr = _cell_rect(col, 2)
+        ttl = (s or {}).get("designation", "-")
+        _txt(cr.x0 + 6, cr.y0 + 18, f"Title: {ttl}", size=10)
+
+    # ── audit trail (small, below table) ──────────────────────────────────────
+    ay = table_bot + 16
+    _txt(ML, ay, "Audit trail", size=9, bold=True, color=GREY)
+    ay += 14
+    for label, s in [("Jane Aerospace", internal_sig), ("Counterparty", sig)]:
+        if s:
+            line = (f"{label}: {s.get('signed_name','')} "
+                    f"<{s.get('email','')}> | {s.get('signed_at','')} "
+                    f"| IP {s.get('ip','-')}")
+            _box(fitz.Rect(ML, ay, MR, ay + 18), line, size=8, color=GREY)
+            ay += 18
 
     out = doc.tobytes(deflate=True, garbage=3)
     doc.close()

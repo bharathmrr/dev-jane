@@ -288,6 +288,91 @@ def send_document_sign_email(
     return _send_html_email(to_email, subject, html)
 
 
+def send_document_review_email(
+    to_email: str,
+    lead_name: str,
+    company_name: str,
+    doc_type: str,
+    review_url: str,
+) -> bool:
+    """T&C review request — the lead accepts or requests changes (no signature yet)."""
+    label = _DOC_LABELS.get(doc_type, doc_type.upper())
+    subject = f"{label} for Your Review — Jane Aerospace × {company_name}"
+    html = _wrap(f"""
+        <p>Dear {lead_name},</p>
+        <p>Please review the Terms &amp; Conditions of the <strong>{label}</strong> between
+        Jane Aerospace and <strong>{company_name}</strong>. The document is pre-filled with
+        your verified details.</p>
+        <p>On the review page you can <strong>accept the terms</strong> or
+        <strong>request changes</strong> with your comments — no signature is needed at this stage.
+        Once you accept, we countersign and send you the final document for e-signature.</p>
+        <p style="margin:24px 0;">
+            <a href="{review_url}"
+               style="background:#1a56db;color:#fff;padding:12px 28px;border-radius:6px;
+                      text-decoration:none;font-size:16px;font-weight:bold;display:inline-block;">
+                Review Terms &amp; Conditions
+            </a>
+        </p>
+        <p style="color:#555;font-size:13px;">If the button doesn't work, open this link:<br>
+        <a href="{review_url}" style="color:#1155cc;">{review_url}</a></p>
+    """)
+    return _send_html_email(to_email, subject, html)
+
+
+def notify_team_document_comments(
+    company_name: str,
+    lead_email: str,
+    doc_type: str,
+    commenter: str,
+    comments_text: str,
+    edit_url: str,
+) -> bool:
+    """Lead requested changes — comments go to the team with the editor link."""
+    label = _DOC_LABELS.get(doc_type, doc_type.upper())
+    subject = f"💬 Changes Requested on {label} — {company_name}"
+    safe = (comments_text or "").replace("<", "&lt;").replace("\n", "<br>")
+    html = f"""
+    <div style="font-family:Arial,sans-serif;font-size:14px;color:#222;max-width:560px;">
+      <h2 style="color:#b45309;margin:0 0 12px;">Changes Requested — {label}</h2>
+      <p><strong>{commenter}</strong> of <strong>{company_name}</strong> ({lead_email})
+      reviewed the {label} and requested changes:</p>
+      <div style="background:#fff7ed;border-left:4px solid #f59e0b;border-radius:6px;
+                  padding:12px 16px;margin:14px 0;font-size:14px;color:#451a03;">{safe}</div>
+      <p>Open the document, make the edits in the Live Editor, and resend the updated
+      version for review:</p>
+      <p style="margin:20px 0;">
+        <a href="{edit_url}" style="background:#1a56db;color:#fff;padding:11px 24px;border-radius:6px;
+           text-decoration:none;font-weight:bold;display:inline-block;">Open Document Editor</a>
+      </p>
+    </div>"""
+    return _send_to_reviewers(subject, html)
+
+
+def notify_team_terms_accepted(
+    company_name: str,
+    lead_email: str,
+    doc_type: str,
+    accepted_by: str,
+    edit_url: str,
+) -> bool:
+    """Lead accepted the T&C — internal countersignature is now required."""
+    label = _DOC_LABELS.get(doc_type, doc_type.upper())
+    subject = f"✓ {label} Terms Accepted — {company_name} (internal signature required)"
+    html = f"""
+    <div style="font-family:Arial,sans-serif;font-size:14px;color:#222;max-width:560px;">
+      <h2 style="color:#16a34a;margin:0 0 12px;">{label} Terms Accepted</h2>
+      <p><strong>{accepted_by}</strong> of <strong>{company_name}</strong> ({lead_email})
+      has accepted the Terms &amp; Conditions of the {label}.</p>
+      <p><strong>Next step:</strong> an authorised Jane Aerospace representative signs the
+      document; it is then automatically emailed to the lead for their counter-signature.</p>
+      <p style="margin:20px 0;">
+        <a href="{edit_url}" style="background:#16a34a;color:#fff;padding:11px 24px;border-radius:6px;
+           text-decoration:none;font-weight:bold;display:inline-block;">Open to Sign &amp; Send</a>
+      </p>
+    </div>"""
+    return _send_to_reviewers(subject, html)
+
+
 def notify_team_document_signed(
     company_name: str,
     lead_email: str,

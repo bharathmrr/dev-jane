@@ -443,7 +443,7 @@ function renderLeadsView(){
       <td><span class="chip c-blue">${esc(l.stage)}</span>${steps(l.stage_index)}</td>
       <td style="font-size:12px;">${esc(l.sent_at)||'—'}${l.followups?`<br><span style="font-size:10.5px;color:var(--mut);">+${l.followups} follow-ups</span>`:''}</td>
       <td style="font-size:12px;">${esc(l.replied_at)||'—'}</td>
-      <td style="font-size:12px;">${esc(l.booked_at)||'—'}${l.selected_slot?`<br><span style="font-size:10.5px;color:var(--mut);">${esc(l.selected_slot)}</span>`:''}</td>
+      <td style="font-size:12px;">${esc(l.booked_at)||'—'}${l.selected_slot?`<br><span style="font-size:10.5px;color:var(--mut);">${esc(l.selected_slot)}</span>`:''}${l.meeting_link?`<br><a href="${esc(l.meeting_link)}" target="_blank" style="font-size:11px;font-weight:700;">🔗 Join Meeting ↗</a>`:''}</td>
       <td>${leadActionBtns(l)}</td></tr>`).join('')||
       '<tr><td colspan="7" style="text-align:center;color:var(--mut);padding:28px;">No leads found</td></tr>'}</tbody></table></div>`;
 }

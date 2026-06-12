@@ -187,6 +187,25 @@ def revise_document(
     return result or current_content
 
 
+def summarize_doc_comment(comment_text: str) -> list[str]:
+    """Filter a lead's change-request comment into short action items for the team.
+
+    Returns up to 5 one-line actions; empty list when no API key / on failure."""
+    result = _ask(
+        settings.LLM_INTENT_MODEL,
+        "You convert a customer's change-request comment on a legal document "
+        "(NDA / supply agreement) into a short list of specific action items for "
+        "the document team. Reply with one action per line, no bullets or "
+        "numbering, maximum 5 lines. Be concrete: name the clause/section and "
+        "the change wanted.",
+        comment_text[:3000],
+        max_tokens=300,
+    )
+    if not result:
+        return []
+    return [ln.strip(" -•\t") for ln in result.splitlines() if ln.strip()][:5]
+
+
 # ---------------------------------------------------------------------------
 # NDA / Agreement sign-rejection and reminder emails
 # ---------------------------------------------------------------------------

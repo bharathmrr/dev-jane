@@ -342,6 +342,7 @@ def _lead_row(lead: LeadV2, rec: OnboardingRecord | None) -> dict:
         "replied_at": _fmt(lead.replied_at),
         "booked_at": _fmt(lead.booked_at),
         "selected_slot": lead.selected_slot or "",
+        "meeting_link": lead.zoho_meeting_link or "",
         "followups": lead.follow_up_count or 0,
         "dropped": lead.opted_out,
         "onboarding": None,
@@ -709,6 +710,18 @@ async def day_block(body: _DayBlockBody, db: AsyncSession = Depends(get_db),
 # Approvals (admin + approver)
 # ---------------------------------------------------------------------------
 
+def _doc_json(r: OnboardingRecord, doc_type: str) -> dict:
+    raw = r.nda_draft_content if doc_type == "nda" else r.agreement_draft_content
+    if raw:
+        try:
+            d = json.loads(raw)
+            if isinstance(d, dict):
+                return d
+        except (ValueError, TypeError):
+            pass
+    return {}
+
+
 def _approval_items(r: OnboardingRecord, lead: LeadV2) -> tuple[list[dict], list[dict]]:
     """Everything in flight for one onboarding record.
 
@@ -740,36 +753,61 @@ def _approval_items(r: OnboardingRecord, lead: LeadV2) -> tuple[list[dict], list
                         "since": _fmt(r.kyc_last_followup_at), "view_url": make_kyc_view_url(oid),
                         "display": r.kyc_status_display or ""})
 
-    # NDA
-    if k == KYCStatus.APPROVED and n in (DocumentStatus.PENDING, DocumentStatus.TEAM_REVIEW,
-                                         DocumentStatus.DRAFT_GENERATED, DocumentStatus.DRAFT_REJECTED):
-        action.append({**base, "kind": "nda_draft", "label": "NDA — Review & Send",
-                       "since": _fmt(r.kyc_approved_at), "view_url": make_doc_edit_url(oid, "nda"),
-                       "display": r.nda_status_display or ""})
-    if n in (DocumentStatus.SIGNED_RECEIVED, DocumentStatus.SIGN_UNDER_REVIEW):
-        action.append({**base, "kind": "nda_sign", "label": "Signed NDA — Review",
-                       "since": _fmt(r.nda_signed_received_at), "view_url": make_doc_edit_url(oid, "nda"),
-                       "display": r.nda_status_display or ""})
-    if n == DocumentStatus.SENT_TO_LEAD:
-        waiting.append({**base, "kind": "nda_wait", "label": "NDA — out for signature",
-                        "since": _fmt(r.nda_sent_at), "view_url": make_doc_sign_url(oid, "nda"),
-                        "display": r.nda_status_display or ""})
+    def _doc_items(doc_type: str, status, prev_ok: bool, sent_at, signed_at,
+                   status_display, approved_at) -> None:
+        """Stage-aware items for one document (NDA or Agreement)."""
+        short = "NDA" if doc_type == "nda" else "Agreement"
+        d = _doc_json(r, doc_type)
+        stage = d.get("stage") or ""
+        comments = d.get("comments") or []
+        display = status_display or ""
 
-    # Agreement
-    if n == DocumentStatus.APPROVED and a in (DocumentStatus.PENDING, DocumentStatus.TEAM_REVIEW,
-                                              DocumentStatus.DRAFT_GENERATED, DocumentStatus.DRAFT_REJECTED):
-        action.append({**base, "kind": "agreement_draft", "label": "Agreement — Review & Send",
-                       "since": _fmt(r.nda_approved_at), "view_url": make_doc_edit_url(oid, "agreement"),
-                       "display": r.agreement_status_display or ""})
-    if a in (DocumentStatus.SIGNED_RECEIVED, DocumentStatus.SIGN_UNDER_REVIEW):
-        action.append({**base, "kind": "agreement_sign", "label": "Signed Agreement — Review",
-                       "since": _fmt(r.agreement_signed_received_at),
-                       "view_url": make_doc_edit_url(oid, "agreement"),
-                       "display": r.agreement_status_display or ""})
-    if a == DocumentStatus.SENT_TO_LEAD:
-        waiting.append({**base, "kind": "agreement_wait", "label": "Agreement — out for signature",
-                        "since": _fmt(r.agreement_sent_at), "view_url": make_doc_sign_url(oid, "agreement"),
-                        "display": r.agreement_status_display or ""})
+        if prev_ok and status in (DocumentStatus.PENDING, DocumentStatus.TEAM_REVIEW,
+                                  DocumentStatus.DRAFT_GENERATED):
+            # changes_requested = lead asked for a revision (NOT a rejection)
+            label = (f"{short} — Revision requested by lead ({len(comments)} "
+                     f"comment{'s' if len(comments) != 1 else ''})"
+                     if stage == "changes_requested" else f"{short} — Review & Send")
+            action.append({**base, "kind": f"{doc_type}_draft", "label": label,
+                           "since": _fmt(sent_at if stage == "changes_requested" else approved_at),
+                           "view_url": make_doc_edit_url(oid, doc_type),
+                           "display": display, "comments": len(comments)})
+        if status == DocumentStatus.DRAFT_REJECTED:
+            label = (f"{short} — Revision requested by lead ({len(comments)} comment{'s' if len(comments) != 1 else ''})"
+                     if stage == "changes_requested" else f"{short} — Review & Send")
+            action.append({**base, "kind": f"{doc_type}_draft", "label": label,
+                           "since": _fmt(sent_at or approved_at),
+                           "view_url": make_doc_edit_url(oid, doc_type),
+                           "display": display, "comments": len(comments)})
+        if status in (DocumentStatus.SIGNED_RECEIVED, DocumentStatus.SIGN_UNDER_REVIEW):
+            action.append({**base, "kind": f"{doc_type}_sign", "label": f"Signed {short} — Review",
+                           "since": _fmt(signed_at), "view_url": make_doc_edit_url(oid, doc_type),
+                           "display": display})
+        if status == DocumentStatus.SENT_TO_LEAD:
+            if stage == "review":
+                waiting.append({**base, "kind": f"{doc_type}_wait", "label": f"{short} — out for T&C review",
+                                "since": _fmt(sent_at), "view_url": make_doc_sign_url(oid, doc_type),
+                                "display": display})
+            elif stage == "accepted":
+                action.append({**base, "kind": f"{doc_type}_internal_sign",
+                               "label": f"{short} — Terms accepted, internal signature required",
+                               "since": _fmt(sent_at), "view_url": make_doc_edit_url(oid, doc_type),
+                               "display": display})
+            elif stage == "awaiting_lead_sign":
+                waiting.append({**base, "kind": f"{doc_type}_wait",
+                                "label": f"{short} — countersigned, awaiting lead signature",
+                                "since": _fmt(sent_at), "view_url": make_doc_sign_url(oid, doc_type),
+                                "display": display})
+            else:  # legacy direct-sign links sent before the review flow existed
+                waiting.append({**base, "kind": f"{doc_type}_wait", "label": f"{short} — out for signature",
+                                "since": _fmt(sent_at), "view_url": make_doc_sign_url(oid, doc_type),
+                                "display": display})
+
+    _doc_items("nda", n, k == KYCStatus.APPROVED, r.nda_sent_at,
+               r.nda_signed_received_at, r.nda_status_display, r.kyc_approved_at)
+    _doc_items("agreement", a, n in (DocumentStatus.APPROVED, DocumentStatus.PROCEED_NEXT),
+               r.agreement_sent_at, r.agreement_signed_received_at,
+               r.agreement_status_display, r.nda_approved_at)
     return action, waiting
 
 

@@ -1156,12 +1156,31 @@ async def kyc_form_submit(
     if company_type == "indian" and not gst_certificate:
         raise HTTPException(400, "GST certificate is required for Indian companies")
 
+    # Registration number is mandatory — it goes on the NDA / Agreement.
+    if company_type == "indian" and not (cin_number or "").strip():
+        raise HTTPException(400, "Certificate of Incorporation Number (CIN) is required")
+    if company_type == "overseas" and not (company_reg_number or "").strip():
+        raise HTTPException(400, "Company Registration Number is required")
+
     gst_filename: str | None = gst_certificate.filename if gst_certificate else None
     inc_filename: str | None = incorporation_certificate.filename
 
     # Read file bytes now — UploadFile is unavailable after response is sent
     gst_bytes: bytes = await gst_certificate.read() if gst_certificate else b""
     inc_bytes: bytes = await incorporation_certificate.read()
+
+    # Server-side backstop for the client-side size/type validation
+    _MAX_FILE = 10 * 1024 * 1024
+    _ALLOWED_EXT = (".pdf", ".jpg", ".jpeg", ".png")
+    for _fname, _fbytes in ((gst_filename, gst_bytes), (inc_filename, inc_bytes)):
+        if not _fname:
+            continue
+        if len(_fbytes) > _MAX_FILE:
+            raise HTTPException(413, f"File '{_fname}' exceeds the 10 MB limit "
+                                     f"({len(_fbytes) / 1024 / 1024:.1f} MB). Please compress it and resubmit.")
+        if not _fname.lower().endswith(_ALLOWED_EXT):
+            raise HTTPException(400, f"File '{_fname}' is not an accepted type. "
+                                     f"Please upload PDF, JPG, or PNG.")
 
     # Count existing submissions for attempt number
     existing_count = (await db.execute(
@@ -1493,7 +1512,7 @@ async def kyc_view_page(onboarding_id: str, token: str, db: AsyncSession = Depen
     rows += _row("Signatory 1 — Name", kyc.contact_name or "")
     rows += _row("Signatory 1 — Designation", extra.get("signatory1_designation", ""))
     rows += _row("Signatory 1 — PAN", extra.get("signatory1_pan", ""))
-    rows += _row("Signatory 1 — Aadhaar (last 4)", extra.get("signatory1_aadhaar", ""))
+    rows += _row("Signatory 1 — Aadhaar Number", extra.get("signatory1_aadhaar", ""))
     if is_overseas:
         rows += _row("Signatory 1 — Nationality", extra.get("signatory1_nationality", ""))
         rows += _row("Signatory 1 — DOB", extra.get("signatory1_dob", ""))
@@ -1503,7 +1522,7 @@ async def kyc_view_page(onboarding_id: str, token: str, db: AsyncSession = Depen
     rows += _row("Signatory 2 — Name", extra.get("signatory2_name", ""))
     rows += _row("Signatory 2 — Designation", extra.get("signatory2_designation", ""))
     rows += _row("Signatory 2 — PAN", extra.get("signatory2_pan", ""))
-    rows += _row("Signatory 2 — Aadhaar (last 4)", extra.get("signatory2_aadhaar", ""))
+    rows += _row("Signatory 2 — Aadhaar Number", extra.get("signatory2_aadhaar", ""))
     rows += _row("Director / Partner Name(s)", extra.get("director_names", ""))
 
     # ── UBO ──────────────────────────────────────────────────────────────────
@@ -2073,7 +2092,7 @@ def _kyc_form_html(submit_url: str, company_name: str, contact_name: str, presel
     <div class="two-col">
       <div>
         <label>Legal / Registered Name of Entity <span class="required">*</span></label>
-        <input type="text" name="company_name" value="{company_name}" required placeholder="ACME AEROSPACE PVT LTD">
+        <input type="text" name="company_name" required placeholder="Enter your company's registered legal name">
       </div>
       <div>
         <label>Trade Name / Brand Name <span class="opt">(if any)</span></label>
@@ -2110,10 +2129,11 @@ def _kyc_form_html(submit_url: str, company_name: str, contact_name: str, presel
                oninput="this.value=this.value.toUpperCase().replace(/\\s/g,'')">
       </div>
       <div>
-        <label>Certificate of Incorporation No. <span class="opt">(optional)</span></label>
+        <label>Certificate of Incorporation No. <span class="required">*</span></label>
         <input type="text" name="cin_number" maxlength="21" placeholder="L17110MH1973PLC019786"
                oninput="this.value=this.value.toUpperCase().replace(/\\s/g,'')">
-        <p class="file-note">CIN for Pvt Ltd / Ltd. Leave blank if not applicable.</p>
+        <p class="file-note">21-character CIN — used as the registration number on your NDA / Agreement.
+          Overseas companies enter their Company Registration No. below instead.</p>
       </div>
     </div>
 
@@ -2209,7 +2229,7 @@ def _kyc_form_html(submit_url: str, company_name: str, contact_name: str, presel
     <div class="two-col">
       <div>
         <label>Name <span class="required">*</span></label>
-        <input type="text" name="contact_name" value="{contact_name}" required
+        <input type="text" name="contact_name" required
                placeholder="Full name" class="no-upper">
       </div>
       <div>
@@ -2225,10 +2245,10 @@ def _kyc_form_html(submit_url: str, company_name: str, contact_name: str, presel
                oninput="this.value=this.value.toUpperCase().replace(/\\s/g,'')">
       </div>
       <div>
-        <label>Aadhaar — last 4 digits <span class="opt">(optional)</span></label>
-        <input type="text" name="signatory1_aadhaar" maxlength="4" placeholder="XXXX"
+        <label>Aadhaar Number <span class="opt">(optional)</span></label>
+        <input type="text" name="signatory1_aadhaar" maxlength="12" placeholder="XXXX XXXX XXXX"
                oninput="this.value=this.value.replace(/[^0-9]/g,'')" class="no-upper">
-        <p class="file-note">Last 4 digits only for identity verification</p>
+        <p class="file-note">Full 12-digit Aadhaar number for identity verification</p>
       </div>
     </div>
 
@@ -2251,8 +2271,8 @@ def _kyc_form_html(submit_url: str, company_name: str, contact_name: str, presel
                oninput="this.value=this.value.toUpperCase().replace(/\\s/g,'')">
       </div>
       <div>
-        <label>Aadhaar — last 4 digits <span class="opt">(optional)</span></label>
-        <input type="text" name="signatory2_aadhaar" maxlength="4" placeholder="XXXX"
+        <label>Aadhaar Number <span class="opt">(optional)</span></label>
+        <input type="text" name="signatory2_aadhaar" maxlength="12" placeholder="XXXX XXXX XXXX"
                oninput="this.value=this.value.replace(/[^0-9]/g,'')" class="no-upper">
       </div>
     </div>
@@ -2320,30 +2340,31 @@ def _kyc_form_html(submit_url: str, company_name: str, contact_name: str, presel
 
     <div id="gst-doc-section" style="{indian_style}">
       <label>GST Registration Certificate <span class="required">*</span></label>
-      <input type="file" name="gst_certificate" accept=".pdf,.jpg,.jpeg,.png">
+      <input type="file" name="gst_certificate" accept=".pdf,.jpg,.jpeg,.png" onchange="validateKycFile(this)">
       <p class="file-note">PDF, JPG, or PNG. Max 10 MB.</p>
     </div>
 
     <label>Certificate of Incorporation <span class="required">*</span></label>
-    <input type="file" name="incorporation_certificate" accept=".pdf,.jpg,.jpeg,.png" required>
+    <input type="file" name="incorporation_certificate" accept=".pdf,.jpg,.jpeg,.png" required onchange="validateKycFile(this)">
     <p class="file-note">PDF, JPG, or PNG. Max 10 MB.</p>
 
     <label>MoA &amp; AoA <span class="opt">(optional — for Pvt Ltd / Ltd)</span></label>
-    <input type="file" name="moa_aoa" accept=".pdf,.jpg,.jpeg,.png">
-    <p class="file-note">Memorandum &amp; Articles of Association.</p>
+    <input type="file" name="moa_aoa" accept=".pdf,.jpg,.jpeg,.png" onchange="validateKycFile(this)">
+    <p class="file-note">Memorandum &amp; Articles of Association. Max 10 MB.</p>
 
     <!-- ── Overseas: Additional Documents ── -->
     <div id="overseas-docs-section" style="{overseas_style}">
       <label>Proof of Registered Business Address <span class="required">*</span></label>
-      <input type="file" name="proof_of_address" accept=".pdf,.jpg,.jpeg,.png">
+      <input type="file" name="proof_of_address" accept=".pdf,.jpg,.jpeg,.png" onchange="validateKycFile(this)">
       <p class="file-note">Utility bill, bank statement, or official letter showing registered address. Max 10 MB.</p>
       <label>Valid Trade Licence / Business Permit <span class="opt">(if applicable)</span></label>
-      <input type="file" name="trade_licence" accept=".pdf,.jpg,.jpeg,.png">
+      <input type="file" name="trade_licence" accept=".pdf,.jpg,.jpeg,.png" onchange="validateKycFile(this)">
       <p class="file-note">PDF, JPG, or PNG. Max 10 MB.</p>
     </div>
 
     <label>Signatory ID Proof <span class="opt">(Aadhaar / PAN Card / Passport)</span></label>
-    <input type="file" name="signatory_id_proof" accept=".pdf,.jpg,.jpeg,.png">
+    <input type="file" name="signatory_id_proof" accept=".pdf,.jpg,.jpeg,.png" onchange="validateKycFile(this)">
+    <p class="file-note">PDF, JPG, or PNG. Max 10 MB.</p>
 
     <!-- ── D. BANK & FINANCIAL DETAILS ── -->
     <div class="sec">D. Bank &amp; Financial Details</div>
@@ -2617,7 +2638,7 @@ function toggleIndian(val){{
        'overseas-docs-section','overseas-bank-section','overseas-directors-section',
        'overseas-escalation-section','overseas-compliance-section'], !isIndian);
   if(isIndian){{
-    _req(['gstin_number'], true);
+    _req(['gstin_number','cin_number'], true);
     _req(['ifsc_code','account_type'], true);
     _req(['country_of_incorporation','company_reg_number','country_of_tax_residence','tax_id_tin',
           'country','swift_code','iban_number','bank_country','account_currency',
@@ -2626,7 +2647,7 @@ function toggleIndian(val){{
           'escalation_contact_name','escalation_contact_title',
           'escalation_contact_email','escalation_contact_phone'], false);
   }} else {{
-    _req(['gstin_number'], false);
+    _req(['gstin_number','cin_number'], false);
     _req(['ifsc_code','account_type'], false);
     _req(['country_of_incorporation','company_reg_number','country_of_tax_residence','tax_id_tin',
           'country','swift_code','iban_number','bank_country','account_currency',
@@ -2700,9 +2721,41 @@ function _row(label, val){{
          'color:#374151;width:38%;vertical-align:top;">'+label+'</td>'+
          '<td style="padding:7px 12px;font-size:13px;color:#111;">'+val+'</td></tr>';
 }}
+/* ── File upload validation: size + type, alert and block ── */
+var KYC_MAX_FILE_MB = 10;
+var KYC_ALLOWED_EXT = ['pdf','jpg','jpeg','png'];
+function validateKycFile(input){{
+  if(!input.files||!input.files.length) return true;
+  var f=input.files[0];
+  var ext=(f.name.split('.').pop()||'').toLowerCase();
+  if(KYC_ALLOWED_EXT.indexOf(ext)===-1){{
+    alert('"'+f.name+'" is not an accepted file type.\\nPlease upload a PDF, JPG, or PNG file.');
+    input.value=''; return false;
+  }}
+  if(f.size > KYC_MAX_FILE_MB*1024*1024){{
+    alert('"'+f.name+'" is '+(f.size/1024/1024).toFixed(1)+' MB — the maximum allowed size is '+
+          KYC_MAX_FILE_MB+' MB per file.\\nPlease compress or rescan the document and try again.');
+    input.value=''; return false;
+  }}
+  return true;
+}}
+function validateAllKycFiles(){{
+  var ok=true, total=0;
+  document.querySelectorAll('#kyc-form input[type=file]').forEach(function(inp){{
+    if(!validateKycFile(inp)) ok=false;
+    if(inp.files&&inp.files.length) total+=inp.files[0].size;
+  }});
+  if(ok && total > 20*1024*1024){{
+    alert('The combined size of all uploaded files is '+(total/1024/1024).toFixed(1)+
+          ' MB — the maximum combined upload is 20 MB.\\nPlease compress your documents and try again.');
+    ok=false;
+  }}
+  return ok;
+}}
 function kycReview(){{
   var form=document.getElementById('kyc-form');
   if(form&&!form.checkValidity()){{ form.reportValidity(); return; }}
+  if(!validateAllKycFiles()) return;
   var isIndian=document.querySelector('input[name=company_type]:checked')&&
                document.querySelector('input[name=company_type]:checked').value==='indian';
   var rows='';
@@ -2756,6 +2809,9 @@ window.onload=function(){{
   if(ci) ci.addEventListener('blur',function(){{validateCIN(this.value);}});
   var ifs=document.querySelector('[name=ifsc_code]');
   if(ifs) ifs.addEventListener('blur',function(){{validateIFSC(this.value);}});
+  document.querySelectorAll('#kyc-form input[type=file]').forEach(function(inp){{
+    inp.addEventListener('change',function(){{validateKycFile(this);}});
+  }});
 }};
 </script>
 </body>
