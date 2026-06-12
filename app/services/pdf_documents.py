@@ -538,6 +538,10 @@ def sanitize_live_html(html: str) -> str:
             if not src_m:
                 return ""
             keep_img = ""
+            # preserve class="sig-img" so the resize toolbar can target it
+            cls_m = re.search(r'class\s*=\s*"([^"]*)"', attrs, re.I)
+            if cls_m and "sig-img" in cls_m.group(1):
+                keep_img += ' class="sig-img" draggable="true"'
             st = re.search(r"style\s*=\s*\"([^\"]*)\"|style\s*=\s*'([^']*)'", attrs, re.I)
             if st:
                 props = []
@@ -546,11 +550,12 @@ def sanitize_live_html(html: str) -> str:
                         continue
                     k, v = part.split(":", 1)
                     k, v = k.strip().lower(), v.strip()
-                    if (k in ("width", "height", "margin", "margin-left", "vertical-align")
+                    if (k in ("width", "height", "margin", "margin-left", "vertical-align",
+                              "cursor")
                             and re.fullmatch(r"[#%().,\w\s-]*", v)):
                         props.append(f"{k}:{v}")
                 if props:
-                    keep_img = f' style="{";".join(props)}"'
+                    keep_img += f' style="{";".join(props)}"'
             return f'<img src="{src_m.group(1)}"{keep_img}/>'
         if closing:
             return f"</{name}>"

@@ -925,12 +925,101 @@ function insertSigImage(input) {{
     c.width = Math.round(img.width * scale);
     c.height = Math.round(img.height * scale);
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    cmd('insertHTML', '<img src="' + c.toDataURL('image/png') + '" style="width:150pt;">&nbsp;');
+    cmd('insertHTML',
+        '<img class="sig-img" draggable="true" src="' + c.toDataURL('image/png') +
+        '" style="width:150pt;cursor:move;vertical-align:middle;">&nbsp;');
     input.value = '';
   }};
   img.onerror = function() {{ alert('Could not read that image file.'); input.value = ''; }};
   img.src = URL.createObjectURL(f);
 }}
+
+// ── Signature image resize / move toolbar ────────────────────────────────────
+(function() {{
+  // inject CSS for selected sig image outline
+  const st = document.createElement('style');
+  st.textContent = '.sig-img{{cursor:move;vertical-align:middle;transition:outline .1s}}' +
+    '.sig-img:hover{{outline:2px dashed #4f8ef7;outline-offset:2px}}' +
+    '.sig-img.sig-sel{{outline:2px solid #1a56db;outline-offset:2px}}';
+  document.head.appendChild(st);
+
+  // build the toolbar
+  const tb = document.createElement('div');
+  tb.id = 'sig-tb';
+  tb.style.cssText = 'position:fixed;display:none;z-index:9999;background:#1e3a5f;' +
+    'border-radius:8px;padding:5px 10px;gap:6px;align-items:center;' +
+    'box-shadow:0 4px 16px rgba(0,0,0,.35);font-family:sans-serif;';
+  tb.innerHTML =
+    '<span style="color:#93c5fd;font-size:11px;font-weight:600;">✏ Signature</span>' +
+    '<button id="sig-tb-sm" title="Smaller" style="background:#2d5a8e;color:#fff;border:none;' +
+      'border-radius:5px;padding:3px 9px;cursor:pointer;font-size:14px;font-weight:bold;">−</button>' +
+    '<span id="sig-tb-sz" style="color:#fff;font-size:11px;min-width:44px;text-align:center;"></span>' +
+    '<button id="sig-tb-lg" title="Larger" style="background:#2d5a8e;color:#fff;border:none;' +
+      'border-radius:5px;padding:3px 9px;cursor:pointer;font-size:14px;font-weight:bold;">+</button>' +
+    '<span style="color:#4b7ab5;margin:0 2px;">|</span>' +
+    '<button id="sig-tb-del" title="Remove signature" style="background:#7f1d1d;color:#fca5a5;' +
+      'border:none;border-radius:5px;padding:3px 9px;cursor:pointer;font-size:12px;">✕ Remove</button>';
+  document.body.appendChild(tb);
+
+  let sel = null;
+
+  function _ptWidth(img) {{
+    // read width style in pt (may be px or pt)
+    const s = img.style.width || '';
+    const v = parseFloat(s) || 150;
+    return s.endsWith('px') ? Math.round(v * 0.75) : v;  // px→pt rough
+  }}
+
+  function _showTb(img) {{
+    if (sel && sel !== img) sel.classList.remove('sig-sel');
+    sel = img;
+    sel.classList.add('sig-sel');
+    _reposTb();
+    tb.style.display = 'flex';
+  }}
+
+  function _reposTb() {{
+    if (!sel) return;
+    const r = sel.getBoundingClientRect();
+    const tbW = 300;
+    let left = r.left;
+    if (left + tbW > window.innerWidth - 10) left = window.innerWidth - tbW - 10;
+    tb.style.left = Math.max(4, left) + 'px';
+    tb.style.top  = (r.top > 46 ? r.top - 42 : r.bottom + 6) + 'px';
+    document.getElementById('sig-tb-sz').textContent = _ptWidth(sel) + ' pt';
+  }}
+
+  function _resize(delta) {{
+    if (!sel) return;
+    const nw = Math.max(30, Math.min(500, _ptWidth(sel) + delta));
+    sel.style.width = nw + 'pt';
+    sel.style.height = '';   // let aspect ratio breathe
+    document.getElementById('sig-tb-sz').textContent = nw + ' pt';
+    _reposTb();
+  }}
+
+  document.getElementById('sig-tb-sm').onclick  = function(e) {{ e.stopPropagation(); _resize(-15); }};
+  document.getElementById('sig-tb-lg').onclick  = function(e) {{ e.stopPropagation(); _resize(+15); }};
+  document.getElementById('sig-tb-del').onclick = function(e) {{
+    e.stopPropagation();
+    if (sel) {{ sel.remove(); sel = null; tb.style.display = 'none'; }}
+  }};
+
+  // click on a sig-img → select; click elsewhere → deselect
+  document.addEventListener('click', function(e) {{
+    if (e.target.classList && e.target.classList.contains('sig-img')) {{
+      _showTb(e.target);
+    }} else if (!tb.contains(e.target)) {{
+      if (sel) sel.classList.remove('sig-sel');
+      sel = null;
+      tb.style.display = 'none';
+    }}
+  }}, true);
+
+  // reposition toolbar on scroll / resize
+  window.addEventListener('scroll', _reposTb, true);
+  window.addEventListener('resize', _reposTb);
+}})();
 
 function findReplace() {{
   const f = prompt('Find text:'); if (!f) return;
