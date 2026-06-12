@@ -1459,8 +1459,7 @@ async def kyc_view_page(onboarding_id: str, token: str, db: AsyncSession = Depen
     rows += _row("Entity Type", extra.get("entity_type", ""))
     rows += _row("Date of Incorporation", extra.get("date_of_incorporation", ""))
     rows += _row("Nature of Business", extra.get("nature_of_business", ""))
-    if extra.get("principal_business_address"):
-        rows += _row("Principal Business Address", extra.get("principal_business_address", ""))
+    rows += _row("Principal Business Address", extra.get("principal_business_address", ""))
 
     # ── A. Registered Address ────────────────────────────────────────────────
     rows += _sec("Registered Address")
@@ -1501,21 +1500,17 @@ async def kyc_view_page(onboarding_id: str, token: str, db: AsyncSession = Depen
         rows += _row("Signatory 1 — Passport / ID", extra.get("signatory1_passport_id", ""))
         rows += _row("Signatory 1 — Country of Residence", extra.get("signatory1_country_of_residence", ""))
         rows += _row("Signatory 1 — Shareholding %", extra.get("signatory1_shareholding_pct", ""))
-    if extra.get("signatory2_name"):
-        rows += _row("Signatory 2 — Name", extra.get("signatory2_name", ""))
-        rows += _row("Signatory 2 — Designation", extra.get("signatory2_designation", ""))
-        rows += _row("Signatory 2 — PAN", extra.get("signatory2_pan", ""))
-        rows += _row("Signatory 2 — Aadhaar (last 4)", extra.get("signatory2_aadhaar", ""))
-    if extra.get("director_names"):
-        rows += _row("Director / Partner Name(s)", extra.get("director_names", ""))
+    rows += _row("Signatory 2 — Name", extra.get("signatory2_name", ""))
+    rows += _row("Signatory 2 — Designation", extra.get("signatory2_designation", ""))
+    rows += _row("Signatory 2 — PAN", extra.get("signatory2_pan", ""))
+    rows += _row("Signatory 2 — Aadhaar (last 4)", extra.get("signatory2_aadhaar", ""))
+    rows += _row("Director / Partner Name(s)", extra.get("director_names", ""))
 
     # ── UBO ──────────────────────────────────────────────────────────────────
-    if extra.get("ubo_name"):
-        rows += _sec("Ultimate Beneficial Owner (UBO)")
-        rows += _row("UBO Name", extra.get("ubo_name", ""))
-        rows += _row("UBO PAN", extra.get("ubo_pan", ""))
-        rows += _row("UBO Nationality", extra.get("ubo_nationality", ""))
-
+    rows += _sec("Ultimate Beneficial Owner (UBO)")
+    rows += _row("UBO Name", extra.get("ubo_name", ""))
+    rows += _row("UBO PAN", extra.get("ubo_pan", ""))
+    rows += _row("UBO Nationality", extra.get("ubo_nationality", ""))
     rows += _row("PEP Status", extra.get("pep_status", ""))
 
     # ── D. Bank Details ──────────────────────────────────────────────────────
@@ -1531,11 +1526,10 @@ async def kyc_view_page(onboarding_id: str, token: str, db: AsyncSession = Depen
         rows += _row("Bank Country", extra.get("bank_country", ""))
         rows += _row("Account Currency", extra.get("account_currency", ""))
     rows += _row("Annual Turnover", extra.get("annual_turnover", ""))
-    if extra.get("bank_branch_address"):
-        rows += _row("Bank Branch Address", extra.get("bank_branch_address", ""))
+    rows += _row("Bank Branch Address", extra.get("bank_branch_address", ""))
 
     # ── Overseas: Escalation Contact ─────────────────────────────────────────
-    if is_overseas and extra.get("escalation_contact_name"):
+    if is_overseas:
         rows += _sec("F. Escalation Contact")
         rows += _row("Name", extra.get("escalation_contact_name", ""))
         rows += _row("Title / Designation", extra.get("escalation_contact_title", ""))
@@ -1545,7 +1539,7 @@ async def kyc_view_page(onboarding_id: str, token: str, db: AsyncSession = Depen
         rows += _row("Relationship", extra.get("escalation_contact_relationship", ""))
 
     # ── Overseas: Directors ───────────────────────────────────────────────────
-    if is_overseas and extra.get("director1_name"):
+    if is_overseas:
         rows += _sec("G. Directors & Key Controllers")
         rows += _row("Director 1 — Name", extra.get("director1_name", ""))
         rows += _row("Director 1 — Nationality", extra.get("director1_nationality", ""))
@@ -1553,16 +1547,14 @@ async def kyc_view_page(onboarding_id: str, token: str, db: AsyncSession = Depen
         rows += _row("Director 1 — Passport / ID", extra.get("director1_passport_id", ""))
         rows += _row("Director 1 — Country of Residence", extra.get("director1_country_of_residence", ""))
         rows += _row("Director 1 — Shareholding %", extra.get("director1_shareholding_pct", ""))
-        if extra.get("director2_name"):
-            rows += _row("Director 2 — Name", extra.get("director2_name", ""))
-            rows += _row("Director 2 — Nationality", extra.get("director2_nationality", ""))
-            rows += _row("Director 2 — DOB", extra.get("director2_dob", ""))
-            rows += _row("Director 2 — Passport / ID", extra.get("director2_passport_id", ""))
-            rows += _row("Director 2 — Country of Residence", extra.get("director2_country_of_residence", ""))
-            rows += _row("Director 2 — Shareholding %", extra.get("director2_shareholding_pct", ""))
+        rows += _row("Director 2 — Name", extra.get("director2_name", ""))
+        rows += _row("Director 2 — Nationality", extra.get("director2_nationality", ""))
+        rows += _row("Director 2 — DOB", extra.get("director2_dob", ""))
+        rows += _row("Director 2 — Passport / ID", extra.get("director2_passport_id", ""))
+        rows += _row("Director 2 — Country of Residence", extra.get("director2_country_of_residence", ""))
+        rows += _row("Director 2 — Shareholding %", extra.get("director2_shareholding_pct", ""))
 
-    # ── Compliance ────────────────────────────────────────────────────────────
-    if any(extra.get(k) for k in ("sanctions_check", "criminal_investigation_check", "regulated_licensed")):
+        # ── Compliance (overseas form section H) ──────────────────────────────
         rows += _sec("H. Compliance")
         rows += _row("Sanctions Check", extra.get("sanctions_check", ""))
         rows += _row("Criminal Investigation", extra.get("criminal_investigation_check", ""))

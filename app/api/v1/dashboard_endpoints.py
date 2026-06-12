@@ -279,14 +279,15 @@ async def overview(db: AsyncSession = Depends(get_db), _: User = Depends(get_cur
 
     signed_nda = sum(1 for r in recs if r.nda_approved_at)
     signed_agr = sum(1 for r in recs if r.agreement_approved_at)
-    pending_approvals = sum(
-        1 for r in recs
-        if r.kyc_status in (KYCStatus.SUBMITTED, KYCStatus.UNDER_REVIEW)
-        or r.nda_status in (DocumentStatus.TEAM_REVIEW, DocumentStatus.DRAFT_GENERATED, DocumentStatus.DRAFT_REJECTED)
-        and r.kyc_status == KYCStatus.APPROVED
-        or r.agreement_status in (DocumentStatus.TEAM_REVIEW, DocumentStatus.DRAFT_GENERATED, DocumentStatus.DRAFT_REJECTED)
-        and r.nda_status == DocumentStatus.APPROVED
-    )
+    lead_by_id = {l.id: l for l in leads}
+    pending_approvals = 0
+    waiting_on_lead = 0
+    for r in recs:
+        _lead = lead_by_id.get(r.lead_id)
+        if _lead:
+            _a, _w = _approval_items(r, _lead)
+            pending_approvals += len(_a)
+            waiting_on_lead += len(_w)
 
     integrations = {
         "Google Sheets (lead source)": bool(settings.GOOGLE_SHEETS_SPREADSHEET_ID),
@@ -310,6 +311,7 @@ async def overview(db: AsyncSession = Depends(get_db), _: User = Depends(get_cur
             "nda_signed": signed_nda,
             "agreement_signed": signed_agr,
             "pending_approvals": pending_approvals,
+            "waiting_on_lead": waiting_on_lead,
         },
         "by_status": by_status,
         "daily": daily,
@@ -457,10 +459,8 @@ async def lead_detail(lead_id: str, db: AsyncSession = Depends(get_db),
                 "company_website": "Website",
             }
             for k, lbl in label_map.items():
-                v = extra.get(k)
-                if v:
-                    kyc_fields[lbl] = v
-            data["kyc_data"] = {k: str(v) for k, v in kyc_fields.items() if v}
+                kyc_fields[lbl] = extra.get(k) or ""
+            data["kyc_data"] = {k: (str(v) if v else "—") for k, v in kyc_fields.items()}
             data["kyc_files"] = {
                 "gst": bool(kyc.gst_certificate_zoho_id),
                 "incorporation": bool(kyc.incorporation_zoho_id),
@@ -709,33 +709,83 @@ async def day_block(body: _DayBlockBody, db: AsyncSession = Depends(get_db),
 # Approvals (admin + approver)
 # ---------------------------------------------------------------------------
 
+def _approval_items(r: OnboardingRecord, lead: LeadV2) -> tuple[list[dict], list[dict]]:
+    """Everything in flight for one onboarding record.
+
+    Returns (action_required, waiting_on_lead).
+    """
+    from app.services.onboarding_email import (
+        make_doc_edit_url,
+        make_doc_sign_url,
+        make_kyc_view_url,
+    )
+    oid = str(r.id)
+    base = {"onboarding_id": oid, "company": lead.business_name, "email": lead.email,
+            "company_type": r.company_type or ""}
+    action: list[dict] = []
+    waiting: list[dict] = []
+    k, n, a = r.kyc_status, r.nda_status, r.agreement_status
+
+    # KYC
+    if k in (KYCStatus.SUBMITTED, KYCStatus.UNDER_REVIEW):
+        action.append({**base, "kind": "kyc", "label": "KYC Submission",
+                       "since": _fmt(r.kyc_submitted_at), "view_url": make_kyc_view_url(oid),
+                       "display": r.kyc_status_display or ""})
+    elif k in (KYCStatus.PENDING, KYCStatus.FORM_SENT):
+        waiting.append({**base, "kind": "kyc_wait", "label": "KYC Form — lead filling",
+                        "since": _fmt(r.kyc_form_sent_at), "view_url": "",
+                        "display": r.kyc_status_display or "KYC form sent, awaiting submission"})
+    elif k == KYCStatus.REJECTED:
+        waiting.append({**base, "kind": "kyc_wait", "label": "KYC Rejected — lead must resubmit",
+                        "since": _fmt(r.kyc_last_followup_at), "view_url": make_kyc_view_url(oid),
+                        "display": r.kyc_status_display or ""})
+
+    # NDA
+    if k == KYCStatus.APPROVED and n in (DocumentStatus.PENDING, DocumentStatus.TEAM_REVIEW,
+                                         DocumentStatus.DRAFT_GENERATED, DocumentStatus.DRAFT_REJECTED):
+        action.append({**base, "kind": "nda_draft", "label": "NDA — Review & Send",
+                       "since": _fmt(r.kyc_approved_at), "view_url": make_doc_edit_url(oid, "nda"),
+                       "display": r.nda_status_display or ""})
+    if n in (DocumentStatus.SIGNED_RECEIVED, DocumentStatus.SIGN_UNDER_REVIEW):
+        action.append({**base, "kind": "nda_sign", "label": "Signed NDA — Review",
+                       "since": _fmt(r.nda_signed_received_at), "view_url": make_doc_edit_url(oid, "nda"),
+                       "display": r.nda_status_display or ""})
+    if n == DocumentStatus.SENT_TO_LEAD:
+        waiting.append({**base, "kind": "nda_wait", "label": "NDA — out for signature",
+                        "since": _fmt(r.nda_sent_at), "view_url": make_doc_sign_url(oid, "nda"),
+                        "display": r.nda_status_display or ""})
+
+    # Agreement
+    if n == DocumentStatus.APPROVED and a in (DocumentStatus.PENDING, DocumentStatus.TEAM_REVIEW,
+                                              DocumentStatus.DRAFT_GENERATED, DocumentStatus.DRAFT_REJECTED):
+        action.append({**base, "kind": "agreement_draft", "label": "Agreement — Review & Send",
+                       "since": _fmt(r.nda_approved_at), "view_url": make_doc_edit_url(oid, "agreement"),
+                       "display": r.agreement_status_display or ""})
+    if a in (DocumentStatus.SIGNED_RECEIVED, DocumentStatus.SIGN_UNDER_REVIEW):
+        action.append({**base, "kind": "agreement_sign", "label": "Signed Agreement — Review",
+                       "since": _fmt(r.agreement_signed_received_at),
+                       "view_url": make_doc_edit_url(oid, "agreement"),
+                       "display": r.agreement_status_display or ""})
+    if a == DocumentStatus.SENT_TO_LEAD:
+        waiting.append({**base, "kind": "agreement_wait", "label": "Agreement — out for signature",
+                        "since": _fmt(r.agreement_sent_at), "view_url": make_doc_sign_url(oid, "agreement"),
+                        "display": r.agreement_status_display or ""})
+    return action, waiting
+
+
 @router.get("/api/approvals")
 async def approvals_list(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
     recs = (await db.execute(select(OnboardingRecord))).scalars().all()
-    out = []
-    from app.services.onboarding_email import make_doc_edit_url, make_kyc_view_url
+    action_all: list[dict] = []
+    waiting_all: list[dict] = []
     for r in recs:
         lead = await db.get(LeadV2, r.lead_id)
         if not lead:
             continue
-        oid = str(r.id)
-        base = {"onboarding_id": oid, "company": lead.business_name, "email": lead.email,
-                "company_type": r.company_type or ""}
-        if r.kyc_status in (KYCStatus.SUBMITTED, KYCStatus.UNDER_REVIEW):
-            out.append({**base, "kind": "kyc", "label": "KYC Submission",
-                        "since": _fmt(r.kyc_submitted_at), "view_url": make_kyc_view_url(oid),
-                        "display": r.kyc_status_display or ""})
-        if r.kyc_status == KYCStatus.APPROVED and r.nda_status in (
-                DocumentStatus.TEAM_REVIEW, DocumentStatus.DRAFT_GENERATED, DocumentStatus.DRAFT_REJECTED):
-            out.append({**base, "kind": "nda_draft", "label": "NDA — Review & Send",
-                        "since": _fmt(r.kyc_approved_at), "view_url": make_doc_edit_url(oid, "nda"),
-                        "display": r.nda_status_display or ""})
-        if r.nda_status == DocumentStatus.APPROVED and r.agreement_status in (
-                DocumentStatus.TEAM_REVIEW, DocumentStatus.DRAFT_GENERATED, DocumentStatus.DRAFT_REJECTED):
-            out.append({**base, "kind": "agreement_draft", "label": "Agreement — Review & Send",
-                        "since": _fmt(r.nda_approved_at), "view_url": make_doc_edit_url(oid, "agreement"),
-                        "display": r.agreement_status_display or ""})
-    return out
+        action, waiting = _approval_items(r, lead)
+        action_all.extend(action)
+        waiting_all.extend(waiting)
+    return {"action": action_all, "waiting": waiting_all}
 
 
 class _ApprovalBody(BaseModel):

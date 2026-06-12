@@ -135,6 +135,8 @@ async def _ensure_doc_data(db: AsyncSession, rec: OnboardingRecord, lead: LeadV2
 
 
 def _render_pdf(rec: OnboardingRecord, doc_type: str, data: dict) -> bytes:
+    """Always render from the original PDF template — format and content are
+    never altered; only placeholder values are written in."""
     from app.services.pdf_documents import fill_document
     return fill_document(doc_type, _is_overseas(rec), data.get("replacements", []))
 
@@ -182,6 +184,7 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
 
     label = _DOC_LABELS[doc_type]
     status = rec.nda_status if doc_type == "nda" else rec.agreement_status
+    status = getattr(status, "value", status)
     signed = bool(data.get("signature"))
     base = "/api/v1/documents"
     data_json = json.dumps({
@@ -189,8 +192,8 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
         "signatory_name": data.get("signatory_name", ""),
         "signatory_email": data.get("signatory_email", ""),
     }, ensure_ascii=False).replace("</", "<\\/")
-    signed_badge = ('&nbsp;|&nbsp; <strong style="color:#16a34a;">✓ SIGNED</strong>' if signed else "")
-    signed_btn = (f'<a class="btn btn-blue" target="_blank" href="{base}/signed/{onboarding_id}/{doc_type}/{token}">⬇ View Signed PDF</a>'
+    signed_badge = ('<span class="chip" style="background:#dcfce7;color:#15803d;">✓ SIGNED</span>' if signed else "")
+    signed_btn = (f'<a class="btn b-blue" target="_blank" href="{base}/signed/{onboarding_id}/{doc_type}/{token}">⬇ Signed PDF</a>'
                   if signed else "")
 
     html = f"""<!DOCTYPE html>
@@ -198,66 +201,70 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{label} — {lead.business_name}</title>
 <style>
-  *{{box-sizing:border-box;}}
-  body{{font-family:Arial,sans-serif;background:#f4f6fb;margin:0;padding:24px;}}
-  .card{{background:#fff;max-width:860px;margin:0 auto;border-radius:12px;
-         box-shadow:0 2px 16px rgba(0,0,0,.1);padding:32px 36px;}}
-  h1{{color:#1a3a6b;font-size:20px;margin:0 0 4px;}}
-  .sub{{color:#666;font-size:13px;margin:0 0 20px;}}
-  .sec{{font-size:12px;font-weight:700;color:#fff;background:#1a3a6b;text-transform:uppercase;
-        letter-spacing:.05em;padding:8px 14px;border-radius:6px;margin:24px 0 12px;}}
-  table{{width:100%;border-collapse:collapse;}}
-  th{{text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;padding:4px 8px;}}
-  td{{padding:4px 8px;vertical-align:top;}}
-  input[type=text],input[type=email]{{width:100%;padding:9px 11px;border:1px solid #ccc;
-    border-radius:6px;font-size:13px;}}
-  .find input{{background:#f8fafc;font-family:monospace;color:#92400e;}}
-  .del{{background:none;border:none;color:#dc2626;font-size:17px;cursor:pointer;padding:6px;}}
-  .btn{{display:inline-block;padding:12px 26px;border-radius:7px;border:none;color:#fff;
-       font-size:14px;font-weight:700;cursor:pointer;margin:4px 8px 4px 0;text-decoration:none;}}
-  .btn-blue{{background:#1a56db;}} .btn-green{{background:#16a34a;}}
-  .btn-gray{{background:#6b7280;}}
-  .note{{background:#fffbeb;border-left:3px solid #f59e0b;padding:10px 14px;font-size:12px;
-        color:#92400e;border-radius:4px;margin:14px 0;}}
-  #msg{{display:none;padding:10px 16px;border-radius:6px;font-size:13px;margin:14px 0;font-weight:600;}}
-  .badge{{display:inline-block;padding:3px 12px;border-radius:99px;font-size:11px;font-weight:700;
-         background:#dbeafe;color:#1e40af;margin-left:8px;}}
-  .two-col{{display:grid;grid-template-columns:1fr 1fr;gap:14px;}}
-  label{{display:block;font-size:12px;font-weight:600;color:#374151;margin:0 0 4px;}}
-  @media(max-width:640px){{.card{{padding:20px 16px;}}.two-col{{grid-template-columns:1fr;}}}}
+  *{{box-sizing:border-box;margin:0;padding:0;}}
+  body{{font-family:'Segoe UI',Arial,sans-serif;background:#e8edf5;overflow:hidden;}}
+  .chip{{display:inline-block;padding:3px 11px;border-radius:99px;font-size:11px;font-weight:700;
+        background:#dbeafe;color:#1e40af;margin-left:6px;vertical-align:middle;}}
+  .btn{{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:8px;border:none;
+       color:#fff;font-size:12.5px;font-weight:700;cursor:pointer;text-decoration:none;font-family:inherit;}}
+  .b-blue{{background:#1a56db;}} .b-green{{background:#16a34a;}}
+  .b-line{{background:#fff;color:#1a3a6b;border:1.5px solid #c7d4ee;}}
+  .topbar{{position:fixed;top:0;left:0;right:0;height:56px;background:#0c2344;color:#fff;z-index:20;
+          display:flex;align-items:center;gap:12px;padding:0 18px;}}
+  .topbar .ttl{{font-weight:800;font-size:13.5px;letter-spacing:.03em;white-space:nowrap;}}
+  .topbar .sub{{font-size:11.5px;color:#b9c8e4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+               min-width:0;flex-shrink:1;}}
+  .topbar .grow{{flex:1;}}
+  #saved{{font-size:11.5px;color:#86efac;min-width:70px;text-align:right;}}
+  .split{{position:fixed;top:56px;left:0;right:0;bottom:0;display:flex;}}
+  .pv{{flex:1;background:#525659;}}
+  .pv iframe{{width:100%;height:100%;border:none;}}
+  .panel{{width:400px;max-width:46vw;background:#fff;border-left:1px solid #d9e1ef;overflow-y:auto;
+         padding:18px 20px 40px;}}
+  .sec{{font-size:11px;font-weight:800;color:#1a3a6b;text-transform:uppercase;letter-spacing:.07em;
+       border-bottom:2px solid #dbeafe;padding-bottom:6px;margin:18px 0 12px;}}
+  .fld{{margin-bottom:11px;}}
+  .fld label{{display:block;font-size:11.5px;font-weight:700;color:#374151;margin-bottom:4px;}}
+  .fld .ph{{font-family:monospace;font-size:10px;color:#92400e;background:#fff7ed;border-radius:4px;
+           padding:1px 6px;margin-left:6px;font-weight:600;}}
+  .fld input{{width:100%;padding:9px 11px;border:1.5px solid #cbd5e1;border-radius:7px;font-size:13px;}}
+  .fld input:focus{{outline:none;border-color:#1a56db;box-shadow:0 0 0 3px rgba(26,86,219,.12);}}
+  .custom{{display:grid;grid-template-columns:1fr 1fr 26px;gap:6px;margin-bottom:8px;align-items:center;}}
+  .custom input{{padding:8px 9px;border:1.5px solid #cbd5e1;border-radius:7px;font-size:12px;width:100%;}}
+  .custom input.cf{{font-family:monospace;background:#f8fafc;color:#92400e;}}
+  .del{{background:none;border:none;color:#dc2626;font-size:16px;cursor:pointer;}}
+  .note{{background:#eff6ff;border-left:3px solid #1a56db;padding:9px 12px;font-size:11.5px;color:#1e3a8a;
+        border-radius:5px;margin-bottom:14px;line-height:1.5;}}
+  .addbtn{{background:#fff;color:#1a3a6b;border:1.5px dashed #94a3b8;border-radius:7px;padding:8px;width:100%;
+          font-size:12px;font-weight:700;cursor:pointer;}}
+  @media(max-width:760px){{.split{{flex-direction:column;}}.panel{{width:100%;max-width:100%;height:55%;}}
+    .pv{{height:45%;}}}}
 </style></head>
 <body>
-<div class="card">
-  <div style="font-size:15px;font-weight:700;color:#1a3a6b;margin-bottom:14px;">✈ Jane Aerospace — Document Editor</div>
-  <h1>{label}<span class="badge">{status}</span></h1>
-  <p class="sub"><strong>{lead.business_name}</strong> &nbsp;|&nbsp; {lead.email}
-     &nbsp;|&nbsp; {'🌐 Overseas' if _is_overseas(rec) else '🇮🇳 Indian'} template
-     {signed_badge}</p>
+<div class="topbar">
+  <span class="ttl">✈ JANE AEROSPACE</span>
+  <span class="sub">{label} — {lead.business_name} ({'Overseas' if _is_overseas(rec) else 'Indian'} template)</span>
+  <span class="chip">{status}</span>{signed_badge}
+  <span class="grow"></span>
+  <span id="saved">Saved ✓</span>
+  <button class="btn b-line" onclick="resetDoc()" title="Rebuild values from KYC data">↺ Reset</button>
+  {signed_btn}
+  <button class="btn b-green" onclick="sendToLead()">📨 Send for Signature</button>
+</div>
 
-  <div class="note">Each row below replaces text in the official PDF template.
-    Values are pre-filled from the approved KYC data — edit anything that needs correction,
-    then <strong>Preview PDF</strong> to verify before sending.</div>
-
-  <div class="sec">Document Fields</div>
-  <table id="rows-table">
-    <thead><tr><th style="width:38%;">Find in document</th><th>Replace with</th><th style="width:30px;"></th></tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
-  <button class="btn btn-gray" style="padding:8px 16px;font-size:12px;" onclick="addRow('','')">+ Add Custom Field</button>
-
-  <div class="sec">Signatory (receives the signing link)</div>
-  <div class="two-col">
-    <div><label>Signatory Name</label><input type="text" id="sig-name"></div>
-    <div><label>Signatory Email</label><input type="email" id="sig-email"></div>
-  </div>
-
-  <div id="msg"></div>
-
-  <div style="margin-top:26px;border-top:1px solid #e5e7eb;padding-top:18px;">
-    <button class="btn btn-gray" onclick="save()">💾 Save</button>
-    <button class="btn btn-blue" onclick="preview()">👁 Preview PDF</button>
-    <button class="btn btn-green" onclick="sendToLead()">📨 Send for Signature</button>
-    {signed_btn}
+<div class="split">
+  <div class="pv"><iframe id="pv" src="{base}/pdf/{onboarding_id}/{doc_type}/{token}#toolbar=1"></iframe></div>
+  <div class="panel">
+    <div class="note">The official PDF template is shown exactly as-is — its format and content never change.
+      Only the placeholder values below are written into it. Edit a value and the preview updates.</div>
+    <div class="sec">Placeholder Values</div>
+    <div id="std-fields"></div>
+    <div class="sec">Custom Replacements</div>
+    <div id="custom-rows"></div>
+    <button class="addbtn" onclick="addCustom('','')">+ Add custom find &amp; replace</button>
+    <div class="sec">Signatory (receives the signing link)</div>
+    <div class="fld"><label>Full Name</label><input type="text" id="sig-name" oninput="dirty()"></div>
+    <div class="fld"><label>Email</label><input type="email" id="sig-email" oninput="dirty()"></div>
   </div>
 </div>
 
@@ -265,26 +272,50 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
 const BASE = '{base}';
 const OID = '{onboarding_id}', DT = '{doc_type}', TOK = '{token}';
 const initial = {data_json};
+let timer = null;
+
+// friendly labels for the standard template placeholders
+const STD = {{
+  '[●] 2024': 'Agreement Date',
+  '[Date]': 'Effective Date',
+  '[Company Name]': 'Company Name',
+  '[Company Registration Number]': 'Registration Number (CIN / Reg. No)',
+  '[Address]': 'Registered Address',
+  '[ABC]': 'Company Reference',
+  'ABC': 'Company Reference (short)',
+}};
 
 function esc(s) {{ const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }}
 
-function addRow(find, replace) {{
-  const tr = document.createElement('tr');
-  tr.innerHTML = `<td class="find"><input type="text" value="${{esc(find)}}"></td>` +
-                 `<td><input type="text" value="${{esc(replace)}}"></td>` +
-                 `<td><button class="del" onclick="this.closest('tr').remove()">✕</button></td>`;
-  document.getElementById('rows').appendChild(tr);
+function render() {{
+  const std = document.getElementById('std-fields');
+  const cus = document.getElementById('custom-rows');
+  std.innerHTML = ''; cus.innerHTML = '';
+  (initial.replacements || []).forEach((r, i) => {{
+    if (STD[r.find] !== undefined) {{
+      std.innerHTML += `<div class="fld"><label>${{esc(STD[r.find])}}<span class="ph">${{esc(r.find)}}</span></label>
+        <input type="text" data-find="${{esc(r.find)}}" value="${{esc(r.replace)}}" oninput="dirty()"></div>`;
+    }} else {{
+      addCustom(r.find, r.replace, true);
+    }}
+  }});
 }}
-
-(initial.replacements || []).forEach(r => addRow(r.find, r.replace));
-document.getElementById('sig-name').value = initial.signatory_name || '';
-document.getElementById('sig-email').value = initial.signatory_email || '';
+function addCustom(find, repl, init) {{
+  const div = document.createElement('div');
+  div.className = 'custom';
+  div.innerHTML = `<input class="cf" placeholder="find in document" value="${{esc(find)}}" oninput="dirty()">
+    <input placeholder="replace with" value="${{esc(repl)}}" oninput="dirty()">
+    <button class="del" onclick="this.parentElement.remove();dirty()">✕</button>`;
+  document.getElementById('custom-rows').appendChild(div);
+}}
 
 function collect() {{
   const rows = [];
-  document.querySelectorAll('#rows tr').forEach(tr => {{
-    const inputs = tr.querySelectorAll('input');
-    if (inputs[0].value.trim()) rows.push({{find: inputs[0].value, replace: inputs[1].value}});
+  document.querySelectorAll('#std-fields input').forEach(i =>
+    rows.push({{find: i.dataset.find, replace: i.value}}));
+  document.querySelectorAll('#custom-rows .custom').forEach(c => {{
+    const ins = c.querySelectorAll('input');
+    if (ins[0].value.trim()) rows.push({{find: ins[0].value, replace: ins[1].value}});
   }});
   return {{
     replacements: rows,
@@ -293,45 +324,62 @@ function collect() {{
   }};
 }}
 
-function showMsg(text, ok) {{
-  const m = document.getElementById('msg');
-  m.textContent = text;
-  m.style.display = 'block';
-  m.style.background = ok ? '#d1fae5' : '#fee2e2';
-  m.style.color = ok ? '#065f46' : '#991b1b';
+function dirty() {{
+  const el = document.getElementById('saved');
+  el.textContent = '● editing…'; el.style.color = '#fbbf24';
+  clearTimeout(timer);
+  timer = setTimeout(saveAndRefresh, 1200);
 }}
 
-async function save(silent) {{
+async function save() {{
+  const el = document.getElementById('saved');
+  el.textContent = 'Saving…'; el.style.color = '#fbbf24';
   const r = await fetch(`${{BASE}}/save/${{OID}}/${{DT}}/${{TOK}}`, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify(collect())
-  }});
-  if (!silent) showMsg(r.ok ? 'Saved.' : 'Save failed (' + r.status + ')', r.ok);
-  return r.ok;
+  }}).catch(() => null);
+  const ok = r && r.ok;
+  el.textContent = ok ? 'Saved ✓' : 'Save failed';
+  el.style.color = ok ? '#86efac' : '#fca5a5';
+  return ok;
 }}
 
-async function preview() {{
-  if (await save(true)) window.open(`${{BASE}}/pdf/${{OID}}/${{DT}}/${{TOK}}`, '_blank');
+async function saveAndRefresh() {{
+  if (await save())
+    document.getElementById('pv').src = `${{BASE}}/pdf/${{OID}}/${{DT}}/${{TOK}}?t=${{Date.now()}}#toolbar=1`;
+}}
+
+async function resetDoc() {{
+  if (!confirm('Reset all values back to the approved KYC data?')) return;
+  const r = await fetch(`${{BASE}}/reset/${{OID}}/${{DT}}/${{TOK}}`, {{method: 'POST'}});
+  if (r.ok) location.reload(); else alert('Reset failed');
 }}
 
 async function sendToLead() {{
-  if (!confirm('Send the document to the lead for e-signature?')) return;
+  clearTimeout(timer);
+  await save();
+  if (!confirm('Send this document to the lead for e-signature?')) return;
   const r = await fetch(`${{BASE}}/send/${{OID}}/${{DT}}/${{TOK}}`, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify(collect())
   }});
   const d = await r.json().catch(() => ({{}}));
-  showMsg(r.ok ? (d.message || 'Sent for signature.') : (d.detail || 'Send failed'), r.ok);
+  alert(r.ok ? (d.message || 'Sent for signature.') : (d.detail || 'Send failed'));
 }}
+
+render();
+document.getElementById('sig-name').value = initial.signatory_name || '';
+document.getElementById('sig-email').value = initial.signatory_email || '';
 </script>
 </body></html>"""
     return HTMLResponse(html)
 
 
 class _DocSaveBody(BaseModel):
-    replacements: list[dict]
+    replacements: list[dict] = []
     signatory_name: str = ""
     signatory_email: str = ""
+    html: str = ""
 
 
 @router.post("/save/{onboarding_id}/{doc_type}/{token}")
@@ -341,17 +389,36 @@ async def document_save(onboarding_id: str, doc_type: str, token: str,
     _check_token(onboarding_id, doc_type, token, "edit")
     rec, lead = await _load(db, onboarding_id)
     data = _get_doc_data(rec, doc_type)
-    data.update({
-        "replacements": [
+    if body.replacements:
+        data["replacements"] = [
             {"find": str(r.get("find", ""))[:200], "replace": str(r.get("replace", ""))[:500]}
             for r in body.replacements if str(r.get("find", "")).strip()
-        ],
-        "signatory_name": body.signatory_name[:200],
-        "signatory_email": body.signatory_email[:320],
-    })
+        ]
+    if body.signatory_name:
+        data["signatory_name"] = body.signatory_name[:200]
+    if body.signatory_email:
+        data["signatory_email"] = body.signatory_email[:320]
+    data.pop("html", None)   # PDF template is the only source — never store HTML
+    data.setdefault("replacements", [])
     _set_doc_data(rec, doc_type, data)
     await db.commit()
     return {"message": "Saved"}
+
+
+@router.post("/reset/{onboarding_id}/{doc_type}/{token}")
+async def document_reset(onboarding_id: str, doc_type: str, token: str,
+                         db: AsyncSession = Depends(get_db)):
+    """Rebuild the document from the original template + approved KYC data."""
+    _check_doc_type(doc_type)
+    _check_token(onboarding_id, doc_type, token, "edit")
+    rec, lead = await _load(db, onboarding_id)
+    old = _get_doc_data(rec, doc_type)
+    if old.get("signature"):
+        raise HTTPException(409, "Document already signed — cannot reset")
+    data = await _build_default_data(db, rec, lead, doc_type)
+    _set_doc_data(rec, doc_type, data)
+    await db.commit()
+    return {"message": "Document reset from template + KYC data"}
 
 
 @router.post("/send/{onboarding_id}/{doc_type}/{token}")
@@ -363,14 +430,15 @@ async def document_send(onboarding_id: str, doc_type: str, token: str,
 
     # save the latest edits first
     data = _get_doc_data(rec, doc_type)
-    data.update({
-        "replacements": [
+    if body.replacements:
+        data["replacements"] = [
             {"find": str(r.get("find", ""))[:200], "replace": str(r.get("replace", ""))[:500]}
             for r in body.replacements if str(r.get("find", "")).strip()
-        ],
-        "signatory_name": body.signatory_name[:200],
-        "signatory_email": body.signatory_email[:320] or lead.email,
-    })
+        ]
+    data.pop("html", None)
+    data["signatory_name"] = body.signatory_name[:200] or data.get("signatory_name", "")
+    data["signatory_email"] = body.signatory_email[:320] or data.get("signatory_email", "") or lead.email
+    data.setdefault("replacements", [])
     _set_doc_data(rec, doc_type, data)
 
     now = _now_ist()
@@ -483,7 +551,7 @@ async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: 
   .card{{background:#fff;border-radius:12px;box-shadow:0 2px 16px rgba(0,0,0,.1);padding:28px 32px;margin-bottom:18px;}}
   h1{{color:#1a3a6b;font-size:20px;margin:0 0 4px;}}
   .sub{{color:#666;font-size:13px;margin:0 0 14px;}}
-  iframe{{width:100%;height:560px;border:1px solid #d1d5db;border-radius:8px;background:#fff;}}
+  iframe{{width:100%;height:600px;border:1px solid #d1d5db;border-radius:8px;background:#fff;}}
   label{{display:block;font-size:13px;font-weight:600;color:#222;margin:14px 0 4px;}}
   input[type=text]{{width:100%;padding:11px 13px;border:1px solid #ccc;border-radius:6px;font-size:14px;}}
   .chk{{display:flex;gap:10px;align-items:flex-start;margin:18px 0;font-size:13px;color:#374151;line-height:1.5;}}
@@ -503,9 +571,9 @@ async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: 
     <div style="font-size:15px;font-weight:700;color:#1a3a6b;margin-bottom:12px;">✈ Jane Aerospace</div>
     <h1>{label}</h1>
     <p class="sub">Between <strong>Jane Aerospace Private Limited</strong> and
-      <strong>{lead.business_name}</strong> — please review the full document below, then sign.</p>
+      <strong>{lead.business_name}</strong> — please review the full document below, then sign at the bottom.</p>
     <iframe src="{pdf_url}#toolbar=1"></iframe>
-    <p class="dl"><a href="{pdf_url}" target="_blank" style="color:#1155cc;">Open / download the PDF in a new tab ↗</a></p>
+    <p class="dl"><a href="{pdf_url}" target="_blank" style="color:#1155cc;">Open / download the PDF ↗</a></p>
   </div>
 
   <div class="card">

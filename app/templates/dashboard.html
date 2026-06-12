@@ -171,6 +171,19 @@ tbody tr:hover{background:var(--b50);}
 .seg button.on{background:#fff;color:var(--b700);box-shadow:0 1px 4px rgba(12,35,68,.15);}
 .toast{position:fixed;bottom:24px;right:24px;background:var(--b900);color:#fff;padding:13px 20px;border-radius:11px;
   font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.35);z-index:90;display:none;max-width:380px;}
+/* kebab action menu */
+.menu-wrap{position:relative;display:inline-block;}
+.kebab{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;
+  border:1.5px solid var(--line);background:#fff;color:#475569;cursor:pointer;font-weight:800;font-size:15px;
+  letter-spacing:1px;line-height:1;}
+.kebab:hover{border-color:var(--b600);color:var(--b600);background:var(--b50);}
+.menu{position:fixed;background:#fff;border:1px solid var(--line);border-radius:11px;
+  box-shadow:0 12px 36px rgba(12,35,68,.22);min-width:200px;z-index:80;padding:6px;display:none;}
+.menu a{display:flex;gap:10px;align-items:center;padding:9px 12px;border-radius:8px;font-size:12.5px;
+  color:#1e293b;cursor:pointer;text-decoration:none;}
+.menu a:hover{background:var(--b50);}
+.menu a.ok{color:var(--ok);} .menu a.warn{color:var(--warn);} .menu a.danger{color:var(--bad);}
+.menu .div{height:1px;background:#eef2f7;margin:5px 4px;}
 /* google-sheet style grid */
 .gs-wrap{overflow:auto;border:1px solid #dadce0;border-radius:10px;background:#fff;max-height:calc(100vh - 220px);}
 .gs{border-collapse:collapse;font-size:12.5px;min-width:100%;}
@@ -364,6 +377,7 @@ async function loadOverview(){
     ['Replied',t.replied,'inbox','#dcfce7','#15803d'],['Booked',t.booked,'cal','#fef3c7','#b45309'],
     ['Onboarding',t.onboarding,'zap','#ede9fe','#6d28d9'],['NDA Signed',t.nda_signed,'doc','#dcfce7','#15803d'],
     ['Agreements',t.agreement_signed,'check2','#dcfce7','#15803d'],['Approvals Due',t.pending_approvals,'clock','#fee2e2','#b91c1c'],
+    ['Waiting on Lead',t.waiting_on_lead||0,'send','#fef3c7','#b45309'],
   ];
   document.getElementById('view-overview').innerHTML=`
     <div class="cards">${cardDefs.map(c=>`<div class="card">
@@ -434,14 +448,35 @@ function renderLeadsView(){
       '<tr><td colspan="7" style="text-align:center;color:var(--mut);padding:28px;">No leads found</td></tr>'}</tbody></table></div>`;
 }
 function leadActionBtns(l){
-  if(!canAct())return '<span style="font-size:11px;color:var(--mut);">view only</span>';
-  let h='';
-  if(!l.onboarding)h+=`<button class="ibtn" title="Start onboarding (send KYC)" onclick="leadAction('${l.lead_id}','start_onboarding')" style="color:var(--ok);border-color:#bbf7d0;">${ic('play')}</button>`;
-  else h+=`<button class="ibtn" title="Cancel onboarding" onclick="leadAction('${l.lead_id}','cancel_onboarding')" style="color:var(--warn);border-color:#fde68a;">${ic('x')}</button>`;
-  if(!l.dropped)h+=`<button class="ibtn" title="Drop lead (stop all emails)" onclick="leadAction('${l.lead_id}','drop')" style="color:var(--bad);border-color:#fecaca;">${ic('drop')}</button>`;
-  else h+=`<button class="ibtn" title="Restore lead" onclick="leadAction('${l.lead_id}','restore')">${ic('play')}</button>`;
-  return h;
+  return `<button class="kebab" onclick="openLeadMenu(event,'${l.lead_id}')" title="Actions">⋮</button>`;
 }
+function openLeadMenu(ev,id){
+  ev.stopPropagation();
+  closeMenus();
+  const l=LEADS.find(x=>x.lead_id===id);if(!l)return;
+  let items=`<a onclick="closeMenus();openDrawer('${id}')">${ic('eye')} View Full Details</a>`;
+  if(canAct()){
+    items+=`<div class="div"></div>`;
+    if(!l.onboarding)items+=`<a class="ok" onclick="closeMenus();leadAction('${id}','start_onboarding')">${ic('play')} Start Onboarding</a>`;
+    else{
+      items+=`<a class="warn" onclick="closeMenus();leadAction('${id}','cancel_onboarding')">${ic('x')} Cancel Onboarding</a>`;
+      items+=`<a href="${l.onboarding.nda_edit_url}" target="_blank" onclick="closeMenus()">${ic('edit')} Open NDA Editor</a>`;
+      items+=`<a href="${l.onboarding.agreement_edit_url}" target="_blank" onclick="closeMenus()">${ic('edit')} Open Agreement Editor</a>`;
+    }
+    items+=`<div class="div"></div>`;
+    if(!l.dropped)items+=`<a class="danger" onclick="closeMenus();leadAction('${id}','drop')">${ic('drop')} Drop Lead</a>`;
+    else items+=`<a onclick="closeMenus();leadAction('${id}','restore')">${ic('play')} Restore Lead</a>`;
+  }
+  const m=document.createElement('div');
+  m.className='menu';m.id='lead-menu';m.innerHTML=items;m.style.display='block';
+  document.body.appendChild(m);
+  const r=ev.currentTarget.getBoundingClientRect();
+  const mw=210, mh=m.offsetHeight||220;
+  m.style.left=Math.max(8,Math.min(r.left-mw+r.width,window.innerWidth-mw-8))+'px';
+  m.style.top=(r.bottom+mh>window.innerHeight-8 ? r.top-mh-4 : r.bottom+4)+'px';
+}
+function closeMenus(){document.querySelectorAll('.menu').forEach(m=>m.remove());}
+document.addEventListener('click',closeMenus);
 async function leadAction(id,action){
   const labels={start_onboarding:'Start onboarding (sends KYC form)?',cancel_onboarding:'Cancel onboarding for this lead?',
     drop:'Drop this lead? No further emails will be sent.',restore:'Restore this lead?'};
@@ -523,14 +558,9 @@ function renderKanban(){
       '<p style="font-size:11px;color:#94a3b8;text-align:center;padding:10px;">No leads</p>'}</div></div>`;}).join('')}</div>`;
 }
 function kcardActions(l){
-  let h=`<div class="kact" onclick="event.stopPropagation()">`;
-  h+=`<button title="View details" onclick="openDrawer('${l.lead_id}')">${ic('eye','width:13px;height:13px;')}</button>`;
-  if(canAct()){
-    if(!l.onboarding)h+=`<button title="Start onboarding (send KYC)" style="color:var(--ok);" onclick="leadAction('${l.lead_id}','start_onboarding')">${ic('play','width:13px;height:13px;')}</button>`;
-    else h+=`<button title="Cancel onboarding" style="color:var(--warn);" onclick="leadAction('${l.lead_id}','cancel_onboarding')">${ic('x','width:13px;height:13px;')}</button>`;
-    h+=`<button title="Drop lead" style="color:var(--bad);" onclick="leadAction('${l.lead_id}','drop')">${ic('drop','width:13px;height:13px;')}</button>`;
-  }
-  return h+'</div>';
+  return `<div class="kact" onclick="event.stopPropagation()">
+    <button class="kebab" style="width:26px;height:26px;font-size:13px;" title="Actions"
+      onclick="openLeadMenu(event,'${l.lead_id}')">⋮</button></div>`;
 }
 
 /* ============================ sheet (google-sheet style) ============================ */
@@ -665,21 +695,40 @@ function docCell(o,k){
 }
 
 /* ============================ approvals ============================ */
+const APPROVABLE={kyc:1,nda_draft:1,agreement_draft:1};
+function aprChip(k){
+  const m={kyc:'c-amber',nda_draft:'c-purple',agreement_draft:'c-blue',nda_sign:'c-purple',
+    agreement_sign:'c-blue',kyc_wait:'c-gray',nda_wait:'c-gray',agreement_wait:'c-gray'};
+  return m[k]||'c-gray';
+}
 async function loadApprovals(){
-  let list=[];try{list=await api('/approvals');}catch(e){}
-  document.getElementById('view-approvals').innerHTML=`<div class="panel" style="overflow-x:auto;">
-    <h3>${ic('check2')} Pending Approvals — ${list.length}</h3>
-    <table><thead><tr><th>Type</th><th>Company</th><th>Waiting Since</th><th>Review</th><th>Decision</th></tr></thead><tbody>${
-    list.map(a=>`<tr>
-      <td><span class="chip ${a.kind==='kyc'?'c-amber':a.kind==='nda_draft'?'c-purple':'c-blue'}">${esc(a.label)}</span></td>
-      <td><b>${esc(a.company)}</b><br><span style="font-size:11.5px;color:var(--mut);">${esc(a.email)}</span></td>
-      <td style="font-size:12px;">${esc(a.since)||'—'}</td>
-      <td><a class="btn btn-o" style="padding:5px 12px;font-size:11px;" target="_blank" href="${a.view_url}">${ic('eye')} Open</a></td>
-      <td>${canAct()?`
-        <button class="btn btn-g" style="padding:5px 12px;font-size:11px;" onclick="approve('${a.onboarding_id}','${a.kind}','approve')">${ic('check2')} Approve${a.kind!=='kyc'?' & Send':''}</button>
-        <button class="btn btn-r" style="padding:5px 12px;font-size:11px;" onclick="approveReject('${a.onboarding_id}','${a.kind}')">${ic('x')} Reject</button>`
-        :'<span style="font-size:11px;color:var(--mut);">approver only</span>'}</td></tr>`).join('')||
-    '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:28px;">Nothing pending — all caught up ✓</td></tr>'}</tbody></table></div>`;
+  let d={action:[],waiting:[]};
+  try{const r=await api('/approvals');d=Array.isArray(r)?{action:r,waiting:[]}:r;}catch(e){}
+  const row=(a,withDecision)=>`<tr>
+    <td><span class="chip ${aprChip(a.kind)}">${esc(a.label)}</span></td>
+    <td><b>${esc(a.company)}</b><br><span style="font-size:11.5px;color:var(--mut);">${esc(a.email)}</span></td>
+    <td style="font-size:12px;">${esc(a.since)||'—'}</td>
+    <td>${a.view_url?`<a class="btn btn-o" style="padding:5px 12px;font-size:11px;" target="_blank" href="${a.view_url}">${ic('eye')} Open</a>`:'—'}
+      ${(!withDecision&&a.view_url&&a.kind.endsWith('_wait')&&a.kind!=='kyc_wait')?`<button class="btn btn-o" style="padding:5px 12px;font-size:11px;" onclick="navigator.clipboard.writeText('${a.view_url}');toast('Signing link copied')">${ic('copy')} Link</button>`:''}</td>
+    <td>${withDecision?(canAct()&&APPROVABLE[a.kind]?`
+      <button class="btn btn-g" style="padding:5px 12px;font-size:11px;" onclick="approve('${a.onboarding_id}','${a.kind}','approve')">${ic('check2')} Approve${a.kind!=='kyc'?' & Send':''}</button>
+      <button class="btn btn-r" style="padding:5px 12px;font-size:11px;" onclick="approveReject('${a.onboarding_id}','${a.kind}')">${ic('x')} Reject</button>`
+      :'<span style="font-size:11px;color:var(--mut);">'+(canAct()?'review via Open':'approver only')+'</span>')
+      :`<span class="chip c-gray">WAITING</span>
+        <div style="font-size:10.5px;color:var(--mut);margin-top:3px;max-width:220px;">${esc(a.display)}</div>`}</td></tr>`;
+  document.getElementById('view-approvals').innerHTML=`
+  <div class="panel" style="overflow-x:auto;">
+    <h3>${ic('check2')} Needs Your Approval — ${d.action.length}</h3>
+    <table><thead><tr><th>Type</th><th>Company</th><th>Since</th><th>Review</th><th>Decision</th></tr></thead><tbody>${
+      d.action.map(a=>row(a,true)).join('')||
+      '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:24px;">Nothing pending — all caught up ✓</td></tr>'}</tbody></table>
+  </div>
+  <div class="panel" style="overflow-x:auto;">
+    <h3>${ic('send')} Waiting on Lead — ${d.waiting.length}</h3>
+    <table><thead><tr><th>Type</th><th>Company</th><th>Since</th><th>Links</th><th>Status</th></tr></thead><tbody>${
+      d.waiting.map(a=>row(a,false)).join('')||
+      '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:24px;">Nothing in flight</td></tr>'}</tbody></table>
+  </div>`;
 }
 async function approve(id,kind,action,notes=''){
   if(action==='approve'&&!confirm(kind==='kyc'?'Approve this KYC? NDA will be generated.':'Approve and send to the lead for e-signature?'))return;

@@ -13,6 +13,9 @@ shrinking the font until it fits.
 from __future__ import annotations
 
 import datetime as dt
+import html as _htmllib
+import io
+import re
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -53,16 +56,14 @@ def default_replacements(doc_type: str, kyc_fields: dict) -> list[dict]:
     address = (kyc_fields.get("address") or "").strip()
     eff_date = (kyc_fields.get("effective_date") or "").strip() or dt.datetime.now(_IST).strftime("%d %B %Y")
 
-    # Templates define the short reference name as [ABC] and then use bare ABC
-    # throughout — a short name fits those narrow text boxes far better.
-    short_name = company.split(" ")[0].strip("(),.") if company else ""
+    # [ABC] / bare ABC are the counterparty reference — always the company name
     rows = [
         {"find": "[Date]", "replace": eff_date},
         {"find": "[Company Name]", "replace": company},
         {"find": "[Company Registration Number]", "replace": reg_no},
         {"find": "[Address]", "replace": address},
-        {"find": "[ABC]", "replace": short_name},
-        {"find": "ABC", "replace": short_name},
+        {"find": "[ABC]", "replace": company},
+        {"find": "ABC", "replace": company},
     ]
     if doc_type == "agreement":
         # Supply agreement dates its preamble as "[●] 2024"
@@ -95,55 +96,70 @@ def kyc_fields_from_submission(
     }
 
 
-def _span_style(page: "fitz.Page", rect: "fitz.Rect") -> tuple[float, bool]:
-    """Font size and boldness of the text occupying `rect` (defaults 11pt regular)."""
-    try:
-        d = page.get_text("dict", clip=fitz.Rect(rect.x0 - 1, rect.y0 - 1, rect.x1 + 1, rect.y1 + 1))
-        for block in d.get("blocks", []):
-            for line in block.get("lines", []):
-                for span in line.get("spans", []):
-                    if span.get("text", "").strip():
-                        bold = "bold" in span.get("font", "").lower() or bool(span.get("flags", 0) & 16)
-                        return float(span.get("size", 11.0)), bold
-    except Exception:
-        pass
-    return 11.0, False
+def _find_present(plain: str, find: str) -> bool:
+    if re.fullmatch(r"\w+", find):
+        return re.search(rf"\b{re.escape(find)}\b", plain) is not None
+    return find in plain
 
 
-def _replace_in_page(page: "fitz.Page", find: str, replace: str) -> int:
-    """Erase every occurrence of `find` and write `replace` in its place,
-    matching the original font size/weight and covering any highlight fill."""
-    rects = page.search_for(find)
-    if not rects:
-        return 0
-    styles = [_span_style(page, r) for r in rects]
-    for r in rects:
-        page.add_redact_annot(r)
-    page.apply_redactions(images=getattr(fitz, "PDF_REDACT_IMAGE_NONE", 0))
-    for r, (size, bold) in zip(rects, styles):
-        # the templates draw a yellow highlight rect behind each placeholder —
-        # paint white over it (it extends slightly above/below the text box)
-        page.draw_rect(fitz.Rect(r.x0 - 0.5, r.y0 - 3.5, r.x1 + 0.5, r.y1 + 1.5),
-                       color=None, fill=(1, 1, 1))
-        if not replace:
-            continue
-        font = "hebo" if bold else "helv"
-        box = fitz.Rect(r.x0, r.y0 - 2, r.x1 + 6, r.y1 + 3)
-        inserted = False
-        for fs in (size, size - 1, size - 2, size - 3):
-            if fs < 6:
-                break
-            rc = page.insert_textbox(box, replace, fontname=font, fontsize=fs,
-                                     color=(0, 0, 0), align=0)
-            if rc >= 0:
-                inserted = True
-                break
-        if not inserted:
-            # value longer than the placeholder box — draw it unclipped at a
-            # reduced size rather than dropping it
-            page.insert_text((r.x0, r.y1 - 2), replace, fontname=font,
-                             fontsize=max(size - 3, 7), color=(0, 0, 0))
-    return len(rects)
+def _block_to_html(block: dict) -> tuple[str, float, float, str]:
+    """Convert one PDF text block to inline HTML, keeping bold/italic runs.
+
+    Returns (html, dominant_font_size, hanging_indent_pt, alignment).
+    """
+    import statistics
+    sizes: list[float] = []
+    parts: list[str] = []
+    lines = block.get("lines", [])
+    for line in lines:
+        for span in line.get("spans", []):
+            t = _htmllib.escape(span.get("text", ""))
+            flags = span.get("flags", 0)
+            fname = span.get("font", "").lower()
+            if flags & 16 or "bold" in fname:
+                t = f"<b>{t}</b>"
+            if flags & 2 or "italic" in fname:
+                t = f"<i>{t}</i>"
+            parts.append(t)
+            if span.get("text", "").strip():
+                sizes.append(float(span.get("size", 11.0)))
+        parts.append(" ")
+    html = "".join(parts).strip()
+    size = round(statistics.median(sizes), 2) if sizes else 11.0
+    indent = 0.0
+    if len(lines) > 1:
+        x0_first = lines[0]["bbox"][0]
+        x0_rest = min(ln["bbox"][0] for ln in lines[1:])
+        indent = max(0.0, round(x0_rest - x0_first, 1))
+    align = "justify" if len(lines) > 1 else "left"
+    return html, size, indent, align
+
+
+def _render_block(html: str, w: float, h: float, size: float,
+                  indent: float, align: str) -> "fitz.Document":
+    """Render rich block HTML into a w×h mini-PDF, shrinking the font
+    fraction by fraction until the text fits the original block rectangle."""
+    fs = size
+    buf = io.BytesIO()
+    while True:
+        css = (f"body{{margin:0;font-family:helvetica;font-size:{fs:.2f}pt;"
+               f"line-height:1.24;color:#111111;}}"
+               f"p{{margin:0;text-align:{align};"
+               f"padding-left:{indent:.1f}pt;text-indent:{-indent:.1f}pt;}}")
+        story = fitz.Story(html=f"<p>{html}</p>", user_css=css)
+        buf = io.BytesIO()
+        writer = fitz.DocumentWriter(buf)
+        rect = fitz.Rect(0, 0, w, h)
+        dev = writer.begin_page(rect)
+        more, _ = story.place(rect)
+        story.draw(dev)
+        writer.end_page()
+        writer.close()
+        if not more or fs <= 5.0:
+            break
+        fs -= 0.25
+    buf.seek(0)
+    return fitz.open(stream=buf.getvalue(), filetype="pdf")
 
 
 def _cover_highlights(page: "fitz.Page") -> int:
@@ -168,25 +184,138 @@ def _cover_highlights(page: "fitz.Page") -> int:
 
 
 def fill_document(doc_type: str, is_overseas: bool, replacements: list[dict]) -> bytes:
-    """Open the template PDF and apply all find→replace rows. Returns PDF bytes."""
+    """Fill placeholders in the original PDF template. Returns PDF bytes.
+
+    Any paragraph block that contains a placeholder is re-rendered inside its
+    own original rectangle with the value substituted — the text reflows
+    naturally (no overlaps), keeping size, bold runs, hanging indents and
+    justification. Every other block of the PDF is left byte-identical.
+    """
     path = template_path(doc_type, is_overseas)
     doc = fitz.open(path)
     total = 0
     # Longest finds first so "[Company Name]" wins over "ABC" etc.
     ordered = sorted(
-        [r for r in replacements if (r.get("find") or "").strip()],
+        [r for r in replacements if (r.get("find") or "").strip()
+         and (r.get("replace") or "").strip()],
         key=lambda r: -len(r["find"]),
     )
     for page in doc:
-        # white-out all highlight rects first, then erase placeholders and
-        # write the replacement values on top
         _cover_highlights(page)
-        for row in ordered:
-            total += _replace_in_page(page, row["find"], (row.get("replace") or "").strip())
+        blocks = [b for b in page.get_text("dict")["blocks"] if b.get("type") == 0]
+        prepared = []
+        for b in blocks:
+            plain = "".join(s.get("text", "") for ln in b.get("lines", [])
+                            for s in ln.get("spans", []))
+            if not any(_find_present(plain, r["find"]) for r in ordered):
+                continue
+            html, size, indent, align = _block_to_html(b)
+            new_html = apply_replacements_html(html, ordered)
+            rect = fitz.Rect(b["bbox"])
+            prepared.append((rect, new_html, size, indent, align))
+            page.add_redact_annot(rect)
+            total += 1
+        if not prepared:
+            continue
+        page.apply_redactions(images=getattr(fitz, "PDF_REDACT_IMAGE_NONE", 0))
+        _cover_highlights(page)
+        for rect, block_html, size, indent, align in prepared:
+            mini = _render_block(block_html, rect.width, rect.height, size, indent, align)
+            page.show_pdf_page(rect, mini, 0)
+            mini.close()
     out = doc.tobytes(deflate=True, garbage=3)
     doc.close()
-    logger.info("pdf_filled", doc_type=doc_type, overseas=is_overseas, replaced=total)
+    logger.info("pdf_filled", doc_type=doc_type, overseas=is_overseas, blocks_reflowed=total)
     return out
+
+
+# ---------------------------------------------------------------------------
+# HTML document flow — template PDF → editable HTML → final PDF
+# ---------------------------------------------------------------------------
+
+_HTML_CACHE: dict[tuple[str, bool], str] = {}
+
+_DOC_CSS = """
+body { font-family: helvetica, sans-serif; font-size: 10pt; line-height: 1.5; color: #111; }
+p { margin: 5pt 0; text-align: justify; }
+h1, h2, h3, h4 { color: #000; margin: 9pt 0 4pt; }
+b { font-weight: bold; }
+"""
+
+
+def template_html(doc_type: str, is_overseas: bool) -> str:
+    """Extract the template PDF as flowing, editable HTML (cached)."""
+    key = (doc_type, is_overseas)
+    if key in _HTML_CACHE:
+        return _HTML_CACHE[key]
+    doc = fitz.open(template_path(doc_type, is_overseas))
+    parts = []
+    for page in doc:
+        x = page.get_text("xhtml").strip()
+        x = re.sub(r"<img[^>]*>", "", x)                       # drop embedded images
+        x = re.sub(r"^<div[^>]*>", "", x)
+        x = re.sub(r"</div>$", "", x)
+        parts.append(x.strip())
+    doc.close()
+    html = "\n".join(parts)
+
+    # Drop paragraphs that are empty, bare page numbers, or per-page running
+    # headers ("Private and confidential") picked up from each PDF page.
+    def _drop_noise(m: "re.Match[str]") -> str:
+        txt = re.sub(r"<[^>]+>", "", m.group()).replace("&#xa0;", " ").strip()
+        if not txt or re.fullmatch(r"\d{1,3}", txt) or txt.lower() == "private and confidential":
+            return ""
+        return m.group()
+
+    html = re.sub(r"<p>.*?</p>", _drop_noise, html, flags=re.S)
+    _HTML_CACHE[key] = html
+    logger.info("template_html_built", doc_type=doc_type, overseas=is_overseas, size=len(html))
+    return html
+
+
+def apply_replacements_html(html: str, replacements: list[dict]) -> str:
+    """Fill placeholders in the document HTML. Word-boundary safe for bare words.
+
+    PDF extraction can split a placeholder across formatting tags (e.g.
+    "[<i>Address</i>]"), so after the plain replace a tag-tolerant regex pass
+    catches those occurrences too.
+    """
+    ordered = sorted(
+        [r for r in replacements if (r.get("find") or "").strip()],
+        key=lambda r: -len(r["find"]),
+    )
+    for row in ordered:
+        find = row["find"]
+        repl = _htmllib.escape((row.get("replace") or "").strip())
+        if not repl:
+            continue
+        if re.fullmatch(r"\w+", find):
+            html = re.sub(rf"\b{re.escape(find)}\b", repl, html)
+            continue
+        html = html.replace(find, repl)
+        # tag-tolerant pass: allow markup/whitespace between the characters
+        pattern = r"(?:\s|<[^>]+>)*".join(re.escape(c) for c in find.replace(" ", ""))
+        html = re.sub(pattern, lambda _m: repl, html)
+    return html
+
+
+def html_to_pdf(body_html: str, title: str = "") -> bytes:
+    """Lay the document HTML out as an A4 PDF (PyMuPDF Story)."""
+    head = f"<h1 style='text-align:center;font-size:13pt;'>{_htmllib.escape(title)}</h1>" if title else ""
+    story = fitz.Story(html=f"<body>{head}{body_html}</body>", user_css=_DOC_CSS)
+    buf = io.BytesIO()
+    writer = fitz.DocumentWriter(buf)
+    mediabox = fitz.paper_rect("a4")
+    where = mediabox + (46, 50, -46, -56)
+    more = 1
+    while more:
+        dev = writer.begin_page(mediabox)
+        more, _ = story.place(where)
+        story.draw(dev)
+        writer.end_page()
+    writer.close()
+    buf.seek(0)
+    return buf.getvalue()
 
 
 def append_signature_page(pdf_bytes: bytes, doc_type: str, sig: dict) -> bytes:
