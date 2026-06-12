@@ -919,132 +919,189 @@ def html_to_pdf(body_html: str, title: str = "") -> bytes:
 
 def append_signature_page(pdf_bytes: bytes, doc_type: str, sig: dict | None = None,
                           internal_sig: dict | None = None) -> bytes:
-    """Append an e-signature certificate page.
+    """Append an Adobe-Sign-style e-signature certificate page.
 
-    Renders a 2-column table layout:
-      | For and on behalf of the Company  | For and on behalf of [Customer]  |
-      | <signature image or styled name>  | <signature image or styled name> |
-      | Name: ...                         | Name: ...                        |
-      | Title: ...                        | Title: ...                       |
-    Plus a small audit trail block below.
+    Layout (stacked vertically):
+      - Dark header bar with title
+      - Document info strip
+      - Per-signer block: shaded header + large signature box + info grid
+      - Legal footer
     """
+    import datetime as _dt
+
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     page = doc.new_page()
-    w = page.rect.width
-    ML, MR = 72.0, w - 72.0
-    MID = (ML + MR) / 2
-    BLACK = (0.0, 0.0, 0.0)
-    BLUE  = (0.1, 0.23, 0.42)
-    GREY  = (0.4, 0.4, 0.4)
+    w, h = page.rect.width, page.rect.height
+    ML, MR = 54.0, w - 54.0
+    CW = MR - ML
 
-    def _txt(x, y, text, size=10, bold=False, color=BLACK):
-        page.insert_text((x, y), text[:80], fontsize=size,
+    # ── colour palette ────────────────────────────────────────────────────────
+    C_HEADER_BG   = (0.07, 0.18, 0.36)   # dark navy
+    C_HEADER_TXT  = (1.0,  1.0,  1.0)    # white
+    C_BAND_BG     = (0.94, 0.96, 1.0)    # very light blue
+    C_BAND_TXT    = (0.07, 0.18, 0.36)   # navy text
+    C_GREEN       = (0.05, 0.6,  0.25)   # signed badge green
+    C_GREEN_BG    = (0.88, 1.0,  0.91)
+    C_ORANGE_BG   = (1.0,  0.96, 0.88)
+    C_ORANGE      = (0.7,  0.35, 0.0)
+    C_BORDER      = (0.78, 0.83, 0.92)
+    C_LABEL       = (0.38, 0.42, 0.5)
+    C_VALUE       = (0.07, 0.10, 0.18)
+    C_SIG_BOX_BG  = (0.97, 0.98, 1.0)
+    WHITE         = (1.0,  1.0,  1.0)
+
+    def _rect_fill(r, fill, border=None, bw=0.5):
+        page.draw_rect(r, color=border, fill=fill, width=bw)
+
+    def _txt(x, y, text, size=9, bold=False, color=C_VALUE):
+        page.insert_text((x, y), str(text)[:120], fontsize=size,
                          fontname="hebo" if bold else "helv", color=color)
 
-    def _box(rect, text, size=10, bold=False, color=BLACK, align=0):
-        page.insert_textbox(rect, text, fontsize=size,
+    def _box(r, text, size=9, bold=False, color=C_VALUE, align=0):
+        page.insert_textbox(r, str(text), fontsize=size,
                             fontname="hebo" if bold else "helv",
                             color=color, align=align)
 
-    # ── title bar ────────────────────────────────────────────────────────────
-    _box(fitz.Rect(ML, 54, MR, 80),
-         f"Electronic Signature Certificate - {DOC_LABELS.get(doc_type, doc_type.upper())}",
-         size=13, bold=True, color=BLUE)
-    page.draw_line((ML, 82), (MR, 82), color=BLUE, width=1.2)
+    # ── header bar ────────────────────────────────────────────────────────────
+    HDR_H = 44
+    _rect_fill(fitz.Rect(0, 0, w, HDR_H), fill=C_HEADER_BG, border=C_HEADER_BG, bw=0.5)
+    _box(fitz.Rect(ML, 8, MR - 120, 28),
+         "JANE AEROSPACE PRIVATE LIMITED", size=9, bold=True, color=C_HEADER_TXT)
+    _box(fitz.Rect(ML, 22, MR, 38),
+         "Electronic Signature Certificate", size=11, bold=True, color=WHITE)
 
-    # ── "IN WITNESS WHEREOF" preamble ────────────────────────────────────────
-    _box(fitz.Rect(ML, 90, MR, 134),
-         "IN WITNESS WHEREOF the Parties have caused this Agreement to be executed "
-         "by their duly authorized representatives on the date stated above.",
-         size=10, color=BLACK)
+    # document label top-right
+    doc_label = DOC_LABELS.get(doc_type, doc_type.upper())
+    _box(fitz.Rect(MR - 160, 6, MR, 38), doc_label,
+         size=8, color=(0.72, 0.82, 1.0), align=2)
 
-    # ── table geometry ───────────────────────────────────────────────────────
-    SIG_H  = 130   # signature + header row
-    NAME_H = 28
-    TTL_H  = 28
-    TY = 142.0                       # table top-y
-    rows_y = [TY, TY + SIG_H, TY + SIG_H + NAME_H, TY + SIG_H + NAME_H + TTL_H]
+    # ── document info strip ───────────────────────────────────────────────────
+    INFO_Y = HDR_H + 4
+    _rect_fill(fitz.Rect(ML, INFO_Y, MR, INFO_Y + 22),
+               fill=C_BAND_BG, border=C_BORDER)
+    now_str = _dt.datetime.now().strftime("%d %b %Y")
+    _box(fitz.Rect(ML + 6, INFO_Y + 4, MR - 6, INFO_Y + 18),
+         f"Document: {doc_label}   |   Certificate generated: {now_str}   |   "
+         f"Platform: Jane Aerospace Secure Signing Portal",
+         size=8, color=C_BAND_TXT)
 
-    def _cell_rect(col, row_idx):
-        x0 = ML if col == 0 else MID
-        x1 = MID if col == 0 else MR
-        return fitz.Rect(x0, rows_y[row_idx], x1, rows_y[row_idx + 1])
+    # ── signer block helper ───────────────────────────────────────────────────
+    BLOCK_GAP = 10
 
-    # draw outer rect + all grid lines
-    table_bot = rows_y[-1]
-    page.draw_rect(fitz.Rect(ML, TY, MR, table_bot), color=BLACK, width=0.8)
-    page.draw_line((MID, TY), (MID, table_bot), color=BLACK, width=0.8)
-    for ry in rows_y[1:-1]:
-        page.draw_line((ML, ry), (MR, ry), color=BLACK, width=0.8)
+    def _signer_block(y0: float, s: dict | None, role: str,
+                      company: str, pending: bool = False) -> float:
+        """Draw one signer block; return the bottom y."""
+        BAND_H   = 26
+        SIG_H    = 96    # signature image area height
+        INFO_H   = 100   # info grid height (3 rows × ~28pt + footer ~16pt)
+        TOTAL_H  = BAND_H + SIG_H + INFO_H
 
-    # ── helper: fill one signature cell ──────────────────────────────────────
-    def _fill_sig_cell(col: int, party_label: str, s: dict | None):
-        cr = _cell_rect(col, 0)
-        pad = 6.0
-        if s is None:
-            _box(fitz.Rect(cr.x0 + pad, cr.y0 + 6, cr.x1 - pad, cr.y0 + 26),
-                 party_label, size=9, bold=True)
-            _txt(cr.x0 + pad, cr.y0 + 50, "(Pending)", size=9, color=GREY)
-            return
+        # outer card border
+        page.draw_rect(fitz.Rect(ML, y0, MR, y0 + TOTAL_H),
+                       color=C_BORDER, fill=WHITE, width=0.6)
 
-        # header text
-        _box(fitz.Rect(cr.x0 + pad, cr.y0 + 6, cr.x1 - pad, cr.y0 + 26),
-             party_label, size=9, bold=True)
+        # ── coloured header band ──
+        badge_color  = C_GREEN    if not pending else C_ORANGE
+        badge_bg     = C_GREEN_BG if not pending else C_ORANGE_BG
+        badge_txt    = "SIGNED"   if not pending else "PENDING"
+        _rect_fill(fitz.Rect(ML, y0, MR, y0 + BAND_H),
+                   fill=badge_bg, border=badge_bg, bw=0.5)
+        # role label left — insert_text for reliable placement on narrow strip
+        band_txt = C_BAND_TXT  # dark navy, always readable on both green/orange bg
+        label_str = f"{company[:45]}  |  {role}"
+        page.insert_text((ML + 8, y0 + 17), label_str,
+                         fontsize=8.5, fontname="hebo", color=band_txt)
+        # badge right
+        badge_r = fitz.Rect(MR - 64, y0 + 5, MR - 6, y0 + BAND_H - 5)
+        _rect_fill(badge_r, fill=badge_color, border=None)
+        _box(badge_r, badge_txt, size=8, bold=True, color=WHITE, align=1)
 
-        # signature image or cursive name
-        img_rect = fitz.Rect(cr.x0 + pad, cr.y0 + 28, cr.x1 - pad, cr.y1 - 22)
-        img = s.get("sig_image") or ""
-        drew = False
-        if img.startswith("data:image"):
-            try:
-                data = base64.b64decode(img.split(",", 1)[1])
-                page.insert_image(img_rect, stream=data, keep_proportion=True)
-                drew = True
-            except Exception:
-                pass
-        if not drew:
-            sig_font = "helv" if s.get("sig_font") == "standard" else "tiit"
-            page.insert_text((cr.x0 + pad, cr.y0 + 72),
-                             s.get("signed_name", ""), fontsize=18,
-                             fontname=sig_font, color=(0.06, 0.14, 0.36))
+        # ── signature image area ──
+        sig_area = fitz.Rect(ML + 8, y0 + BAND_H + 4,
+                             MR - 8, y0 + BAND_H + SIG_H - 4)
+        _rect_fill(sig_area, fill=C_SIG_BOX_BG, border=C_BORDER, bw=0.5)
 
-        # date below signature
-        signed_at = s.get("signed_at", "")
-        if signed_at and "T" in signed_at:
-            signed_at = signed_at.split("T")[0]
-        _txt(cr.x0 + pad, cr.y1 - 8, signed_at, size=9, bold=True)
+        if pending or s is None:
+            _box(fitz.Rect(sig_area.x0 + 10, sig_area.y0 + 28,
+                           sig_area.x1 - 10, sig_area.y1 - 4),
+                 "Signature pending", size=10, color=C_LABEL, align=1)
+        else:
+            img = (s or {}).get("sig_image") or ""
+            drew = False
+            if img.startswith("data:image"):
+                try:
+                    raw = base64.b64decode(img.split(",", 1)[1])
+                    page.insert_image(fitz.Rect(sig_area.x0 + 8, sig_area.y0 + 4,
+                                                sig_area.x1 - 8, sig_area.y1 - 4),
+                                      stream=raw, keep_proportion=True)
+                    drew = True
+                except Exception:
+                    pass
+            if not drew:
+                sf = "helv" if (s or {}).get("sig_font") == "standard" else "tiit"
+                name = (s or {}).get("signed_name", "")
+                page.insert_text(
+                    (sig_area.x0 + 14, sig_area.y0 + (SIG_H - 8) / 2 + 4),
+                    name[:60], fontsize=22, fontname=sf,
+                    color=(0.05, 0.14, 0.38))
 
-    # ── fill signature row ────────────────────────────────────────────────────
-    japl_label  = "For and on behalf of the Company"
-    cust_name   = (sig or {}).get("company_name", "Counterparty") if sig else "Counterparty"
-    lead_label  = f"For and on behalf of {cust_name}"
+        # ── info grid ──
+        gy = y0 + BAND_H + SIG_H
+        page.draw_line((ML, gy), (MR, gy), color=C_BORDER, width=0.5)
 
-    _fill_sig_cell(0, japl_label,  internal_sig)
-    _fill_sig_cell(1, lead_label,  sig)
+        # _kv: small grey label line, then darker value line below it
+        def _kv(lx, ly, label, value):
+            _txt(lx, ly,      label,       size=7,   color=C_LABEL)
+            _txt(lx, ly + 10, str(value)[:58], size=8.5, color=C_VALUE)
 
-    # ── name row ─────────────────────────────────────────────────────────────
-    for col, s in enumerate([internal_sig, sig]):
-        cr = _cell_rect(col, 1)
-        nm = (s or {}).get("signed_name", "-")
-        _txt(cr.x0 + 6, cr.y0 + 18, f"Name: {nm}", size=10)
-
-    # ── title row ─────────────────────────────────────────────────────────────
-    for col, s in enumerate([internal_sig, sig]):
-        cr = _cell_rect(col, 2)
-        ttl = (s or {}).get("designation", "-")
-        _txt(cr.x0 + 6, cr.y0 + 18, f"Title: {ttl}", size=10)
-
-    # ── audit trail (small, below table) ──────────────────────────────────────
-    ay = table_bot + 16
-    _txt(ML, ay, "Audit trail", size=9, bold=True, color=GREY)
-    ay += 14
-    for label, s in [("Jane Aerospace", internal_sig), ("Counterparty", sig)]:
         if s:
-            line = (f"{label}: {s.get('signed_name','')} "
-                    f"<{s.get('email','')}> | {s.get('signed_at','')} "
-                    f"| IP {s.get('ip','-')}")
-            _box(fitz.Rect(ML, ay, MR, ay + 18), line, size=8, color=GREY)
-            ay += 18
+            signed_at = s.get("signed_at", "")
+            if signed_at and "T" in signed_at:
+                d, t = signed_at.split("T", 1)
+                signed_at = f"{d}  {t[:5]} IST"
+
+            col1_x = ML + 8
+            col2_x = ML + CW / 2 + 8
+            # each kv row = label(7pt) + value(8.5pt) + gap = ~28pt
+            row1 = gy + 12
+            row2 = gy + 40
+            row3 = gy + 68
+
+            _kv(col1_x, row1, "Signed By",   s.get("signed_name", ""))
+            _kv(col2_x, row1, "Title",        s.get("designation", "-"))
+            _kv(col1_x, row2, "Email",        s.get("email", "-"))
+            _kv(col2_x, row2, "IP Address",   s.get("ip", "-"))
+            _kv(col1_x, row3, "Date & Time",  signed_at)
+            _kv(col2_x, row3, "On behalf of", s.get("company_name", "-"))
+            page.draw_line((ML, gy + INFO_H - 16), (MR, gy + INFO_H - 16),
+                           color=C_BORDER, width=0.4)
+            _box(fitz.Rect(ML + 8, gy + INFO_H - 15, MR - 8, gy + INFO_H),
+                 "Signed electronically via Jane Aerospace Secure Signing Portal. "
+                 "Signature constitutes legal acceptance.",
+                 size=7, color=C_LABEL)
+
+        return y0 + TOTAL_H
+
+    # ── draw signer blocks ────────────────────────────────────────────────────
+    cust_name  = (sig or {}).get("company_name", "Counterparty") if sig else "Counterparty"
+    japl_name  = (internal_sig or {}).get("company_name", "Jane Aerospace Private Limited")
+
+    y = float(INFO_Y + 26 + BLOCK_GAP)
+    y = _signer_block(y, internal_sig, "Authorised Signatory", japl_name,
+                      pending=(internal_sig is None))
+    y += BLOCK_GAP
+    y = _signer_block(y, sig, "Authorised Signatory", cust_name,
+                      pending=(sig is None))
+
+    # ── legal footer ──────────────────────────────────────────────────────────
+    footer_y = y + 14
+    page.draw_line((ML, footer_y), (MR, footer_y), color=C_BORDER, width=0.5)
+    _box(fitz.Rect(ML, footer_y + 4, MR, footer_y + 28),
+         "This certificate is an official record of the electronic signatures applied to the above "
+         "document through the Jane Aerospace secure signing portal. Each signatory confirmed "
+         "acceptance by entering their legal name and clicking 'I Agree & Sign'. "
+         "This record, including timestamps and IP addresses, constitutes the full audit trail.",
+         size=7.5, color=C_LABEL)
 
     out = doc.tobytes(deflate=True, garbage=3)
     doc.close()
