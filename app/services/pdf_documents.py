@@ -433,16 +433,19 @@ def extract_editable_html(doc_type: str, is_overseas: bool,
                 filled = sum(1 for row in cells for c in row if c and str(c).strip())
                 if filled < 2:
                     continue
-                # column widths ∝ sqrt(longest cell) — stamped on the first row
-                # so the browser table and the PDF grid use the same columns
+                # column widths — 2-col tables split 50/50 (signature blocks,
+                # party tables); 3+ cols use sqrt(longest) for proportional fit
                 ncols = max(len(r) for r in cells)
-                weights = []
-                for c in range(ncols):
-                    longest = max((len(str(r[c]).strip()) for r in cells
-                                   if c < len(r) and r[c]), default=1)
-                    weights.append(max(longest, 4) ** 0.5)
-                total_w = sum(weights)
-                pcts = [100.0 * wt / total_w for wt in weights]
+                if ncols == 2:
+                    pcts = [50.0, 50.0]
+                else:
+                    weights = []
+                    for c in range(ncols):
+                        longest = max((len(str(r[c]).strip()) for r in cells
+                                       if c < len(r) and r[c]), default=1)
+                        weights.append(max(longest, 4) ** 0.5)
+                    total_w = sum(weights)
+                    pcts = [100.0 * wt / total_w for wt in weights]
                 lines = ['<table style="border-collapse:collapse;width:100%;'
                          'margin:8pt 0;font-size:10pt;">']
                 for ri, row in enumerate(cells):
@@ -568,7 +571,12 @@ def sanitize_live_html(html: str) -> str:
             return "<br/>"
         return f"<{name}{keep}>"
 
-    return re.sub(r"<\s*(/?)\s*([a-zA-Z0-9]+)((?:\s[^<>]*)?)/?>", _clean, html)
+    html = re.sub(r"<\s*(/?)\s*([a-zA-Z0-9]+)((?:\s[^<>]*)?)/?>", _clean, html)
+    # bare newlines inside table cells (legacy saved docs) → visible line breaks
+    html = re.sub(r"(<td\b[^>]*>)(.*?)(</td>)",
+                  lambda m: m.group(1) + m.group(2).replace("\n", "<br>") + m.group(3),
+                  html, flags=re.S | re.I)
+    return html
 
 
 _LIVE_CSS_BASE = """
@@ -649,7 +657,8 @@ def _parse_table_html(table_html: str) -> tuple[list[list[str]], list[float]]:
     rows: list[list[str]] = []
     pcts: list[float] = []
     for row_html in re.findall(r"<tr[^>]*>(.*?)</tr>", table_html, re.S | re.I):
-        cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row_html, re.S | re.I)
+        cells = [c.replace("\n", "<br>")
+                 for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row_html, re.S | re.I)]
         if not cells:
             continue
         if not rows:  # first row — try to read stamped column widths
