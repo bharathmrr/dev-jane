@@ -22,6 +22,17 @@ class LLMClient(Protocol):
         self, *, system: str, user: str, model: str, max_tokens: int
     ) -> dict: ...
 
+    async def complete_with_tools(
+        self, *, system: str, messages: list, tools: list, model: str, max_tokens: int
+    ) -> dict:
+        """One turn of a tool-use conversation.
+
+        Returns ``{"text", "tool_calls": [{"id","name","input"}], "content", "stop_reason"}``
+        where ``content`` is the assistant message's blocks (to append back into
+        ``messages`` before sending tool results).
+        """
+        ...
+
 
 class AnthropicClient:
     """Uses the official anthropic async SDK. Requests JSON-only output."""
@@ -44,6 +55,37 @@ class AnthropicClient:
             block.text for block in resp.content if block.type == "text"
         ).strip()
         return _safe_json(text)
+
+    async def complete_with_tools(
+        self, *, system: str, messages: list, tools: list, model: str, max_tokens: int
+    ) -> dict:
+        resp = await self._client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=messages,
+            tools=tools,
+        )
+        text = "".join(b.text for b in resp.content if b.type == "text").strip()
+        tool_calls = [
+            {"id": b.id, "name": b.name, "input": b.input}
+            for b in resp.content
+            if b.type == "tool_use"
+        ]
+        content: list[dict] = []
+        for b in resp.content:
+            if b.type == "text":
+                content.append({"type": "text", "text": b.text})
+            elif b.type == "tool_use":
+                content.append(
+                    {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
+                )
+        return {
+            "text": text,
+            "tool_calls": tool_calls,
+            "content": content,
+            "stop_reason": resp.stop_reason,
+        }
 
 
 class StubClient:
@@ -91,6 +133,64 @@ class StubClient:
             "confidence": 0.4,
             "reasoning": "stub heuristic",
         }
+
+    async def complete_with_tools(
+        self, *, system: str, messages: list, tools: list, model: str, max_tokens: int
+    ) -> dict:
+        """Deterministic keyword routing so the co-pilot works with no API key and
+        the tool-use loop is unit-testable. Calls one tool, then on the follow-up
+        (a tool_result is present) returns a short final answer."""
+        def _has_tool_result(msgs: list) -> bool:
+            for m in msgs:
+                c = m.get("content") if isinstance(m, dict) else None
+                if isinstance(c, list) and any(
+                    isinstance(b, dict) and b.get("type") == "tool_result" for b in c
+                ):
+                    return True
+            return False
+
+        def _first_user_text(msgs: list) -> str:
+            for m in msgs:
+                if isinstance(m, dict) and m.get("role") == "user":
+                    c = m.get("content")
+                    if isinstance(c, str):
+                        return c
+                    if isinstance(c, list):
+                        for b in c:
+                            if isinstance(b, dict) and b.get("type") == "text":
+                                return b.get("text", "")
+            return ""
+
+        def _text(s: str) -> dict:
+            return {"text": s, "tool_calls": [],
+                    "content": [{"type": "text", "text": s}], "stop_reason": "end_turn"}
+
+        def _call(name: str, inp: dict) -> dict:
+            tid = "stub_" + name
+            return {"text": "", "tool_calls": [{"id": tid, "name": name, "input": inp}],
+                    "content": [{"type": "tool_use", "id": tid, "name": name, "input": inp}],
+                    "stop_reason": "tool_use"}
+
+        if _has_tool_result(messages):
+            return _text("Here's what I found — let me know if you want details.")
+
+        body = _first_user_text(messages).lower()
+        if any(k in body for k in ("approval", "pending", "waiting", "to action")):
+            return _call("list_pending", {"kind": "approvals"})
+        if "comment" in body:
+            return _call("navigate", {"type": "open_comments"})
+        if any(k in body for k in ("notification", "alert")):
+            return _call("navigate", {"type": "open_notifications"})
+        if any(k in body for k in ("summary", "overview", "how many", "booked",
+                                   "pipeline", "this week", "total")):
+            return _call("pipeline_summary", {})
+        if any(k in body for k in ("open ", "show ", "find ", "pull up", "go to", "take me")):
+            for view in ("overview", "kanban", "leads", "sheet", "bookings", "docs"):
+                if view in body:
+                    return _call("navigate", {"type": "navigate", "view": view})
+            return _call("search_leads", {"query": body})
+        return _text("Hi! I can find leads, summarize your pipeline, and open views for you. "
+                     "Try saying 'show pending approvals' or 'open this week's bookings'.")
 
 
 def _safe_json(text: str) -> dict:

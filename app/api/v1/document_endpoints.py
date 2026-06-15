@@ -33,6 +33,7 @@ import datetime as dt
 import json
 import re
 import uuid
+from html import unescape as _html_unescape
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -154,17 +155,38 @@ async def _ensure_doc_data(db: AsyncSession, rec: OnboardingRecord, lead: LeadV2
     return data
 
 
-def _render_pdf(rec: OnboardingRecord, doc_type: str, data: dict) -> bytes:
+def _render_pdf(rec: OnboardingRecord, doc_type: str, data: dict, *, stamp: bool = True) -> bytes:
     """Render the working document.
 
     Live-edited documents render from their edited HTML (Live Editor mode);
     everything else fills the original PDF template placeholder-by-placeholder,
-    leaving format and content untouched."""
+    leaving format and content untouched.
+
+    Placed signature overlays are flattened on top when ``stamp`` is True. The
+    editor preview passes ``stamp=False`` so its draggable overlay layer is the
+    only representation; downloads / the signing copy stamp them into the PDF."""
+    from app.services.pdf_documents import stamp_overlays
     if data.get("mode") == "live" and data.get("html"):
         from app.services.pdf_documents import live_html_to_pdf
-        return live_html_to_pdf(data["html"])
-    from app.services.pdf_documents import fill_document
-    return fill_document(doc_type, _is_overseas(rec), data.get("replacements", []))
+        pdf = live_html_to_pdf(data["html"])
+    else:
+        from app.services.pdf_documents import fill_document
+        pdf = fill_document(doc_type, _is_overseas(rec), data.get("replacements", []))
+    return stamp_overlays(pdf, data.get("signatures_overlay")) if stamp else pdf
+
+
+def _plain_text_from_html(raw: str) -> str:
+    """Best-effort plain text from editor HTML, used as the Track-Changes baseline."""
+    s = raw or ""
+    s = re.sub(r"(?is)<(?:script|style)\b.*?</(?:script|style)>", "", s)
+    s = re.sub(r"(?i)<(?:br|/p|/div|/h[1-6]|/li|/tr|/table)\s*/?>", "\n", s)
+    s = re.sub(r"(?i)<(?:p|div|h[1-6]|li|tr)\b[^>]*>", "\n", s)
+    s = re.sub(r"<[^>]+>", "", s)
+    s = _html_unescape(s)
+    s = re.sub(r"[ \t]+", " ", s)
+    s = re.sub(r" *\n *", "\n", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
 
 
 _MAX_VERSIONS = 15
@@ -244,7 +266,9 @@ async def _preview_pdf(db: AsyncSession, onboarding_id: str, doc_type: str, v: s
         return hit[1]
     rec, lead = await _load(db, onboarding_id)
     data = await _ensure_doc_data(db, rec, lead, doc_type)
-    pdf = _render_pdf(rec, doc_type, data)
+    # stamp=False: the editor shows placed signatures as a live, draggable overlay
+    # layer on top of these page images — they are flattened only in the real PDF.
+    pdf = _render_pdf(rec, doc_type, data, stamp=False)
     _PREVIEW_CACHE[key] = (v, pdf)
     while len(_PREVIEW_CACHE) > 10:
         _PREVIEW_CACHE.pop(next(iter(_PREVIEW_CACHE)))
@@ -255,7 +279,7 @@ async def _preview_pdf(db: AsyncSession, onboarding_id: str, doc_type: str, v: s
 async def document_preview_info(onboarding_id: str, doc_type: str, token: str,
                                 v: str = "", db: AsyncSession = Depends(get_db)):
     _check_doc_type(doc_type)
-    _check_token(onboarding_id, doc_type, token, "edit")
+    _check_token(onboarding_id, doc_type, token, "edit", "sign")   # lead may render pages to place their signature
     import fitz
     pdf = await _preview_pdf(db, onboarding_id, doc_type, v)
     doc = fitz.open(stream=pdf, filetype="pdf")
@@ -268,7 +292,7 @@ async def document_preview_info(onboarding_id: str, doc_type: str, token: str,
 async def document_preview_page(onboarding_id: str, doc_type: str, token: str,
                                 p: int = 0, v: str = "", db: AsyncSession = Depends(get_db)):
     _check_doc_type(doc_type)
-    _check_token(onboarding_id, doc_type, token, "edit")
+    _check_token(onboarding_id, doc_type, token, "edit", "sign")   # lead may render pages to place their signature
     import fitz
     pdf = await _preview_pdf(db, onboarding_id, doc_type, v)
     doc = fitz.open(stream=pdf, filetype="pdf")
@@ -605,6 +629,682 @@ document.getElementById('sig-email').value = initial.signatory_email || '';
 # Team: Live Document Editor (full content editing)
 # ---------------------------------------------------------------------------
 
+# ── Word-style ribbon for the Live Editor ────────────────────────────────────
+# Plain (non-f-string) constants injected via single {placeholders} so the many
+# CSS/JS braces need no {{ }} escaping. The JS shares the editor's global scope
+# (cmd / restoreRange / dirty / sheet are defined in the main editor script).
+_EDITOR_RIBBON_CSS = """
+  /* Word-style ribbon */
+  .toolbar{background:linear-gradient(#fbfcfe,#eceff5);border-bottom:1px solid #d4dae6;
+           padding:5px 12px;gap:0;align-items:stretch;flex-wrap:wrap;}
+  .rb-lbl-grp{display:inline-flex;flex-direction:column;align-items:center;gap:3px;
+              padding:3px 10px;border-right:1px solid #dde3ee;}
+  .rb-lbl-grp:last-of-type{border-right:none;}
+  .rb-end{margin-left:auto;border-right:none;}
+  .rb-row{display:inline-flex;align-items:center;gap:3px;}
+  .rb-cap{font-size:9.5px;color:#8a93a6;font-weight:600;letter-spacing:.03em;}
+  .tb{border:1px solid transparent;background:none;border-radius:6px;min-width:30px;height:30px;
+      font-size:13.5px;cursor:pointer;color:#26324a;display:inline-flex;align-items:center;
+      justify-content:center;padding:0 8px;transition:background .12s,border-color .12s,box-shadow .12s;}
+  .tb:hover{background:#e8effb;border-color:#c4d6f5;}
+  .tb:active{background:#d8e6fb;}
+  .tb.active{background:#dcebff;border-color:#9cc0f5;color:#1a56db;box-shadow:inset 0 0 0 1px #c3dbfb;}
+  .tb-accent{width:auto;color:#1a56db;font-weight:700;border-color:#cfe0fb;background:#f2f7ff;}
+  .tb-accent:hover{background:#e4eeff;}
+  .tb-color{position:relative;flex-direction:column;gap:0;font-weight:800;font-size:13px;padding-top:2px;}
+  .tb-color input[type=color]{position:absolute;left:5px;right:5px;bottom:4px;width:auto;height:4px;
+      border:none;padding:0;background:none;cursor:pointer;}
+  .rb-sel{height:30px;border:1px solid #cbd4e3;border-radius:6px;background:#fff;font-size:12.5px;
+          color:#26324a;padding:0 6px;cursor:pointer;font-family:inherit;transition:border-color .12s;}
+  .rb-sel:hover{border-color:#9cb6e6;}
+  .rb-sel:focus{outline:none;border-color:#1a56db;box-shadow:0 0 0 3px rgba(26,86,219,.13);}
+  #rb-style{min-width:104px;} .rb-size{min-width:60px;}
+  .tsep{display:none;}
+  /* Word-style page canvas */
+  .edwrap{background:#e4e6ea;padding:30px 18px 90px;}
+  .sheet{box-shadow:0 1px 4px rgba(0,0,0,.12),0 10px 30px rgba(12,35,68,.16);
+         border:1px solid #d6dae2;border-radius:2px;}
+  .sheet:focus{border-color:#bcd0f2;
+         box-shadow:0 1px 4px rgba(0,0,0,.12),0 12px 34px rgba(26,86,219,.18);}
+  /* diff stat chips shown in preview header */
+  .chip-add{display:inline-flex;align-items:center;padding:2px 8px;border-radius:99px;
+    font-size:11px;font-weight:700;background:#dcfce7;color:#15803d;}
+  .chip-del{display:inline-flex;align-items:center;padding:2px 8px;border-radius:99px;
+    font-size:11px;font-weight:700;background:#fee2e2;color:#b91c1c;}
+  /* track-changes redline, shown inline in the document (read-only review) */
+  /* track-changes redline — Word style: thin colored underline / strikethrough
+     plus a change-bar in the left margin. No heavy block fills. */
+  ins.rl-ins{background:none;color:#1a56db;text-decoration:underline;
+    text-decoration-thickness:1px;text-underline-offset:2px;padding:0;}
+  del.rl-del{background:none;color:#c0182f;text-decoration:line-through;
+    text-decoration-thickness:1px;padding:0;}
+  p.rl-blank{margin:0;height:8px;}
+  /* change-bar removed — the inline strikethrough/underline shows the change */
+  /* review mode: very subtle tint so it reads as read-only */
+  .sheet.review{background:#fcfcfd;cursor:default;box-shadow:0 1px 4px rgba(0,0,0,.12),
+    0 10px 30px rgba(12,35,68,.16);}
+  /* real SVG icons in toolbar + topbar */
+  .tb svg{width:17px;height:17px;display:block;}
+  .tb-accent{display:inline-flex;align-items:center;}
+  .tb-accent svg{width:16px;height:16px;margin-right:5px;}
+  .topbar .btn{display:inline-flex;align-items:center;gap:6px;}
+  .topbar .btn svg{width:15px;height:15px;flex:0 0 auto;}
+  #rb-font{min-width:118px;}
+"""
+
+_EDITOR_RIBBON_JS = """
+/* Word-style ribbon behaviour: paragraph styles, point font sizes, and live
+   active-state highlighting. Relies on cmd()/restoreRange()/dirty()/sheet from
+   the main editor script (classic scripts share the global lexical scope). */
+(function(){
+  'use strict';
+  window.rbStyle = function(v){ cmd('formatBlock', '<' + v + '>'); };
+  window.rbSize = function(pt){
+    if(!pt) return;
+    restoreRange();
+    // execCommand fontSize only accepts 1-7, so tag the run as size 7 then
+    // rewrite those <font> nodes to a real point size (survives the sanitizer).
+    document.execCommand('fontSize', false, '7');
+    var marks = sheet.querySelectorAll('font[size="7"]');
+    for(var i=0;i<marks.length;i++){ marks[i].removeAttribute('size'); marks[i].style.fontSize = pt + 'pt'; }
+    dirty();
+  };
+  window.rbFont = function(v){ if(!v) return; cmd('fontName', v); };
+  var STATE = [['b-bold','bold'],['b-italic','italic'],['b-underline','underline'],
+               ['b-strike','strikeThrough'],['a-left','justifyLeft'],['a-center','justifyCenter'],
+               ['a-right','justifyRight'],['a-just','justifyFull']];
+  function sync(){
+    var sel = document.getSelection();
+    if(!sel || !sel.anchorNode || !sheet.contains(sel.anchorNode)) return;
+    for(var i=0;i<STATE.length;i++){
+      var el = document.getElementById(STATE[i][0]); if(!el) continue;
+      var on = false; try{ on = document.queryCommandState(STATE[i][1]); }catch(e){}
+      el.classList.toggle('active', on);
+    }
+  }
+  document.addEventListener('selectionchange', sync);
+
+  /* ── Track Changes: word-level redline of the current doc vs the original
+        template. Deterministic (LCS), bounded, no network/AI. ── */
+  function esc(s){ return (s + '').replace(/[&<>"]/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function wc(s){ var m = (s || '').match(/[^\\s]+/g); return m ? m.length : 0; }
+  function tok(s){ return (s || '').match(/\\s+|[^\\s]+/g) || []; }
+  function merge(ops){
+    var r = [];
+    for(var i=0;i<ops.length;i++){
+      if(r.length && r[r.length-1][0] === ops[i][0]) r[r.length-1][1] += ops[i][1];
+      else r.push([ops[i][0], ops[i][1]]);
+    }
+    return r;
+  }
+  function lcs(a, b, ops){
+    var n = a.length, m = b.length, i, j;
+    if(n === 0){ if(m) ops.push(['+', b.join('')]); return; }
+    if(m === 0){ ops.push(['-', a.join('')]); return; }
+    var dp = [];
+    for(i=0;i<=n;i++) dp.push(new Int32Array(m + 1));
+    for(i=n-1;i>=0;i--) for(j=m-1;j>=0;j--)
+      dp[i][j] = (a[i] === b[j]) ? dp[i+1][j+1] + 1 : Math.max(dp[i+1][j], dp[i][j+1]);
+    var x = 0, y = 0;
+    while(x < n && y < m){
+      if(a[x] === b[y]){ ops.push(['=', a[x]]); x++; y++; }
+      else if(dp[x+1][y] >= dp[x][y+1]){ ops.push(['-', a[x]]); x++; }
+      else { ops.push(['+', b[y]]); y++; }
+    }
+    while(x < n) ops.push(['-', a[x++]]);
+    while(y < m) ops.push(['+', b[y++]]);
+  }
+  function diffWords(aStr, bStr){
+    var a = tok(aStr), b = tok(bStr), start = 0;
+    while(start < a.length && start < b.length && a[start] === b[start]) start++;
+    var ea = a.length, eb = b.length;
+    while(ea > start && eb > start && a[ea-1] === b[eb-1]){ ea--; eb--; }
+    var am = a.slice(start, ea), bm = b.slice(start, eb), ops = [];
+    if(start) ops.push(['=', a.slice(0, start).join('')]);
+    if(am.length * bm.length > 1000000){   // guard: coarse replace on huge rewrites
+      if(am.length) ops.push(['-', am.join('')]);
+      if(bm.length) ops.push(['+', bm.join('')]);
+    } else { lcs(am, bm, ops); }
+    if(ea < a.length) ops.push(['=', a.slice(ea).join('')]);
+    return merge(ops);
+  }
+  // Normalise HTML -> plain text the SAME way on BOTH sides of the diff (mirrors
+  // server _plain_text_from_html). Previously base used server text but cur used
+  // sheet.innerText: the two extractors tokenise whitespace/tables differently,
+  // so the diff flagged nearly the whole document. One normaliser fixes that.
+  function htmlUnescape(s){
+    var t = document.createElement('textarea'); t.innerHTML = (s || ''); return t.value;
+  }
+  function plainText(raw){
+    var s = raw || '';
+    s = s.replace(/<(?:script|style)\\b[\\s\\S]*?<\\/(?:script|style)>/gi, '');
+    s = s.replace(/<(?:br|\\/p|\\/div|\\/h[1-6]|\\/li|\\/tr|\\/table)\\s*\\/?>/gi, '\\n');
+    s = s.replace(/<(?:p|div|h[1-6]|li|tr)\\b[^>]*>/gi, '\\n');
+    s = s.replace(/<[^>]+>/g, '');
+    s = htmlUnescape(s);
+    s = s.replace(/[ \\t]+/g, ' ');
+    s = s.replace(/ *\\n */g, '\\n');
+    s = s.replace(/\\n{3,}/g, '\\n\\n');
+    return s.replace(/^\\s+|\\s+$/g, '');
+  }
+  // Single source of truth for the diff: original template vs current document.
+  // While reviewing, the sheet holds redline markup — diff against the stashed
+  // real document instead, so counts never balloon to the whole doc mid-review.
+  function docOps(){
+    var base = (typeof ORIG_HTML === 'string') ? plainText(ORIG_HTML)
+             : ((typeof ORIG_TEXT === 'string') ? ORIG_TEXT : '');
+    var curHtml = (window._reviewing && window._reviewBackup != null)
+                ? window._reviewBackup
+                : ((typeof sheet !== 'undefined' && sheet) ? sheet.innerHTML : '');
+    return diffWords(base, plainText(curHtml));
+  }
+
+  // exposed so the page-level togglePreview() can call it without re-implementing LCS
+  window._diffStats = function(){
+    var ops = docOps(), ins = 0, del = 0;
+    for(var i = 0; i < ops.length; i++){
+      if(ops[i][0] === '+') ins += wc(ops[i][1]);
+      else if(ops[i][0] === '-') del += wc(ops[i][1]);
+    }
+    return {ins: ins, del: del};
+  };
+
+  // ── Inline redline: render the +/-/= ops as Word-style tracked changes ──
+  // Block-level redline that PRESERVES the document's formatting: unchanged
+  // blocks (paragraphs, headings, tables, signature images) are emitted with
+  // their exact current HTML; only blocks that actually changed are shown as
+  // tracked text. Fonts / bold / tables / signatures stay intact in review.
+  function ntext(s){ return (s || '').replace(/\\s+/g, ' ').replace(/^\\s+|\\s+$/g, ''); }
+  function blocksOf(html){
+    var d = document.createElement('div'); d.innerHTML = html || '';
+    var out = [], kids = d.children, i;
+    for(i = 0; i < kids.length; i++){
+      var t = ntext(kids[i].textContent);
+      out.push({ html: kids[i].outerHTML, text: t, key: t || kids[i].outerHTML });
+    }
+    if(out.length === 0 && ntext(d.textContent) !== ''){
+      var tt = ntext(d.textContent);
+      out.push({ html: '<p>' + esc(d.textContent) + '</p>', text: tt, key: tt });
+    }
+    return out;
+  }
+  function blockLCS(a, b){
+    var n = a.length, m = b.length, dp = [], i, j;
+    for(i = 0; i <= n; i++) dp.push(new Int32Array(m + 1));
+    for(i = n - 1; i >= 0; i--) for(j = m - 1; j >= 0; j--)
+      dp[i][j] = (a[i].key === b[j].key) ? dp[i+1][j+1] + 1 : Math.max(dp[i+1][j], dp[i][j+1]);
+    var ops = [], x = 0, y = 0;
+    while(x < n && y < m){
+      if(a[x].key === b[y].key){ ops.push(['=', y]); x++; y++; }
+      else if(dp[x+1][y] >= dp[x][y+1]){ ops.push(['-', x]); x++; }
+      else { ops.push(['+', y]); y++; }
+    }
+    while(x < n) ops.push(['-', x++]);
+    while(y < m) ops.push(['+', y++]);
+    return ops;
+  }
+  function injectClass(html, cls){
+    return (html || '').replace(/^(\\s*<[a-zA-Z][^>]*?)(\\s*\\/?>)/, function(m, p1, p2){
+      return /\\sclass\\s*=/.test(p1)
+        ? p1.replace(/class\\s*=\\s*"([^"]*)"/, 'class="$1 ' + cls + '"') + p2
+        : p1 + ' class="' + cls + '"' + p2;
+    });
+  }
+  // Re-wrap inner content in the block's ORIGINAL tag + attributes so the
+  // paragraph keeps its font-size / alignment / indent in review mode — only the
+  // words inside change. Prevents "the format changes when tracking is on".
+  function _reblock(html, inner, cls){
+    var m = (html || '').match(/^(\\s*<([a-zA-Z][a-z0-9]*)\\b[^>]*>)([\\s\\S]*)(<\\/\\2>\\s*)$/);
+    if(!m) return '<p class="' + cls + '">' + inner + '</p>';
+    return injectClass(m[1], cls) + inner + m[4];
+  }
+  function wordRedline(aText, bText){
+    var ops = diffWords(aText, bText), s = '';
+    for(var i = 0; i < ops.length; i++){
+      var t = ops[i][0], raw = ops[i][1], safe = esc(raw), solid = raw.replace(/\\s+/g, '') !== '';
+      if(t === '+' && solid) s += '<ins class="rl-ins">' + safe + '</ins>';
+      else if(t === '-' && solid) s += '<del class="rl-del">' + safe + '</del>';
+      else s += safe;
+    }
+    return s;
+  }
+  function insBlock(b){
+    // empty-text block = signature image / media: keep its HTML so it survives review
+    return b.text === '' ? injectClass(b.html, 'rl-chg rl-newblk')
+                         : _reblock(b.html, wordRedline('', b.text), 'rl-chg');
+  }
+  function delBlock(b){ return _reblock(b.html, '<del class="rl-del">' + esc(b.text) + '</del>', 'rl-chg'); }
+  function renderRedline(){
+    var orig = blocksOf(typeof ORIG_HTML === 'string' ? ORIG_HTML : ''),
+        cur  = blocksOf((typeof sheet !== 'undefined' && sheet) ? sheet.innerHTML : '');
+    var ops = blockLCS(orig, cur), html = '', i = 0, k;
+    while(i < ops.length){
+      if(ops[i][0] === '='){ html += cur[ops[i][1]].html; i++; continue; }   // unchanged -> exact formatting
+      var dels = [], inss = [];
+      while(i < ops.length && ops[i][0] === '-'){ dels.push(orig[ops[i][1]]); i++; }
+      while(i < ops.length && ops[i][0] === '+'){ inss.push(cur[ops[i][1]]); i++; }
+      // Pair each edited paragraph with its replacement and diff at WORD level, so
+      // only the words that changed are marked — never the whole paragraph. Any
+      // leftover blocks are genuine paragraph adds / removes.
+      var pairN = Math.min(dels.length, inss.length);
+      for(k = 0; k < pairN; k++){
+        if(dels[k].text !== '' && inss[k].text !== '')
+          html += _reblock(inss[k].html, wordRedline(dels[k].text, inss[k].text), 'rl-chg');
+        else { html += delBlock(dels[k]); html += insBlock(inss[k]); }
+      }
+      for(k = pairN; k < dels.length; k++) html += delBlock(dels[k]);
+      for(k = pairN; k < inss.length; k++) html += insBlock(inss[k]);
+    }
+    return html || '<p style="color:#64748b;">No changes vs the original template.</p>';
+  }
+
+  // Track Changes is a clean ON/OFF toggle driven by the toolbar button — no
+  // banner. ON: render the redline INLINE in the document (read-only) and the
+  // button highlights. OFF: restore the exact original bytes and editing resumes.
+  // The document text is never modified or saved while reviewing (see saveDoc).
+  window._reviewing = false;
+  window._reviewBackup = null;
+  window.toggleTrackChanges = function(){
+    var btn = document.getElementById('btn-tc');
+    if(window._reviewing){
+      if(window._reviewBackup != null) sheet.innerHTML = window._reviewBackup;   // restore untouched doc
+      window._reviewBackup = null;
+      window._reviewing = false;
+      sheet.classList.remove('review');
+      if(typeof SIGNED === 'undefined' || !SIGNED) sheet.setAttribute('contenteditable', 'true');
+      if(btn) btn.classList.remove('active');
+      return;
+    }
+    window._reviewBackup = sheet.innerHTML;          // remember the real document
+    sheet.classList.add('review');
+    sheet.setAttribute('contenteditable', 'false');  // read-only while reviewing
+    sheet.innerHTML = renderRedline();               // format-preserving inline redline
+    window._reviewing = true;
+    if(btn) btn.classList.add('active');             // highlighted = switch ON
+  };
+})();
+"""
+
+
+_SIG_OVERLAY_CSS = """
+  /* signature overlays placed on the PDF preview page (Adobe-style) */
+  #pv-pages .pg-wrap{position:relative;width:94%;max-width:740px;margin:0 auto;
+    background:#fff;aspect-ratio:595/842;box-shadow:0 2px 12px rgba(0,0,0,.4);}
+  #pv-pages .pg-wrap img.pg{width:100%;display:block;box-shadow:none;}
+  .sig-ov{position:absolute;cursor:move;touch-action:none;outline:1.5px dashed transparent;
+    outline-offset:2px;transition:outline-color .1s;}
+  .sig-ov:hover,.sig-ov.drag{outline-color:#1a56db;}
+  .sig-ov img{display:block;width:100%;height:auto;pointer-events:none;user-select:none;}
+  .sig-ov-del{position:absolute;top:-10px;right:-10px;width:20px;height:20px;line-height:16px;
+    border-radius:50%;border:2px solid #fff;background:#dc2626;color:#fff;font-size:11px;
+    cursor:pointer;padding:0;display:none;}
+  .sig-ov-grip{position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;border-radius:3px;
+    background:#1a56db;border:2px solid #fff;cursor:nwse-resize;touch-action:none;display:none;}
+  .sig-ov:hover .sig-ov-del,.sig-ov:hover .sig-ov-grip,
+  .sig-ov.drag .sig-ov-del,.sig-ov.drag .sig-ov-grip{display:block;}
+
+  /* full-screen placement stage */
+  .pv.sigmode{position:fixed;inset:0;z-index:9000;display:flex;flex-direction:column;background:#3a3d40;}
+  .pv.sigmode .pvhead{display:none;}
+  .pv.sigmode #pv-pages{flex:1;overflow:auto;padding:18px 0 60px;}
+  .pv.sigmode .pg-wrap{max-width:840px;margin-bottom:16px;}
+  .sig-bar{display:none;background:#1f2937;color:#fff;padding:9px 16px;align-items:center;gap:14px;
+    flex-shrink:0;box-shadow:0 2px 10px rgba(0,0,0,.35);flex-wrap:wrap;}
+  .pv.sigmode .sig-bar{display:flex;}
+  .sig-bar-t{font-weight:700;font-size:13.5px;}
+  .sig-pal{display:flex;align-items:center;min-height:40px;}
+  .sig-chip{height:40px;max-width:180px;background:#fff;border-radius:6px;padding:3px 6px;cursor:pointer;
+    border:2px solid #60a5fa;}
+  .sig-pal-empty{font-size:12px;color:#9ca3af;}
+  .sig-bar-btn{background:#374151;color:#fff;border:1px solid #4b5563;border-radius:7px;padding:7px 12px;
+    font-size:12.5px;cursor:pointer;}
+  .sig-bar-btn:hover{background:#4b5563;}
+  .sig-bar-hint{font-size:11.5px;color:#9ca3af;margin-left:auto;}
+  .sig-bar-done{background:#16a34a;color:#fff;border:none;border-radius:7px;padding:8px 18px;
+    font-size:12.5px;font-weight:700;cursor:pointer;}
+  .sig-bar-done:hover{background:#15803d;}
+  /* create-signature modal */
+  .sig-modal{display:flex;position:fixed;inset:0;z-index:9500;background:rgba(15,23,42,.6);
+    align-items:center;justify-content:center;}
+  .sig-modal-box{background:#fff;border-radius:14px;width:480px;max-width:94vw;padding:20px 22px;
+    box-shadow:0 24px 60px rgba(0,0,0,.4);}
+  .sig-modal-box h3{margin:0 0 12px;font-size:16px;color:#111;}
+  .sig-tabs{display:flex;gap:6px;margin-bottom:12px;}
+  .sig-tab{flex:1;padding:8px;border:1px solid #d4dae6;background:#f6f8fc;border-radius:8px;cursor:pointer;
+    font-size:12.5px;font-weight:600;color:#3a4661;text-align:center;}
+  .sig-tab.on{background:#1a56db;color:#fff;border-color:#1a56db;}
+  .sig-panel{display:none;} .sig-panel.on{display:block;}
+  #sig-canvas{width:100%;height:150px;border:1px dashed #c2ccdc;border-radius:8px;background:#fcfdff;
+    touch-action:none;cursor:crosshair;}
+  #sig-type{width:100%;padding:10px 12px;border:1px solid #c2ccdc;border-radius:8px;font-size:15px;}
+  #sig-type-prev{height:90px;display:flex;align-items:center;justify-content:center;font-size:38px;
+    font-family:'Brush Script MT','Segoe Script',cursive;color:#111;border:1px solid #eef1f6;
+    border-radius:8px;margin-top:10px;}
+  .sig-modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px;}
+  .sig-mbtn{padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;border:none;}
+  .sig-mbtn.ok{background:#16a34a;color:#fff;} .sig-mbtn.x{background:#eef1f6;color:#374151;}
+"""
+
+_SIG_OVERLAY_JS = """
+/* Adobe-style signature overlays: signature images placed ON the PDF preview
+   page (never in the editable text). Persisted as fractional page coordinates
+   and flattened into the final PDF server-side (see stamp_overlays). Shares the
+   editor's global scope: BASE/OID/DT/TOK/SIG_OVERLAYS/togglePreview. */
+(function(){
+  'use strict';
+  var overlays = (typeof SIG_OVERLAYS !== 'undefined' && Array.isArray(SIG_OVERLAYS)) ? SIG_OVERLAYS.slice() : [];
+  var saveT = null;
+  var _sigData = overlays.length ? overlays[overlays.length - 1].image : '';   // reuse the last-placed signature
+  var bar = null, modal = null, drawing = false, dctx = null, dlast = null;
+
+  function _save(){
+    clearTimeout(saveT);
+    saveT = setTimeout(function(){
+      var el = document.getElementById('saved');
+      if(el){ el.textContent = 'Saving\\u2026'; el.style.color = '#fbbf24'; }
+      fetch(BASE + '/save/' + OID + '/' + DT + '/' + TOK, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ signatures_overlay: overlays })
+      }).then(function(r){
+        if(el){ el.textContent = (r && r.ok) ? 'Saved \\u2713' : 'Save failed';
+                el.style.color = (r && r.ok) ? '#86efac' : '#fca5a5'; }
+      }).catch(function(){ if(el){ el.textContent = 'Save failed'; el.style.color = '#fca5a5'; } });
+    }, 350);
+  }
+
+  function _pageImg(wrap){ return wrap.querySelector('img.pg'); }
+
+  // Rebuild overlays[] from the live DOM (fractions of each page), then persist.
+  function _commit(){
+    var out = [], wraps = document.querySelectorAll('#pv-pages .pg-wrap');
+    for(var i=0;i<wraps.length;i++){
+      var pr = wraps[i].getBoundingClientRect();   // measure the WRAP (always sized via aspect-ratio) so a not-yet-loaded image never drops the overlay
+      if(!pr.width || !pr.height) continue;
+      var ovs = wraps[i].querySelectorAll('.sig-ov');
+      for(var j=0;j<ovs.length;j++){
+        var er = ovs[j].getBoundingClientRect();
+        out.push({
+          page: i,
+          x: (er.left - pr.left) / pr.width,
+          y: (er.top  - pr.top ) / pr.height,
+          w: er.width / pr.width,
+          h: er.height / pr.height,
+          image: ovs[j].getAttribute('data-img')
+        });
+      }
+    }
+    overlays = out;
+    _save();
+  }
+
+  // which page is under the pointer (so a signature can be dragged page-to-page)
+  function _pageUnder(x, y){
+    var wraps = document.querySelectorAll('#pv-pages .pg-wrap');
+    for(var i=0;i<wraps.length;i++){
+      var r = wraps[i].getBoundingClientRect();
+      if(x>=r.left && x<=r.right && y>=r.top && y<=r.bottom) return wraps[i];
+    }
+    return null;
+  }
+
+  function _bindDrag(el){
+    var d = null;
+    el.addEventListener('pointerdown', function(e){
+      if(e.target.classList.contains('sig-ov-grip') || e.target.classList.contains('sig-ov-del')) return;
+      e.preventDefault();
+      try{ el.setPointerCapture(e.pointerId); }catch(x){}
+      var er = el.getBoundingClientRect();
+      d = { dx: e.clientX - er.left, dy: e.clientY - er.top };
+      el.classList.add('drag');
+    });
+    el.addEventListener('pointermove', function(e){
+      if(!d) return;
+      var page = _pageUnder(e.clientX, e.clientY) || el.parentNode;
+      if(page !== el.parentNode) page.appendChild(el);          // move across pages
+      var pr = page.getBoundingClientRect();
+      var left = (e.clientX - d.dx - pr.left) / pr.width;
+      var top  = (e.clientY - d.dy - pr.top ) / pr.height;
+      left = Math.max(0, Math.min(1 - el.offsetWidth  / pr.width,  left));
+      top  = Math.max(0, Math.min(1 - el.offsetHeight / pr.height, top));
+      el.style.left = (left*100) + '%';
+      el.style.top  = (top*100) + '%';
+    });
+    function up(e){ if(!d) return; d = null; el.classList.remove('drag');
+      try{ el.releasePointerCapture(e.pointerId); }catch(x){} _commit(); }
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  }
+
+  function _bindResize(el, grip){
+    var r = null;
+    grip.addEventListener('pointerdown', function(e){
+      e.preventDefault(); e.stopPropagation();
+      try{ grip.setPointerCapture(e.pointerId); }catch(x){}
+      r = { x: e.clientX, w: el.offsetWidth, pr: el.parentNode.getBoundingClientRect() };
+    });
+    grip.addEventListener('pointermove', function(e){
+      if(!r) return;
+      var nw = Math.max(24, Math.min(r.pr.width, r.w + (e.clientX - r.x)));
+      el.style.width = (nw / r.pr.width * 100) + '%';   // height follows the image aspect ratio
+    });
+    function up(e){ if(!r) return; r = null;
+      try{ grip.releasePointerCapture(e.pointerId); }catch(x){} _commit(); }
+    grip.addEventListener('pointerup', up);
+    grip.addEventListener('pointercancel', up);
+  }
+
+  function _makeOverlay(wrap, ov){
+    var el = document.createElement('div');
+    el.className = 'sig-ov';
+    el.setAttribute('data-img', ov.image);
+    el.style.left  = (ov.x*100) + '%';
+    el.style.top   = (ov.y*100) + '%';
+    el.style.width = (ov.w*100) + '%';
+    var im = document.createElement('img'); im.src = ov.image; im.alt = 'signature';
+    el.appendChild(im);
+    var del = document.createElement('button');
+    del.className = 'sig-ov-del'; del.type = 'button'; del.textContent = '\\u2715';
+    del.title = 'Remove signature';
+    del.addEventListener('click', function(e){ e.stopPropagation(); el.remove(); _commit(); });
+    el.appendChild(del);
+    var grip = document.createElement('div'); grip.className = 'sig-ov-grip';
+    el.appendChild(grip);
+    _bindDrag(el);
+    _bindResize(el, grip);
+    wrap.appendChild(el);
+    return el;
+  }
+
+  // Re-paint overlay DOM from overlays[] (called after each preview refresh).
+  window.renderSigOverlays = function(){
+    var wraps = document.querySelectorAll('#pv-pages .pg-wrap');
+    if(!wraps.length) return;
+    for(var i=0;i<wraps.length;i++){
+      var old = wraps[i].querySelectorAll('.sig-ov');
+      for(var k=0;k<old.length;k++) old[k].remove();
+    }
+    for(var j=0;j<overlays.length;j++){
+      var o = overlays[j];
+      var w = (o.page >= 0 && o.page < wraps.length) ? wraps[o.page] : wraps[0];
+      if(w) _makeOverlay(w, o);
+    }
+  };
+
+  // ── full-screen placement stage ──────────────────────────────────────────
+  window.placeSignature = function(){
+    var pv = document.querySelector('.pv');
+    if(pv && !pv.classList.contains('open') && typeof togglePreview === 'function') togglePreview();
+    if(!pv) return;
+    pv.classList.add('sigmode');
+    _ensureBar();
+    _refreshPalette();
+    if(!_sigData) _openCreate();          // no signature yet -> ask for one
+  };
+  function _exitPlacement(){
+    var pv = document.querySelector('.pv'); if(pv) pv.classList.remove('sigmode');
+    if(bar) bar.style.display = 'none';
+    _commit();
+  }
+  function _ensureBar(){
+    var pv = document.querySelector('.pv'); if(!pv) return;
+    if(bar){ bar.style.display = 'flex'; return; }
+    bar = document.createElement('div'); bar.className = 'sig-bar';
+    bar.innerHTML =
+      '<span class="sig-bar-t">Place your signature</span>' +
+      '<div id="sig-palette" class="sig-pal"></div>' +
+      '<button type="button" class="sig-bar-btn" id="sig-create-btn">＋ Create / change</button>' +
+      '<span class="sig-bar-hint">Click your signature to drop it, then drag it onto any page</span>' +
+      '<button type="button" class="sig-bar-done" id="sig-done-btn">Done</button>';
+    pv.insertBefore(bar, pv.firstChild);
+    document.getElementById('sig-create-btn').addEventListener('click', _openCreate);
+    document.getElementById('sig-done-btn').addEventListener('click', _exitPlacement);
+    bar.style.display = 'flex';
+  }
+  function _refreshPalette(){
+    var p = document.getElementById('sig-palette'); if(!p) return;
+    if(_sigData){
+      p.innerHTML = '<img class="sig-chip" id="sig-chip" src="' + _sigData + '" alt="signature" title="Click to drop on the page">';
+      document.getElementById('sig-chip').addEventListener('click', _placeFromPalette);
+    } else {
+      p.innerHTML = '<span class="sig-pal-empty">No signature yet — click Create</span>';
+    }
+  }
+  function _visiblePage(){
+    var pv = document.querySelector('.pv'), wraps = document.querySelectorAll('#pv-pages .pg-wrap');
+    if(!wraps.length) return null;
+    var mid = pv.getBoundingClientRect().top + pv.clientHeight/2, best = wraps[0], bd = 1e9;
+    for(var i=0;i<wraps.length;i++){ var r = wraps[i].getBoundingClientRect();
+      var dd = Math.abs((r.top + r.bottom)/2 - mid); if(dd < bd){ bd = dd; best = wraps[i]; } }
+    return best;
+  }
+  function _placeFromPalette(){
+    if(!_sigData) return;
+    var wrap = _visiblePage(); if(!wrap) return;
+    var im = new Image();
+    im.onload = function(){
+      var pr = wrap.getBoundingClientRect();
+      var ar = (im.width/im.height) || 3, pw = pr.width||600, ph = pr.height||850;
+      var wFrac = Math.min(0.28, 180/pw), hFrac = (wFrac*pw/ar)/ph;
+      if(hFrac > 0.11){ hFrac = 0.11; wFrac = (hFrac*ph*ar)/pw; }   // cap height so it never covers the cell
+      _makeOverlay(wrap, { x: 0.5 - wFrac/2, y: 0.42, w: wFrac, h: hFrac, image: _sigData });
+      _commit();
+    };
+    im.src = _sigData;
+  }
+
+  // ── create-signature modal: draw / type / upload ─────────────────────────
+  function _openCreate(){
+    if(modal){ modal.style.display = 'flex'; _showTab('draw'); _clearCanvas(); return; }
+    modal = document.createElement('div'); modal.className = 'sig-modal';
+    modal.innerHTML =
+      '<div class="sig-modal-box">' +
+        '<h3>Add your signature</h3>' +
+        '<div class="sig-tabs">' +
+          '<div class="sig-tab on" data-tab="draw">Draw</div>' +
+          '<div class="sig-tab" data-tab="type">Type</div>' +
+          '<div class="sig-tab" data-tab="upload">Upload</div>' +
+        '</div>' +
+        '<div class="sig-panel on" data-panel="draw"><canvas id="sig-canvas"></canvas>' +
+          '<div style="text-align:right;margin-top:6px;"><button type="button" class="sig-bar-btn" id="sig-clear" ' +
+          'style="background:#eef1f6;color:#374151;border-color:#d4dae6;">Clear</button></div></div>' +
+        '<div class="sig-panel" data-panel="type"><input id="sig-type" placeholder="Type your name"><div id="sig-type-prev"></div></div>' +
+        '<div class="sig-panel" data-panel="upload"><input type="file" id="sig-upload" accept=".png,.jpg,.jpeg">' +
+          '<p style="font-size:11.5px;color:#64748b;margin-top:8px;">PNG or JPG, max 5 MB.</p></div>' +
+        '<div class="sig-modal-actions"><button type="button" class="sig-mbtn x" id="sig-cancel">Cancel</button>' +
+          '<button type="button" class="sig-mbtn ok" id="sig-use">Use signature</button></div>' +
+      '</div>';
+    document.body.appendChild(modal);
+    var tabs = modal.querySelectorAll('.sig-tab');
+    for(var i=0;i<tabs.length;i++) tabs[i].addEventListener('click', function(){ _showTab(this.getAttribute('data-tab')); });
+    var cv = document.getElementById('sig-canvas');
+    cv.width = cv.clientWidth || 430; cv.height = 150; dctx = cv.getContext('2d');
+    dctx.lineWidth = 2.4; dctx.lineCap = 'round'; dctx.lineJoin = 'round'; dctx.strokeStyle = '#111';
+    cv.addEventListener('pointerdown', function(e){ drawing = true; dlast = _cpos(cv,e); try{cv.setPointerCapture(e.pointerId);}catch(x){} });
+    cv.addEventListener('pointermove', function(e){ if(!drawing) return; var p = _cpos(cv,e);
+      dctx.beginPath(); dctx.moveTo(dlast.x,dlast.y); dctx.lineTo(p.x,p.y); dctx.stroke(); dlast = p; });
+    cv.addEventListener('pointerup', function(){ drawing = false; });
+    cv.addEventListener('pointercancel', function(){ drawing = false; });
+    document.getElementById('sig-clear').addEventListener('click', _clearCanvas);
+    var ti = document.getElementById('sig-type');
+    ti.addEventListener('input', function(){ document.getElementById('sig-type-prev').textContent = ti.value; });
+    document.getElementById('sig-cancel').addEventListener('click', function(){ modal.style.display = 'none'; });
+    document.getElementById('sig-use').addEventListener('click', _useSignature);
+    modal.addEventListener('click', function(e){ if(e.target === modal) modal.style.display = 'none'; });
+    _showTab('draw');
+  }
+  function _cpos(cv,e){ var r = cv.getBoundingClientRect();
+    return { x: (e.clientX-r.left)*(cv.width/r.width), y: (e.clientY-r.top)*(cv.height/r.height) }; }
+  function _clearCanvas(){ if(dctx){ var c = dctx.canvas; dctx.clearRect(0,0,c.width,c.height); } }
+  function _showTab(name){
+    var tabs = modal.querySelectorAll('.sig-tab'), pans = modal.querySelectorAll('.sig-panel');
+    for(var i=0;i<tabs.length;i++) tabs[i].classList.toggle('on', tabs[i].getAttribute('data-tab')===name);
+    for(var j=0;j<pans.length;j++) pans[j].classList.toggle('on', pans[j].getAttribute('data-panel')===name);
+  }
+  function _canvasNonBlank(c){
+    try{ var d = c.getContext('2d').getImageData(0,0,c.width,c.height).data;
+      for(var i=3;i<d.length;i+=4){ if(d[i]!==0) return true; } }catch(e){ return true; } return false;
+  }
+  function _typeToData(text){
+    var c = document.createElement('canvas'); c.width = 520; c.height = 150;
+    var x = c.getContext('2d'); x.fillStyle = '#111'; x.textBaseline = 'middle';
+    x.font = '64px "Brush Script MT","Segoe Script","Comic Sans MS",cursive';
+    x.fillText(text, 16, 82); return c.toDataURL('image/png');
+  }
+  // Compress to a small data URL so it ALWAYS clears the server's size cap
+  // (oversized images were being silently dropped -> "some signatures missing").
+  function _compress(img){
+    var maxSide = 380, sc = Math.min(1, maxSide / Math.max(img.width || 1, img.height || 1));
+    var c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round((img.width||1)*sc));
+    c.height = Math.max(1, Math.round((img.height||1)*sc));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    var data = c.toDataURL('image/png');
+    if(data.length > 520000){                       // big photo -> flatten to JPEG
+      var c2 = document.createElement('canvas'); c2.width = c.width; c2.height = c.height;
+      var x = c2.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0,0,c2.width,c2.height);
+      x.drawImage(c, 0, 0); data = c2.toDataURL('image/jpeg', 0.82);
+    }
+    return data;
+  }
+  function _useSignature(){
+    var active = modal.querySelector('.sig-tab.on').getAttribute('data-tab');
+    if(active === 'draw'){
+      var c = document.getElementById('sig-canvas');
+      if(!_canvasNonBlank(c)){ alert('Please draw your signature first.'); return; }
+      _setSig(c.toDataURL('image/png'));
+    } else if(active === 'type'){
+      var t = (document.getElementById('sig-type').value || '').trim();
+      if(!t){ alert('Please type your name.'); return; }
+      _setSig(_typeToData(t));
+    } else {
+      var f = document.getElementById('sig-upload').files && document.getElementById('sig-upload').files[0];
+      if(!f){ alert('Please choose an image file.'); return; }
+      if(f.size > 5*1024*1024){ alert('Image too large — max 5 MB.'); return; }
+      var img = new Image();
+      img.onload = function(){ _setSig(_compress(img)); };
+      img.onerror = function(){ alert('Could not read that image.'); };
+      img.src = URL.createObjectURL(f);
+    }
+  }
+  function _setSig(data){ _sigData = data; if(modal) modal.style.display = 'none'; _refreshPalette(); _placeFromPalette(); }
+
+  // kept for the topbar file input (legacy entry point)
+  window._sigOverlayFromFile = function(input){
+    var f = input.files && input.files[0]; if(!f) return;
+    if(f.size > 5*1024*1024){ alert('Signature image too large — max 5 MB.'); input.value = ''; return; }
+    var img = new Image();
+    img.onload = function(){
+      var pv = document.querySelector('.pv');
+      if(pv && !pv.classList.contains('sigmode')) window.placeSignature();
+      _setSig(_compress(img)); input.value = ''; };
+    img.onerror = function(){ alert('Could not read that image file.'); input.value = ''; };
+    img.src = URL.createObjectURL(f);
+  };
+})();
+"""
+
+
 @router.get("/editor/{onboarding_id}/{doc_type}/{token}", response_class=HTMLResponse, include_in_schema=False)
 async def document_live_editor(onboarding_id: str, doc_type: str, token: str,
                                db: AsyncSession = Depends(get_db)):
@@ -627,8 +1327,13 @@ async def document_live_editor(onboarding_id: str, doc_type: str, token: str,
         doc_html = extract_editable_html(doc_type, _is_overseas(rec), data.get("replacements", []))
         live_now = False
 
+    from app.services.pdf_documents import extract_editable_html as _extract_orig
+    _orig_html = _extract_orig(doc_type, _is_overseas(rec), data.get("replacements", []))
+    orig_text_js = json.dumps(_plain_text_from_html(_orig_html), ensure_ascii=False).replace("</", "<\\/")
+    orig_html_js = json.dumps(_orig_html, ensure_ascii=False).replace("</", "<\\/")
     html_json = json.dumps(doc_html, ensure_ascii=False).replace("</", "<\\/")
     comments_json = json.dumps(comments, ensure_ascii=False).replace("</", "<\\/")
+    overlays_json = json.dumps(data.get("signatures_overlay") or [], ensure_ascii=False).replace("</", "<\\/")
     locked_banner = ""
     if signed:
         locked_banner = ('<div style="background:#fee2e2;color:#991b1b;padding:9px 16px;font-size:13px;'
@@ -683,9 +1388,10 @@ async def document_live_editor(onboarding_id: str, doc_type: str, token: str,
   .sheet table{{border-collapse:collapse;width:100%;margin:8pt 0;table-layout:fixed;}}
   .sheet td{{border:1px solid #999;padding:4pt 6pt;vertical-align:top;word-wrap:break-word;}}
   .sheet:focus{{outline:none;}}
-  .pv{{flex:1;background:#525659;display:flex;flex-direction:column;min-width:0;}}
-  .pv .pvhead{{background:#3c4043;color:#e8eaed;font-size:11px;font-weight:700;padding:6px 12px;
-              display:flex;justify-content:space-between;align-items:center;}}
+  .pv{{display:none;flex-direction:column;min-width:0;flex:1;background:#525659;}}
+  .pv.open{{display:flex;}}
+  .pv .pvhead{{background:#2d3033;padding:5px 10px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0;gap:8px;}}
+  #pv-diff-stats{{display:flex;gap:5px;align-items:center;}}
   #pv-pages{{flex:1;overflow-y:auto;padding:14px 10px;display:flex;flex-direction:column;
             gap:12px;align-items:center;}}
   #pv-pages img.pg{{width:94%;max-width:740px;aspect-ratio:595/842;background:#fff;
@@ -730,62 +1436,108 @@ async def document_live_editor(onboarding_id: str, doc_type: str, token: str,
   .sb-empty{{font-size:12px;color:#94a3b8;padding:4px 2px;}}
   @media(max-width:980px){{.main{{flex-direction:column;}}.pv{{min-height:38vh;}}
     #sidebar{{width:100%;}}}}
-</style></head>
+</style>
+<style>{_EDITOR_RIBBON_CSS}</style>
+<style>{_SIG_OVERLAY_CSS}</style></head>
 <body>
 <div class="work">
 {locked_banner}
 <div class="topbar">
-  <span class="ttl">✈ LIVE EDITOR</span>
   <span class="sub">{label} — {lead.business_name}</span>
-  <span class="chip" id="mode-chip">{'LIVE-EDITED' if live_now else 'FROM TEMPLATE'}</span>
   <span class="grow"></span>
   <span id="saved">Saved ✓</span>
-  <button class="btn b-line" onclick="toggleSidebar()">🔔 Comments (<span id="cmt-n">{len([c for c in comments if not c.get("done")])}</span>)</button>
-  <button class="btn b-line" onclick="openVersions()">🕘 Versions</button>
-  <a class="btn b-line" target="_blank" id="dl-btn" href="{base}/pdf/{onboarding_id}/{doc_type}/{token}">⬇ PDF</a>
-  <a class="btn b-line" href="{base}/edit/{onboarding_id}/{doc_type}/{token}">⚙ Placeholders &amp; Send</a>
-  <button class="btn b-line" onclick="revertTemplate()" title="Drop all live edits">↺ Original</button>
-  <button class="btn b-green" onclick="sendForReview()">📨 Send for Review</button>
+  <button class="btn b-line" onclick="toggleSidebar()" title="Comments"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span id="cmt-n">{len([c for c in comments if not c.get("done")])}</span></button>
+  <button class="btn b-line" onclick="openVersions()" title="Version history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></button>
+  <button class="btn b-line" id="btn-pv" onclick="togglePreview()" title="Toggle PDF preview with change summary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Preview</button>
+  <button class="btn b-line" onclick="placeSignature()" title="Place a signature on the page — floats on top, never changes the text"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19c3-1 4-7 6-7s2 4 4 4 2-9 4-9"/><line x1="3" y1="21" x2="21" y2="21"/></svg>Place Signature</button>
+  <input type="file" id="sig-ov-file" accept=".png,.jpg,.jpeg" style="display:none" onchange="_sigOverlayFromFile(this)">
+  <a class="btn b-line" target="_blank" id="dl-btn" href="{base}/pdf/{onboarding_id}/{doc_type}/{token}" title="Download PDF"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>PDF</a>
+  <button class="btn b-line" onclick="revertTemplate()" title="Restore original template"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/></svg>Original</button>
+  <button class="btn b-green" onclick="sendForReview()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send for Review</button>
 </div>
-<div class="toolbar">
-  <button class="tb" onmousedown="return false" onclick="cmd('undo')" title="Undo">↶</button>
-  <button class="tb" onmousedown="return false" onclick="cmd('redo')" title="Redo">↷</button>
-  <span class="tsep"></span>
-  <select class="tb" onmousedown="saveRange()" onchange="cmd('fontSize',this.value);this.selectedIndex=2;" title="Font size">
-    <option value="1">Small</option><option value="2">Normal-</option>
-    <option value="3" selected>Normal</option><option value="4">Large</option>
-    <option value="5">XL</option><option value="6">Heading</option>
-  </select>
-  <span class="tsep"></span>
-  <button class="tb" style="font-weight:800;" onmousedown="return false" onclick="cmd('bold')" title="Bold">B</button>
-  <button class="tb" style="font-style:italic;" onmousedown="return false" onclick="cmd('italic')" title="Italic">I</button>
-  <button class="tb" style="text-decoration:underline;" onmousedown="return false" onclick="cmd('underline')" title="Underline">U</button>
-  <button class="tb" style="text-decoration:line-through;" onmousedown="return false" onclick="cmd('strikeThrough')" title="Strike">S</button>
-  <span class="tsep"></span>
-  <button class="tb" onmousedown="return false" onclick="cmd('justifyLeft')" title="Align left">⫷</button>
-  <button class="tb" onmousedown="return false" onclick="cmd('justifyCenter')" title="Center">≡</button>
-  <button class="tb" onmousedown="return false" onclick="cmd('justifyFull')" title="Justify">☰</button>
-  <span class="tsep"></span>
-  <button class="tb" onmousedown="return false" onclick="cmd('insertUnorderedList')" title="Bullet list">• ─</button>
-  <button class="tb" onmousedown="return false" onclick="cmd('insertOrderedList')" title="Numbered list">1. ─</button>
-  <span class="tsep"></span>
-  <button class="tb" style="background:#fde047;" onmousedown="return false" onclick="cmd('hiliteColor','#fde047')" title="Highlight">🖊</button>
-  <button class="tb" onmousedown="return false" onclick="cmd('hiliteColor','transparent')" title="Remove highlight">⊘</button>
-  <button class="tb" style="color:#1d4ed8;" onmousedown="return false" onclick="insertNote()" title="Insert note">📝 Note</button>
-  <button class="tb" onmousedown="return false" onclick="insertClause()" title="Add a new clause/paragraph">¶ Clause</button>
-  <button class="tb" onmousedown="return false" onclick="document.getElementById('sig-file').click()"
-          title="Insert your signature image at the cursor — drag it to reposition">🖊 Sign</button>
-  <input type="file" id="sig-file" accept=".png,.jpg,.jpeg" style="display:none" onchange="insertSigImage(this)">
-  <span class="tsep"></span>
-  <button class="tb" onmousedown="return false" onclick="findReplace()" title="Find and replace">🔍 Replace</button>
-  <button class="tb" onmousedown="return false" onclick="cmd('removeFormat')" title="Clear formatting">Tx</button>
-  <span class="grow"></span>
-  <button class="tb" style="color:#1a56db;font-weight:700;" onmousedown="return false" onclick="saveVersion()" title="Snapshot this state">💾 Save Version</button>
+<div class="toolbar" id="ribbon" onmousedown="saveRange()">
+  <div class="rb-lbl-grp">
+    <div class="rb-row">
+      <button class="tb" onmousedown="return false" onclick="cmd('undo')" title="Undo (Ctrl+Z)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+      <button class="tb" onmousedown="return false" onclick="cmd('redo')" title="Redo (Ctrl+Y)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>
+    </div><span class="rb-cap">Undo</span>
+  </div>
+  <div class="rb-lbl-grp">
+    <div class="rb-row">
+      <select class="rb-sel" id="rb-font" title="Font" onmousedown="saveRange()" onchange="rbFont(this.value)">
+        <option value="Calibri, sans-serif" selected>Calibri</option>
+        <option value="Arial, sans-serif">Arial</option>
+        <option value="Georgia, serif">Georgia</option>
+        <option value="'Times New Roman', serif">Times New Roman</option>
+        <option value="'Courier New', monospace">Courier New</option>
+        <option value="Verdana, sans-serif">Verdana</option>
+        <option value="'Segoe UI', sans-serif">Segoe UI</option>
+      </select>
+    </div><span class="rb-cap">Font</span>
+  </div>
+  <div class="rb-lbl-grp">
+    <div class="rb-row">
+      <select class="rb-sel" id="rb-style" title="Paragraph style" onmousedown="saveRange()" onchange="rbStyle(this.value)">
+        <option value="p" selected>Normal</option>
+        <option value="h3">Heading 3</option>
+        <option value="h2">Heading 2</option>
+        <option value="h1">Heading 1</option>
+      </select>
+    </div><span class="rb-cap">Styles</span>
+  </div>
+  <div class="rb-lbl-grp">
+    <div class="rb-row">
+      <select class="rb-sel rb-size" id="rb-size" title="Font size (pt)" onmousedown="saveRange()" onchange="rbSize(this.value)">
+        <option>8</option><option>9</option><option>10</option><option selected>10.5</option>
+        <option>11</option><option>12</option><option>14</option><option>16</option>
+        <option>18</option><option>20</option><option>24</option><option>28</option><option>36</option>
+      </select>
+      <button class="tb" id="b-bold" style="font-weight:800;" onmousedown="return false" onclick="cmd('bold')" title="Bold (Ctrl+B)">B</button>
+      <button class="tb" id="b-italic" style="font-style:italic;" onmousedown="return false" onclick="cmd('italic')" title="Italic (Ctrl+I)">I</button>
+      <button class="tb" id="b-underline" style="text-decoration:underline;" onmousedown="return false" onclick="cmd('underline')" title="Underline (Ctrl+U)">U</button>
+      <button class="tb" id="b-strike" style="text-decoration:line-through;" onmousedown="return false" onclick="cmd('strikeThrough')" title="Strikethrough">S</button>
+      <label class="tb tb-color" title="Font colour">A<input type="color" value="#111111" onmousedown="saveRange()" oninput="cmd('foreColor',this.value)"></label>
+      <label class="tb tb-color" title="Highlight colour"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a1.9 1.9 0 0 1-2.7 0l-5.3-5.3a1.9 1.9 0 0 1 0-2.7L14 4"/></svg><input type="color" value="#ffe066" onmousedown="saveRange()" oninput="cmd('hiliteColor',this.value)"></label>
+      <button class="tb" onmousedown="return false" onclick="cmd('hiliteColor','transparent')" title="No highlight"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div><span class="rb-cap">Format</span>
+  </div>
+  <div class="rb-lbl-grp">
+    <div class="rb-row">
+      <button class="tb" id="a-left" onmousedown="return false" onclick="cmd('justifyLeft')" title="Align left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="14" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg></button>
+      <button class="tb" id="a-center" onmousedown="return false" onclick="cmd('justifyCenter')" title="Center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="5" y1="18" x2="19" y2="18"/></svg></button>
+      <button class="tb" id="a-right" onmousedown="return false" onclick="cmd('justifyRight')" title="Align right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/></svg></button>
+      <button class="tb" id="a-just" onmousedown="return false" onclick="cmd('justifyFull')" title="Justify"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <button class="tb" onmousedown="return false" onclick="cmd('insertUnorderedList')" title="Bulleted list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="9" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.4" fill="currentColor" stroke="none"/></svg></button>
+      <button class="tb" onmousedown="return false" onclick="cmd('insertOrderedList')" title="Numbered list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><text x="2" y="8" font-size="7" stroke="none" fill="currentColor">1</text><text x="2" y="14" font-size="7" stroke="none" fill="currentColor">2</text><text x="2" y="20" font-size="7" stroke="none" fill="currentColor">3</text></svg></button>
+      <button class="tb" onmousedown="return false" onclick="cmd('outdent')" title="Decrease indent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="11" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><polyline points="7 9 3 12 7 15"/></svg></button>
+      <button class="tb" onmousedown="return false" onclick="cmd('indent')" title="Increase indent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="11" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><polyline points="3 9 7 12 3 15"/></svg></button>
+    </div><span class="rb-cap">Paragraph</span>
+  </div>
+  <div class="rb-lbl-grp">
+    <div class="rb-row">
+      <button class="tb" onmousedown="return false" onclick="insertNote()" title="Insert note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg></button>
+      <button class="tb" onmousedown="return false" onclick="insertClause()" title="Add a clause / paragraph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/><line x1="19" y1="13" x2="19" y2="21"/><line x1="15" y1="17" x2="23" y2="17"/></svg></button>
+      <button class="tb" onmousedown="return false" onclick="document.getElementById('sig-file').click()" title="Insert signature image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19c3-1 4-7 6-7s2 4 4 4 2-9 4-9"/><line x1="3" y1="21" x2="21" y2="21"/></svg></button>
+      <input type="file" id="sig-file" accept=".png,.jpg,.jpeg" style="display:none" onchange="insertSigImage(this)">
+      <button class="tb" onmousedown="return false" onclick="findReplace()" title="Find &amp; replace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
+      <button class="tb" onmousedown="return false" onclick="cmd('removeFormat')" title="Clear formatting"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h15"/><path d="M9 4 6 20"/><line x1="5" y1="20" x2="11" y2="20"/><line x1="14" y1="14" x2="21" y2="21"/><line x1="21" y1="14" x2="14" y2="21"/></svg></button>
+    </div><span class="rb-cap">Insert</span>
+  </div>
+  <div class="rb-lbl-grp">
+    <div class="rb-row">
+      <button class="tb tb-accent" id="btn-tc" onmousedown="return false" onclick="toggleTrackChanges()" title="Show tracked changes vs the original template (read-only)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>Track Changes</button>
+    </div><span class="rb-cap">Review</span>
+  </div>
+  <div class="rb-lbl-grp rb-end">
+    <div class="rb-row">
+      <button class="tb tb-accent" onmousedown="return false" onclick="saveVersion()" title="Snapshot this version"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 14 8"/></svg>Save Version</button>
+    </div><span class="rb-cap">Version</span>
+  </div>
 </div>
 <div class="main">
   <div class="edwrap"><div class="sheet" id="sheet" contenteditable="{'false' if signed else 'true'}" spellcheck="false" onblur="saveRange()"></div></div>
   <div class="pv">
-    <div class="pvhead"><span>LIVE PDF PREVIEW</span><button class="tb" style="color:#e8eaed;height:22px;" onclick="refreshPv()" title="Refresh">⟳</button></div>
+    <div class="pvhead"><div id="pv-diff-stats"></div><button class="tb" style="color:#bdc1c6;height:20px;background:none;" onclick="refreshPv()" title="Refresh preview">⟳</button></div>
     <div id="pv-pages"></div>
   </div>
 </div>
@@ -805,6 +1557,9 @@ const BASE = '{base}', OID = '{onboarding_id}', DT = '{doc_type}', TOK = '{token
 const SIGNED = {str(signed).lower()};
 const INIT_HTML = {html_json};
 const COMMENTS = {comments_json};
+const ORIG_TEXT = {orig_text_js};
+const ORIG_HTML = {orig_html_js};   // raw original HTML — normalized client-side for an apples-to-apples diff
+const SIG_OVERLAYS = {overlays_json};   // placed signature overlays {{page,x,y,w,h,image}}
 let timer = null;
 
 const sheet = document.getElementById('sheet');
@@ -849,11 +1604,38 @@ function dirty() {{
 }}
 sheet.addEventListener('input', dirty);
 
+function togglePreview() {{
+  var pv = document.querySelector('.pv');
+  var btn = document.getElementById('btn-pv');
+  if (pv.classList.contains('open')) {{
+    pv.classList.remove('open');
+    if (btn) {{ btn.classList.remove('active'); btn.textContent = '👁 Preview'; }}
+    return;
+  }}
+  pv.classList.add('open');
+  if (btn) {{ btn.classList.add('active'); btn.textContent = '👁 Preview ✕'; }}
+  // show word diff stats in the preview header
+  var statsEl = document.getElementById('pv-diff-stats');
+  if (statsEl && typeof window._diffStats === 'function') {{
+    var s = window._diffStats();
+    if (s.ins === 0 && s.del === 0) {{
+      statsEl.innerHTML = '<span style="color:#9ca3af;font-size:11px;">No changes vs template</span>';
+    }} else {{
+      statsEl.innerHTML =
+        (s.ins > 0 ? '<span class="chip-add">+' + s.ins + ' added</span>' : '') +
+        (s.del > 0 ? '<span class="chip-del">−' + s.del + ' removed</span>' : '');
+    }}
+  }}
+  refreshPv();
+}}
+
 async function saveDoc(extra) {{
   if (SIGNED) return false;
   const el = document.getElementById('saved');
   el.textContent = 'Saving…'; el.style.color = '#fbbf24';
-  const payload = Object.assign({{html: sheet.innerHTML, mode: 'live'}}, extra || {{}});
+  // While reviewing, the sheet shows redline markup — persist the stashed real doc instead.
+  const liveHtml = window._reviewing ? (window._reviewBackup || '') : sheet.innerHTML;
+  const payload = Object.assign({{html: liveHtml, mode: 'live'}}, extra || {{}});
   const r = await fetch(`${{BASE}}/save/${{OID}}/${{DT}}/${{TOK}}`, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify(payload)
@@ -862,8 +1644,8 @@ async function saveDoc(extra) {{
   el.textContent = ok ? 'Saved ✓' : 'Save failed';
   el.style.color = ok ? '#86efac' : '#fca5a5';
   if (ok) {{
-    document.getElementById('mode-chip').textContent = 'LIVE-EDITED';
-    refreshPv();
+    var mc = document.getElementById('mode-chip'); if (mc) mc.textContent = 'LIVE-EDITED';
+    if (document.querySelector('.pv.open')) refreshPv();
     if (document.getElementById('sidebar').classList.contains('open')) loadSidebar();
   }}
   return ok;
@@ -881,16 +1663,22 @@ async function refreshPv() {{
     const d = await r.json();
     const wrap = document.getElementById('pv-pages');
     const n = Math.max(d.pages || 1, 1);
+    // each page is an <img.pg> inside a position:relative .pg-wrap so signature
+    // overlays can be absolutely positioned on top of it.
     while (wrap.children.length > n) wrap.removeChild(wrap.lastChild);
     while (wrap.children.length < n) {{
+      const pw = document.createElement('div');
+      pw.className = 'pg-wrap';
       const img = document.createElement('img');
       img.className = 'pg';
       img.loading = 'lazy';
-      wrap.appendChild(img);
+      pw.appendChild(img);
+      wrap.appendChild(pw);
     }}
     for (let i = 0; i < n; i++) {{
-      wrap.children[i].src = `${{BASE}}/preview-page/${{OID}}/${{DT}}/${{TOK}}?p=${{i}}&v=${{v}}`;
+      wrap.children[i].querySelector('img.pg').src = `${{BASE}}/preview-page/${{OID}}/${{DT}}/${{TOK}}?p=${{i}}&v=${{v}}`;
     }}
+    if (typeof renderSigOverlays === 'function') renderSigOverlays();
   }} catch(e) {{}}
   _pvBusy = false;
   if (_pvAgain) {{ _pvAgain = false; refreshPv(); }}
@@ -925,9 +1713,14 @@ function insertSigImage(input) {{
     c.width = Math.round(img.width * scale);
     c.height = Math.round(img.height * scale);
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    // Size by a target signature HEIGHT (~48pt): pick the width that yields it
+    // from the image's aspect ratio, so portrait / oversized uploads can't blow
+    // out the signature cell. Width is used (not height) because it is the
+    // dimension the PDF sanitizer keeps and the PDF engine renders reliably.
+    const w = Math.max(30, Math.min(260, Math.round(48 * (c.width / c.height))));
     cmd('insertHTML',
-        '<img class="sig-img" draggable="true" src="' + c.toDataURL('image/png') +
-        '" style="width:150pt;cursor:move;vertical-align:middle;">&nbsp;');
+        '<img class="sig-img" src="' + c.toDataURL('image/png') +
+        '" style="width:' + w + 'pt;vertical-align:middle;">&nbsp;');
     input.value = '';
   }};
   img.onerror = function() {{ alert('Could not read that image file.'); input.value = ''; }};
@@ -938,7 +1731,7 @@ function insertSigImage(input) {{
 (function() {{
   // inject CSS for selected sig image outline
   const st = document.createElement('style');
-  st.textContent = '.sig-img{{cursor:move;vertical-align:middle;transition:outline .1s}}' +
+  st.textContent = '.sig-img{{cursor:move;vertical-align:middle;max-width:100%;transition:outline .1s}}' +
     '.sig-img:hover{{outline:2px dashed #4f8ef7;outline-offset:2px}}' +
     '.sig-img.sig-sel{{outline:2px solid #1a56db;outline-offset:2px}}';
   document.head.appendChild(st);
@@ -956,10 +1749,40 @@ function insertSigImage(input) {{
     '<span id="sig-tb-sz" style="color:#fff;font-size:11px;min-width:44px;text-align:center;"></span>' +
     '<button id="sig-tb-lg" title="Larger" style="background:#2d5a8e;color:#fff;border:none;' +
       'border-radius:5px;padding:3px 9px;cursor:pointer;font-size:14px;font-weight:bold;">+</button>' +
+    '<button id="sig-tb-fit" title="Fit to signature height" style="background:#2d5a8e;color:#fff;border:none;' +
+      'border-radius:5px;padding:3px 9px;cursor:pointer;font-size:12px;">↕ Fit</button>' +
     '<span style="color:#4b7ab5;margin:0 2px;">|</span>' +
     '<button id="sig-tb-del" title="Remove signature" style="background:#7f1d1d;color:#fca5a5;' +
       'border:none;border-radius:5px;padding:3px 9px;cursor:pointer;font-size:12px;">✕ Remove</button>';
   document.body.appendChild(tb);
+
+  // Word-style drag-to-resize grip on the selected signature image
+  const grip = document.createElement('div');
+  grip.id = 'sig-grip';
+  grip.style.cssText = 'position:fixed;display:none;z-index:9999;width:14px;height:14px;' +
+    'background:#1a56db;border:2px solid #fff;border-radius:3px;cursor:nwse-resize;' +
+    'box-shadow:0 1px 4px rgba(0,0,0,.4);touch-action:none;';
+  document.body.appendChild(grip);
+  let _drag = null;
+  grip.addEventListener('pointerdown', function(e) {{
+    if (!sel) return;
+    e.preventDefault(); e.stopPropagation();
+    try {{ grip.setPointerCapture(e.pointerId); }} catch(x) {{}}
+    _drag = {{ x: e.clientX, w: _ptWidth(sel) }};
+  }});
+  grip.addEventListener('pointermove', function(e) {{
+    if (!_drag || !sel) return;
+    const nw = Math.max(30, Math.min(500, Math.round(_drag.w + (e.clientX - _drag.x) * 0.75)));
+    sel.style.width = nw + 'pt'; sel.style.height = '';
+    document.getElementById('sig-tb-sz').textContent = nw + ' pt';
+    _reposTb();
+  }});
+  grip.addEventListener('pointerup', function(e) {{
+    if (!_drag) return;
+    _drag = null;
+    try {{ grip.releasePointerCapture(e.pointerId); }} catch(x) {{}}
+    if (typeof dirty === 'function') dirty();   // persist the new size
+  }});
 
   let sel = null;
 
@@ -976,6 +1799,7 @@ function insertSigImage(input) {{
     sel.classList.add('sig-sel');
     _reposTb();
     tb.style.display = 'flex';
+    grip.style.display = 'block';
   }}
 
   function _reposTb() {{
@@ -987,6 +1811,8 @@ function insertSigImage(input) {{
     tb.style.left = Math.max(4, left) + 'px';
     tb.style.top  = (r.top > 46 ? r.top - 42 : r.bottom + 6) + 'px';
     document.getElementById('sig-tb-sz').textContent = _ptWidth(sel) + ' pt';
+    grip.style.left = (r.right - 7) + 'px';
+    grip.style.top  = (r.bottom - 7) + 'px';
   }}
 
   function _resize(delta) {{
@@ -996,10 +1822,25 @@ function insertSigImage(input) {{
     sel.style.height = '';   // let aspect ratio breathe
     document.getElementById('sig-tb-sz').textContent = nw + ' pt';
     _reposTb();
+    if (typeof dirty === 'function') dirty();   // persist the new size
+  }}
+
+  // Normalise the selected signature to a ~48pt height using its real aspect
+  // ratio — one click to tame an oversized / portrait image (e.g. a screenshot).
+  function _fitHeight() {{
+    if (!sel) return;
+    const ar = (sel.naturalWidth && sel.naturalHeight) ? (sel.naturalWidth / sel.naturalHeight) : 1;
+    const nw = Math.max(30, Math.min(500, Math.round(48 * ar)));
+    sel.style.width = nw + 'pt';
+    sel.style.height = '';
+    document.getElementById('sig-tb-sz').textContent = nw + ' pt';
+    _reposTb();
+    if (typeof dirty === 'function') dirty();
   }}
 
   document.getElementById('sig-tb-sm').onclick  = function(e) {{ e.stopPropagation(); _resize(-15); }};
   document.getElementById('sig-tb-lg').onclick  = function(e) {{ e.stopPropagation(); _resize(+15); }};
+  document.getElementById('sig-tb-fit').onclick = function(e) {{ e.stopPropagation(); _fitHeight(); }};
   document.getElementById('sig-tb-del').onclick = function(e) {{
     e.stopPropagation();
     if (sel) {{ sel.remove(); sel = null; tb.style.display = 'none'; }}
@@ -1009,10 +1850,11 @@ function insertSigImage(input) {{
   document.addEventListener('click', function(e) {{
     if (e.target.classList && e.target.classList.contains('sig-img')) {{
       _showTb(e.target);
-    }} else if (!tb.contains(e.target)) {{
+    }} else if (!tb.contains(e.target) && !grip.contains(e.target)) {{
       if (sel) sel.classList.remove('sig-sel');
       sel = null;
       tb.style.display = 'none';
+      grip.style.display = 'none';
     }}
   }}, true);
 
@@ -1154,12 +1996,14 @@ async function sendForReview() {{
   if (!confirm('Send this edited document to the lead to review the Terms & Conditions?')) return;
   const r = await fetch(`${{BASE}}/send/${{OID}}/${{DT}}/${{TOK}}`, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{html: sheet.innerHTML, mode: 'live'}})
+    body: JSON.stringify({{html: window._reviewing ? (window._reviewBackup || '') : sheet.innerHTML, mode: 'live'}})
   }});
   const d = await r.json().catch(() => ({{}}));
   alert(r.ok ? (d.message || 'Sent for review.') : (d.detail || 'Send failed'));
 }}
 </script>
+<script>{_EDITOR_RIBBON_JS}</script>
+<script>{_SIG_OVERLAY_JS}</script>
 </body></html>"""
     return HTMLResponse(html)
 
@@ -1172,6 +2016,9 @@ class _DocSaveBody(BaseModel):
     mode: str = ""        # "" = unchanged | "live" (store html) | "template" (drop html)
     snapshot: bool = False
     note: str = ""
+    # Adobe-style signature overlays placed on the PDF preview. None = leave as-is
+    # (so a text autosave never clobbers them); [] = clear all.
+    signatures_overlay: list[dict] | None = None
 
 
 @router.post("/save/{onboarding_id}/{doc_type}/{token}")
@@ -1202,6 +2049,24 @@ async def document_save(onboarding_id: str, doc_type: str, token: str,
     elif body.mode == "template":
         data.pop("html", None)
         data["mode"] = "template"
+    if body.signatures_overlay is not None:
+        clean = []
+        for ov in body.signatures_overlay[:30]:        # cap the number of overlays
+            img = _clean_sig_image(str((ov or {}).get("image", "")))
+            if not img:
+                continue
+            try:
+                clean.append({
+                    "page": max(0, int(ov.get("page", 0))),
+                    "x": max(0.0, min(1.0, float(ov.get("x", 0)))),
+                    "y": max(0.0, min(1.0, float(ov.get("y", 0)))),
+                    "w": max(0.0, min(1.0, float(ov.get("w", 0.2)))),
+                    "h": max(0.0, min(1.0, float(ov.get("h", 0.08)))),
+                    "image": img,
+                })
+            except (TypeError, ValueError):
+                continue
+        data["signatures_overlay"] = clean
     if body.snapshot:
         _snapshot_version(data, "team", body.note or "Manual save")
     data.setdefault("replacements", [])
@@ -1728,6 +2593,338 @@ async def document_internal_sign(onboarding_id: str, doc_type: str, token: str,
     return {"message": f"Signed on behalf of Jane Aerospace and sent to {to_email} for counter-signature."}
 
 
+# ── Signer-side e-signature widget (Type / Draw / Upload) ────────────────────
+# Bulk CSS/JS live here as PLAIN (non-f-string) constants so the many JS/CSS
+# braces need no {{ }} escaping. document_sign_page injects them with single
+# {placeholders}; dynamic values reach the JS through window.SIGN_CFG.
+_SIGN_WIDGET_CSS = """
+  .fonts{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:6px;}
+  .font-opt{border:2px solid #d1d5db;border-radius:8px;padding:10px 8px;text-align:center;
+            font-size:21px;cursor:pointer;color:#1a3a6b;background:#fff;transition:all .15s;}
+  .font-opt.selected{border-color:#1a56db;background:#eff6ff;box-shadow:0 0 0 3px rgba(26,86,219,.15);}
+  .sigtabs{display:flex;gap:4px;border-bottom:2px solid #e5e9f2;margin:6px 0 14px;}
+  .sigtab{background:none;border:none;padding:10px 18px;font-size:14px;font-weight:600;color:#64748b;
+          cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;width:auto;border-radius:0;}
+  .sigtab:hover{background:none;color:#1a56db;}
+  .sigtab.active{color:#1a3a6b;border-bottom-color:#1a56db;}
+  .sigpanel{display:none;}
+  .sigpanel.active{display:block;}
+  .pad-shell{position:relative;}
+  #sig-pad{display:block;width:100%;height:190px;border:2px dashed #c7d4ee;border-radius:8px;
+           background:#fbfdff;touch-action:none;cursor:crosshair;}
+  .pad-baseline{position:absolute;left:16px;right:16px;bottom:42px;border-top:1px solid #e2e8f0;pointer-events:none;}
+  .pad-hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#9fb0cc;
+            font-size:14px;pointer-events:none;transition:opacity .15s;}
+  .pad-tools{display:flex;align-items:center;gap:14px;margin-top:10px;flex-wrap:wrap;}
+  .swatches{display:flex;gap:8px;}
+  .swatch{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid #fff;box-shadow:0 0 0 1px #cbd5e1;}
+  .swatch.active{box-shadow:0 0 0 2px #1a56db;}
+  .mini-btn{background:#fff;border:1px solid #d1d5db;border-radius:6px;color:#475569;font-size:12.5px;
+            font-weight:600;padding:6px 12px;cursor:pointer;width:auto;}
+  .mini-btn:hover{background:#f1f5f9;}
+  .mini-btn:disabled{background:#fff;opacity:.45;cursor:not-allowed;}
+  #sig-preview{border:1px dashed #c7d4ee;border-radius:8px;background:#fbfdff;min-height:64px;
+               display:flex;align-items:center;padding:8px 18px;font-size:30px;color:#10245c;
+               font-family:Georgia,serif;margin-top:6px;overflow:hidden;}
+  #sig-preview img{height:auto;}
+  .resize-bar{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;color:#475569;}
+  .resize-bar button{width:32px;height:32px;border:1px solid #d1d5db;border-radius:6px;background:#fff;
+                     font-size:18px;font-weight:700;color:#1a3a6b;cursor:pointer;line-height:1;padding:0;}
+  .resize-bar button:hover{background:#eff6ff;}
+  .resize-bar .pt{min-width:64px;text-align:center;font-weight:600;color:#1a3a6b;}
+"""
+
+_SIGN_WIDGET_JS = r"""
+/* Type / Draw / Upload signature capture. Builds the exact _SignBody payload
+   and self-validates the data URL against the server regex before POSTing,
+   because _clean_sig_image() drops a non-matching image SILENTLY. */
+window.SIGW = (function () {
+  'use strict';
+  var CFG = window.SIGN_CFG || {};
+  var PX_PER_PT = CFG.pxPerPt || 3;
+  var MIN_PT = CFG.minPt || 30, MAX_PT = CFG.maxPt || 500, STEP = CFG.stepPt || 15;
+  var MAX_B64 = CFG.maxB64 || 780000;
+  var DRAW_MAX_W = CFG.drawMaxWidth || 600, UP_MAX_W = CFG.uploadMaxWidth || 480;
+  // server contract: ^data:image/(png|jpeg);base64,[A-Za-z0-9+/=]{40,800000}$
+  var SIG_RE = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+\/=]{40,800000}$/;
+  var FONT_MAP = { standard: 'Georgia,serif', dancing: "'Dancing Script',cursive",
+                   greatvibes: "'Great Vibes',cursive", pacifico: "'Pacifico',cursive" };
+
+  var mode = 'type', sigFont = 'standard', sigWidthPt = CFG.defaultPt || 150;
+  var drawnURL = '', uploadURL = '', uploadImg = null, pad = null;
+  function $(id) { return document.getElementById(id); }
+  function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+  /* ===== HiDPI signature pad ===== */
+  function SignaturePad(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d', { willReadFrequently: true });
+    this.color = '#10245c'; this.minW = 1.3; this.maxW = 3.4; this.vW = 0.7;
+    this.dpr = 1; this.history = []; this._reset();
+    var self = this;
+    this.ro = new ResizeObserver(function () { self.fit(); });
+    this.ro.observe(canvas); this._bind();
+  }
+  SignaturePad.prototype._reset = function () {
+    this.drawing = false; this.pts = []; this.lastV = 0;
+    this.lastW = (this.minW + this.maxW) / 2; this.ink = false;
+  };
+  // Backing store sized in DEVICE px (css * dpr) -> crisp on Retina; one
+  // transform lets every stroke be authored in CSS-px space.
+  SignaturePad.prototype.fit = function () {
+    var dpr = Math.max(1, window.devicePixelRatio || 1);
+    var rect = this.canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;               // hidden tab -> skip
+    var prev = this.ink ? this.canvas.toDataURL() : null;
+    this.dpr = dpr;
+    this.canvas.width = Math.round(rect.width * dpr);
+    this.canvas.height = Math.round(rect.height * dpr);
+    this.canvas.style.height = rect.height + 'px';
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this._style();
+    if (prev) { var im = new Image(), c = this.ctx, w = rect.width, h = rect.height;
+      im.onload = function () { c.drawImage(im, 0, 0, w, h); }; im.src = prev; }
+  };
+  SignaturePad.prototype._style = function () {
+    var c = this.ctx; c.strokeStyle = this.color; c.fillStyle = this.color;
+    c.lineCap = 'round'; c.lineJoin = 'round';
+  };
+  // pointer -> authored CSS-px; scaleX/Y absorb responsive layout + browser zoom
+  SignaturePad.prototype._pos = function (e) {
+    var rect = this.canvas.getBoundingClientRect();
+    var lw = this.canvas.width / this.dpr, lh = this.canvas.height / this.dpr;
+    var sx = lw / rect.width, sy = lh / rect.height;
+    return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy,
+             p: (e.pressure > 0 && e.pressure !== 0.5) ? e.pressure : 0.5 };
+  };
+  SignaturePad.prototype._bind = function () {
+    var cv = this.canvas, self = this;
+    cv.addEventListener('pointerdown', function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      cv.setPointerCapture(e.pointerId); self._snap();
+      self.drawing = true; self.pts = [self._pos(e)]; self.lastW = (self.minW + self.maxW) / 2;
+    });
+    cv.addEventListener('pointermove', function (e) {
+      if (!self.drawing) return; e.preventDefault();
+      var evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];   // full pen path
+      for (var i = 0; i < evs.length; i++) self._extend(self._pos(evs[i]));
+    });
+    function end(e) {
+      if (!self.drawing) return; self.drawing = false; self._flush();
+      try { cv.releasePointerCapture(e.pointerId); } catch (x) {}
+      onPadChange();
+    }
+    cv.addEventListener('pointerup', end);
+    cv.addEventListener('pointercancel', end);
+    cv.addEventListener('pointerleave', end);
+  };
+  // variable-width quadratic-midpoint smoothing (velocity + stylus pressure)
+  SignaturePad.prototype._extend = function (pt) {
+    this.ink = true; var p = this.pts; p.push(pt); if (p.length < 3) return;
+    var n = p.length, p0 = p[n - 3], p1 = p[n - 2], p2 = p[n - 1];
+    var m1 = mid(p0, p1), m2 = mid(p1, p2), v = dist(p1, p2);
+    this.lastV = this.vW * v + (1 - this.vW) * this.lastV;
+    var target = Math.max(this.maxW - this.lastV * 0.9, this.minW) * (0.6 + 0.8 * p2.p);
+    var w = (this.lastW + target) / 2, c = this.ctx;
+    c.beginPath(); c.lineWidth = w; c.moveTo(m1.x, m1.y);
+    c.quadraticCurveTo(p1.x, p1.y, m2.x, m2.y); c.stroke(); this.lastW = w;
+  };
+  SignaturePad.prototype._flush = function () {
+    if (this.pts.length && this.pts.length < 3) {            // tap -> dot
+      var p = this.pts[0]; this.ctx.beginPath();
+      this.ctx.arc(p.x, p.y, this.lastW / 2, 0, Math.PI * 2); this.ctx.fill(); this.ink = true;
+    }
+    this.pts = [];
+  };
+  SignaturePad.prototype._snap = function () {
+    try { this.history.push(this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height)); } catch (e) {}
+    if (this.history.length > 20) this.history.shift();
+  };
+  SignaturePad.prototype.undo = function () {
+    var im = this.history.pop(); if (!im) return;
+    var c = this.ctx; c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
+    c.putImageData(im, 0, 0); c.restore(); this.ink = !this.isEmpty(); onPadChange();
+  };
+  SignaturePad.prototype.clear = function () {
+    var c = this.ctx; c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, this.canvas.width, this.canvas.height); c.restore();
+    this.history = []; this._reset(); onPadChange();
+  };
+  SignaturePad.prototype.setColor = function (hex) { this.color = hex; this._style(); };
+  SignaturePad.prototype._bounds = function () {       // alpha bounding box of the ink
+    var w = this.canvas.width, h = this.canvas.height, d;
+    try { d = this.ctx.getImageData(0, 0, w, h).data; } catch (e) { return null; }
+    var minX = w, minY = h, maxX = -1, maxY = -1, x, y;
+    for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
+      if (d[(y * w + x) * 4 + 3] !== 0) {
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+    }
+    return maxX < 0 ? null : { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+  };
+  SignaturePad.prototype.isEmpty = function () { return !this._bounds(); };
+  SignaturePad.prototype.canUndo = function () { return this.history.length > 0; };
+  // ink-trim + downscale until base64 fits the server cap
+  SignaturePad.prototype.toDataURL = function (maxWidth) {
+    var box = this._bounds(); if (!box) return '';
+    var pad2 = 10 * this.dpr;
+    var sx = Math.max(0, box.minX - pad2), sy = Math.max(0, box.minY - pad2);
+    var sw = Math.min(this.canvas.width, box.maxX + pad2) - sx;
+    var sh = Math.min(this.canvas.height, box.maxY + pad2) - sy;
+    var scale = Math.min(1, maxWidth / sw), url = '';
+    for (var i = 0; i < 6; i++) {
+      var out = document.createElement('canvas');
+      out.width = Math.max(1, Math.round(sw * scale));
+      out.height = Math.max(1, Math.round(sh * scale));
+      out.getContext('2d').drawImage(this.canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+      url = out.toDataURL('image/png');
+      if ((url.length - url.indexOf(',') - 1) <= MAX_B64) break;
+      scale *= 0.8;
+    }
+    return url;
+  };
+
+  /* ===== wiring ===== */
+  function targetWidthPx() { return Math.max(60, Math.min(DRAW_MAX_W, Math.round(sigWidthPt * PX_PER_PT))); }
+  function onPadChange() {
+    var hint = $('pad-hint'); if (hint) hint.style.opacity = pad.isEmpty() ? '1' : '0';
+    var u = $('pad-undo'); if (u) u.disabled = !pad.canUndo();
+    drawnURL = pad.isEmpty() ? '' : pad.toDataURL(targetWidthPx());
+    updatePreview();
+  }
+  // upload re-encoded to PNG, width <= min(480, target), shrink to fit the cap
+  function recomputeUpload() {
+    if (!uploadImg) { uploadURL = ''; return; }
+    var capW = Math.min(UP_MAX_W, targetWidthPx());
+    var scale = Math.min(1, capW / uploadImg.width), url = '';
+    for (var i = 0; i < 6; i++) {
+      var c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(uploadImg.width * scale));
+      c.height = Math.max(1, Math.round(uploadImg.height * scale));
+      c.getContext('2d').drawImage(uploadImg, 0, 0, c.width, c.height);
+      url = c.toDataURL('image/png');
+      if ((url.length - url.indexOf(',') - 1) <= MAX_B64) break;
+      scale *= 0.8;
+    }
+    uploadURL = url;
+  }
+  function currentImage() { return mode === 'draw' ? drawnURL : mode === 'upload' ? uploadURL : ''; }
+
+  function switchTab(m) {
+    mode = m;
+    var tabs = document.querySelectorAll('.sigtab'), i;
+    for (i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].dataset.mode === m);
+    var panels = document.querySelectorAll('.sigpanel');
+    for (i = 0; i < panels.length; i++) panels[i].classList.toggle('active', panels[i].dataset.panel === m);
+    $('resize-bar').style.display = (m === 'type') ? 'none' : 'flex';
+    if (m === 'draw' && pad) pad.fit();      // canvas now visible -> size it
+    updatePreview();
+  }
+  function pickFont(el) {
+    var opts = document.querySelectorAll('.font-opt'), i;
+    for (i = 0; i < opts.length; i++) opts[i].classList.remove('selected');
+    el.classList.add('selected'); sigFont = el.dataset.font; updatePreview();
+  }
+  function onNameInput() { updatePreview(); }
+  function loadUpload(input) {
+    var f = input.files && input.files[0];
+    if (!f) { uploadImg = null; uploadURL = ''; updatePreview(); return; }
+    if (f.size > 5 * 1024 * 1024) { alert('Signature image is too large — maximum 5 MB.'); input.value = ''; return; }
+    var img = new Image();
+    img.onload = function () { uploadImg = img; recomputeUpload(); updatePreview(); };
+    img.onerror = function () { alert('Could not read that image file.'); input.value = ''; };
+    img.src = URL.createObjectURL(f);
+  }
+  // signer-side resize: mirrors the editor toolbar (step 15pt, clamp 30-500)
+  function resize(dir) {
+    sigWidthPt = Math.max(MIN_PT, Math.min(MAX_PT, sigWidthPt + dir * STEP));
+    $('sig-pt').textContent = sigWidthPt + ' pt';
+    if (mode === 'draw' && pad && !pad.isEmpty()) drawnURL = pad.toDataURL(targetWidthPx());
+    else if (mode === 'upload') recomputeUpload();
+    updatePreview();
+  }
+  function updatePreview() {
+    var prev = $('sig-preview'), name = ($('s-name').value || '').trim();
+    if (mode === 'type') {
+      prev.style.fontFamily = FONT_MAP[sigFont];
+      prev.textContent = name || 'Type your name above';
+      prev.style.color = name ? '#10245c' : '#9ca3af';
+      prev.style.fontSize = name ? '30px' : '14px';
+      return;
+    }
+    var img = currentImage();
+    if (img) {
+      prev.innerHTML = '<img src="' + img + '" style="width:' + sigWidthPt + 'px;max-width:100%;height:auto;">';
+    } else {
+      prev.style.fontFamily = 'Georgia,serif'; prev.style.color = '#9ca3af'; prev.style.fontSize = '14px';
+      prev.textContent = (mode === 'draw') ? 'Draw your signature above' : 'Upload a signature image';
+    }
+  }
+  function showErr(msg) { var e = $('err'); e.textContent = msg; e.style.display = 'block'; }
+
+  async function signDoc() {
+    $('err').style.display = 'none';
+    var name = ($('s-name').value || '').trim();
+    if (!name) { showErr('Please enter your full legal name.'); return; }
+    var sigImage = '';
+    if (mode === 'draw') {
+      if (!drawnURL) { showErr('Please draw your signature.'); return; }
+      sigImage = drawnURL;
+    } else if (mode === 'upload') {
+      if (!uploadURL) { showErr('Please upload your signature image.'); return; }
+      sigImage = uploadURL;
+    }
+    // self-validate against the server regex so nothing is silently dropped
+    if (sigImage && !SIG_RE.test(sigImage)) {
+      showErr('Signature could not be encoded within size limits — please redraw a little smaller.'); return;
+    }
+    if (!$('s-agree').checked) { showErr('Please tick the confirmation checkbox to proceed.'); return; }
+
+    var btn = $('sign-btn'); btn.disabled = true; btn.textContent = 'Signing…';
+    try {
+      var r = await fetch(CFG.endpoint || window.location.pathname, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          signed_name: name,
+          designation: ($('s-desig').value || '').trim(),
+          sig_font: (mode === 'type') ? sigFont : 'standard',   // TYPE -> font; DRAW/UPLOAD -> standard
+          sig_image: sigImage                                   // '' for TYPE, data URL otherwise
+        })
+      });
+      var d = await r.json().catch(function () { return {}; });
+      if (r.ok) { window.location.href = d.redirect || window.location.pathname; }
+      else { showErr(d.detail || 'Signing failed. Please try again.');
+             btn.disabled = false; btn.textContent = '✍ I Agree & Sign'; }
+    } catch (e) {
+      showErr('Network error — ' + e.message);
+      btn.disabled = false; btn.textContent = '✍ I Agree & Sign';
+    }
+  }
+
+  function init() {
+    pad = new SignaturePad($('sig-pad'));
+    var sw = $('sig-swatches');
+    if (sw) sw.addEventListener('click', function (e) {
+      var s = e.target && e.target.closest ? e.target.closest('.swatch') : null;
+      if (!s) return;
+      var all = sw.querySelectorAll('.swatch'), i;
+      for (i = 0; i < all.length; i++) all[i].classList.remove('active');
+      s.classList.add('active'); pad.setColor(s.dataset.color);
+    });
+    $('sig-pt').textContent = sigWidthPt + ' pt';
+    updatePreview();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+
+  return { switchTab: switchTab, pickFont: pickFont, onNameInput: onNameInput, loadUpload: loadUpload,
+           resize: resize, undo: function () { pad.undo(); }, clearPad: function () { pad.clear(); },
+           signDoc: signDoc };
+})();
+"""
+
+
 @router.get("/sign/{onboarding_id}/{doc_type}/{token}", response_class=HTMLResponse, include_in_schema=False)
 async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: AsyncSession = Depends(get_db)):
     _check_doc_type(doc_type)
@@ -1765,162 +2962,188 @@ async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: 
         pdf_url = f"/api/v1/documents/signed/{onboarding_id}/{doc_type}/{token}"
     sig_name = data.get("signatory_name", "") or (lead.contact_name or "")
 
+    sign_cfg = {
+        "endpoint": f"/api/v1/documents/sign/{onboarding_id}/{doc_type}/{token}",
+        "maxB64": 780000, "uploadMaxWidth": 480, "drawMaxWidth": 600,
+        "defaultPt": 150, "minPt": 30, "maxPt": 500, "stepPt": 15, "pxPerPt": 3,
+    }
+    sign_cfg_js = json.dumps(sign_cfg).replace("<", "\\u003c")  # safe to embed in <script>
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign {label} — Jane Aerospace</title>
 <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600&family=Great+Vibes&family=Pacifico&display=swap" rel="stylesheet">
+<style>{_SIGN_WIDGET_CSS}</style>
 <style>
-  .fonts{{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:6px;}}
-  .font-opt{{border:2px solid #d1d5db;border-radius:8px;padding:10px 8px;text-align:center;
-            font-size:21px;cursor:pointer;color:#1a3a6b;background:#fff;transition:all .15s;}}
-  .font-opt.selected{{border-color:#1a56db;background:#eff6ff;box-shadow:0 0 0 3px rgba(26,86,219,.15);}}
-  #sig-preview{{border:1px dashed #c7d4ee;border-radius:8px;background:#fbfdff;min-height:64px;
-               display:flex;align-items:center;padding:8px 18px;font-size:30px;color:#10245c;
-               font-family:Georgia,serif;margin-top:6px;}}
-</style>
-<style>
-  *{{box-sizing:border-box;}}
-  body{{font-family:Arial,sans-serif;background:#f4f6fb;margin:0;padding:20px;}}
-  .wrap{{max-width:900px;margin:0 auto;}}
-  .card{{background:#fff;border-radius:12px;box-shadow:0 2px 16px rgba(0,0,0,.1);padding:28px 32px;margin-bottom:18px;}}
-  h1{{color:#1a3a6b;font-size:20px;margin:0 0 4px;}}
-  .sub{{color:#666;font-size:13px;margin:0 0 14px;}}
-  iframe{{width:100%;height:600px;border:1px solid #d1d5db;border-radius:8px;background:#fff;}}
-  label{{display:block;font-size:13px;font-weight:600;color:#222;margin:14px 0 4px;}}
-  input[type=text]{{width:100%;padding:11px 13px;border:1px solid #ccc;border-radius:6px;font-size:14px;}}
-  .chk{{display:flex;gap:10px;align-items:flex-start;margin:18px 0;font-size:13px;color:#374151;line-height:1.5;}}
-  .chk input{{margin-top:3px;width:17px;height:17px;}}
-  button{{background:#16a34a;color:#fff;border:none;padding:14px 34px;border-radius:7px;
-         font-size:16px;font-weight:700;cursor:pointer;width:100%;}}
-  button:disabled{{background:#9ca3af;cursor:not-allowed;}}
-  .dl{{font-size:13px;margin-top:8px;}}
-  #err{{display:none;background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:6px;
-       font-size:13px;margin:12px 0;}}
-  .two-col{{display:grid;grid-template-columns:1fr 1fr;gap:14px;}}
-  @media(max-width:640px){{.two-col{{grid-template-columns:1fr;}}.card{{padding:20px 16px;}}iframe{{height:420px;}}}}
+  *{{box-sizing:border-box;margin:0;}}
+  :root{{--navy:#15315f;--ink:#0f172a;--muted:#64748b;--line:#e6eaf0;--blue:#2563eb;}}
+  body{{font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;color:var(--ink);
+    background:linear-gradient(180deg,#e9eff8,#f5f8fc 260px);min-height:100vh;padding:0 16px 44px;
+    -webkit-font-smoothing:antialiased;}}
+  .topbar{{display:flex;align-items:center;justify-content:space-between;gap:12px;max-width:880px;
+    margin:0 auto;padding:18px 4px 20px;}}
+  .brand{{display:flex;align-items:center;gap:10px;font-weight:800;color:var(--navy);font-size:17px;}}
+  .brand .logo{{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--navy),var(--blue));
+    color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;}}
+  .secure{{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#15803d;
+    background:#dcfce7;border:1px solid #bbf7d0;border-radius:99px;padding:5px 12px;}}
+  .wrap{{max-width:880px;margin:0 auto;}}
+  .card{{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;margin-bottom:18px;
+    box-shadow:0 1px 2px rgba(16,24,40,.04),0 14px 34px rgba(16,40,90,.08);}}
+  .card-head{{display:flex;align-items:flex-start;gap:14px;padding:18px 26px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,#fbfdff,#f5f9fe);}}
+  .step{{width:30px;height:30px;flex:none;border-radius:50%;background:var(--navy);color:#fff;font-weight:800;
+    font-size:14px;display:flex;align-items:center;justify-content:center;}}
+  .card-head h1{{font-size:16px;color:var(--navy);margin:1px 0 3px;}}
+  .card-head .sub{{font-size:12.5px;color:var(--muted);line-height:1.5;}}
+  .card-pad{{padding:22px 26px;}}
+  .parties{{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}}
+  .party{{flex:1;min-width:170px;background:#f8fafc;border:1px solid var(--line);border-radius:11px;padding:11px 14px;}}
+  .party .role{{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;font-weight:800;}}
+  .party .pname{{font-size:13.5px;font-weight:700;color:var(--ink);margin-top:3px;}}
+  .vs{{color:#c2ccda;font-weight:800;font-size:17px;}}
+  .viewer{{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:16px;}}
+  .viewer-bar{{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 14px;
+    background:#f1f5f9;border-bottom:1px solid var(--line);font-size:12px;color:#475569;font-weight:700;}}
+  .viewer iframe{{width:100%;height:560px;border:none;display:block;background:#fff;}}
+  .btn-ghost{{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--blue);
+    text-decoration:none;background:#eff6ff;border:1px solid #dbeafe;border-radius:7px;padding:5px 11px;}}
+  label{{display:block;font-size:12.5px;font-weight:600;color:#334155;margin:0 0 6px;}}
+  .req{{color:#e11d48;}}
+  input[type=text]{{width:100%;padding:11px 13px;border:1.5px solid #d6dce6;border-radius:9px;font-size:14px;
+    color:var(--ink);background:#fff;transition:border-color .15s,box-shadow .15s;}}
+  input[type=text]:focus{{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.14);}}
+  .two-col{{display:grid;grid-template-columns:1fr 1fr;gap:16px;}}
+  .consent{{display:flex;gap:12px;align-items:flex-start;margin:20px 0 0;font-size:12.5px;color:#374151;
+    line-height:1.55;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:14px 16px;}}
+  .consent input{{margin-top:2px;width:18px;height:18px;flex:none;accent-color:#16a34a;}}
+  #err{{display:none;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;padding:11px 14px;
+    border-radius:9px;font-size:13px;margin:14px 0 0;}}
+  .sign-btn{{margin-top:18px;width:100%;border:none;border-radius:12px;padding:15px 28px;font-size:16px;
+    font-weight:800;color:#fff;cursor:pointer;letter-spacing:.2px;background:linear-gradient(135deg,#16a34a,#15803d);
+    box-shadow:0 8px 20px rgba(22,163,74,.28);transition:transform .08s,box-shadow .15s,background .15s;}}
+  .sign-btn:hover{{box-shadow:0 10px 26px rgba(22,163,74,.36);}}
+  .sign-btn:active{{transform:translateY(1px);}}
+  .sign-btn:disabled{{background:#9ca3af;box-shadow:none;cursor:not-allowed;}}
+  .trust{{max-width:880px;margin:4px auto 0;display:flex;align-items:center;justify-content:center;gap:20px;
+    flex-wrap:wrap;color:#94a3b8;font-size:11.5px;}}
+  .trust span{{display:inline-flex;align-items:center;gap:6px;}}
+  @media(max-width:640px){{.two-col{{grid-template-columns:1fr;}}.card-pad{{padding:18px 16px;}}
+    .card-head{{padding:15px 16px;}}.viewer iframe{{height:62vh;}}.topbar{{padding:14px 2px 16px;}}}}
 </style></head>
 <body>
+<div class="topbar">
+  <div class="brand"><span class="logo">✈</span> Jane Aerospace</div>
+  <span class="secure">🔒 Secure e-signature</span>
+</div>
 <div class="wrap">
   <div class="card">
-    <div style="font-size:15px;font-weight:700;color:#1a3a6b;margin-bottom:12px;">✈ Jane Aerospace</div>
-    <h1>{label}</h1>
-    <p class="sub">Between <strong>Jane Aerospace Private Limited</strong> and
-      <strong>{lead.business_name}</strong> — please review the full document below, then sign at the bottom.</p>
-    <iframe src="{pdf_url}#toolbar=1"></iframe>
-    <p class="dl"><a href="{pdf_url}" target="_blank" style="color:#1155cc;">Open / download the PDF ↗</a></p>
+    <div class="card-head">
+      <div class="step">1</div>
+      <div><h1>Review the {label}</h1>
+        <div class="sub">Read the full document below — scroll, zoom, or download it before you sign.</div></div>
+    </div>
+    <div class="card-pad">
+      <div class="parties">
+        <div class="party"><div class="role">Disclosing Party</div><div class="pname">Jane Aerospace Private Limited</div></div>
+        <span class="vs">⇄</span>
+        <div class="party"><div class="role">Counterparty</div><div class="pname">{lead.business_name}</div></div>
+      </div>
+      <div class="viewer">
+        <div class="viewer-bar"><span>📄 {label}</span>
+          <a class="btn-ghost" href="{pdf_url}" target="_blank">Open / download ↗</a></div>
+        <iframe src="{pdf_url}#toolbar=1" title="Document preview"></iframe>
+      </div>
+    </div>
   </div>
 
   <div class="card">
-    <h1 style="font-size:17px;">Electronic Signature</h1>
-    <div class="two-col">
-      <div>
-        <label>Full Legal Name <span style="color:#e53e3e;">*</span></label>
-        <input type="text" id="s-name" value="{sig_name}" placeholder="Your full name" oninput="updateSig()">
+    <div class="card-head">
+      <div class="step">2</div>
+      <div><h1>Sign electronically</h1>
+        <div class="sub">Adopt your signature below, tick the consent box, then confirm.</div></div>
+    </div>
+    <div class="card-pad">
+      <div class="two-col">
+        <div>
+          <label>Full Legal Name <span class="req">*</span></label>
+          <input type="text" id="s-name" value="{sig_name}" placeholder="Your full name" oninput="SIGW.onNameInput()">
+        </div>
+        <div>
+          <label>Designation</label>
+          <input type="text" id="s-desig" placeholder="e.g. Director">
+        </div>
       </div>
-      <div>
-        <label>Designation</label>
-        <input type="text" id="s-desig" placeholder="e.g. Director">
+
+      <label style="margin-top:16px;">Your Signature</label>
+      <div class="sigtabs" id="sig-tabs">
+        <button type="button" class="sigtab active" data-mode="type"   onclick="SIGW.switchTab('type')">Type</button>
+        <button type="button" class="sigtab"        data-mode="draw"   onclick="SIGW.switchTab('draw')">Draw</button>
+        <button type="button" class="sigtab"        data-mode="upload" onclick="SIGW.switchTab('upload')">Upload</button>
       </div>
+
+      <div class="sigpanel active" data-panel="type">
+        <div class="fonts" id="font-row">
+          <div class="font-opt selected" data-font="standard"   style="font-family:Georgia,serif;"           onclick="SIGW.pickFont(this)">Signature</div>
+          <div class="font-opt"          data-font="dancing"    style="font-family:'Dancing Script',cursive;" onclick="SIGW.pickFont(this)">Signature</div>
+          <div class="font-opt"          data-font="greatvibes" style="font-family:'Great Vibes',cursive;"     onclick="SIGW.pickFont(this)">Signature</div>
+          <div class="font-opt"          data-font="pacifico"   style="font-family:'Pacifico',cursive;"        onclick="SIGW.pickFont(this)">Signature</div>
+        </div>
+      </div>
+
+      <div class="sigpanel" data-panel="draw">
+        <div class="pad-shell">
+          <canvas id="sig-pad"></canvas>
+          <div class="pad-baseline"></div>
+          <div class="pad-hint" id="pad-hint">Draw your signature here</div>
+        </div>
+        <div class="pad-tools">
+          <div class="swatches" id="sig-swatches">
+            <span class="swatch active" data-color="#10245c" style="background:#10245c" title="Black"></span>
+            <span class="swatch"        data-color="#1d4ed8" style="background:#1d4ed8" title="Blue"></span>
+            <span class="swatch"        data-color="#b91c1c" style="background:#b91c1c" title="Red"></span>
+          </div>
+          <button type="button" class="mini-btn" id="pad-undo" onclick="SIGW.undo()" disabled>↶ Undo</button>
+          <button type="button" class="mini-btn" id="pad-clear" onclick="SIGW.clearPad()">Clear</button>
+        </div>
+      </div>
+
+      <div class="sigpanel" data-panel="upload">
+        <label style="margin-top:4px;">Upload a PNG / JPG of your signature
+          <span style="color:#9ca3af;font-weight:400;">(used as your signature image)</span></label>
+        <input type="file" id="s-sigimg" accept=".png,.jpg,.jpeg" onchange="SIGW.loadUpload(this)"
+               style="font-size:13px;margin-top:4px;">
+      </div>
+
+      <label style="margin-top:14px;">Signature Preview</label>
+      <div id="sig-preview">Type your name above</div>
+      <div class="resize-bar" id="resize-bar" style="display:none;">
+        <span>Size</span>
+        <button type="button" onclick="SIGW.resize(-1)" title="Smaller">&minus;</button>
+        <span class="pt" id="sig-pt">150 pt</span>
+        <button type="button" onclick="SIGW.resize(1)" title="Larger">+</button>
+      </div>
+
+      <div class="consent">
+        <input type="checkbox" id="s-agree">
+        <span>I confirm that I am an authorised signatory of <strong>{lead.business_name}</strong>,
+        I have read and understood this {label} in full, and I agree to be legally bound by its terms.
+        I understand that adopting my signature and clicking "I Agree &amp; Sign" constitutes my electronic signature.</span>
+      </div>
+      <div id="err"></div>
+      <button id="sign-btn" class="sign-btn" onclick="SIGW.signDoc()">✍ I Agree &amp; Sign</button>
     </div>
-    <label style="margin-top:16px;">Signature Style</label>
-    <div class="fonts" id="font-row">
-      <div class="font-opt selected" data-font="standard" style="font-family:Georgia,serif;" onclick="pickFont(this)">Signature</div>
-      <div class="font-opt" data-font="dancing" style="font-family:'Dancing Script',cursive;" onclick="pickFont(this)">Signature</div>
-      <div class="font-opt" data-font="greatvibes" style="font-family:'Great Vibes',cursive;" onclick="pickFont(this)">Signature</div>
-      <div class="font-opt" data-font="pacifico" style="font-family:'Pacifico',cursive;" onclick="pickFont(this)">Signature</div>
-    </div>
-    <label style="margin-top:14px;">Or Upload Your Signature Image
-      <span style="color:#9ca3af;font-weight:400;">(PNG / JPG of your real signature — used instead of the style above)</span></label>
-    <input type="file" id="s-sigimg" accept=".png,.jpg,.jpeg" onchange="loadSigImage(this)"
-           style="font-size:13px;margin-top:2px;">
-    <label style="margin-top:14px;">Signature Preview</label>
-    <div id="sig-preview">Type your name above</div>
-    <div class="chk">
-      <input type="checkbox" id="s-agree">
-      <span>I confirm that I am an authorised signatory of <strong>{lead.business_name}</strong>,
-      I have read and understood this {label} in full, and I agree to be legally bound by its terms.
-      I understand that typing my name and clicking "I Agree &amp; Sign" constitutes my electronic signature.</span>
-    </div>
-    <div id="err"></div>
-    <button id="sign-btn" onclick="signDoc()">✍ I Agree &amp; Sign</button>
   </div>
 </div>
+<div class="trust">
+  <span>🔒 Encrypted in transit</span>
+  <span>⚖ Legally binding · IT Act, 2000</span>
+  <span>📋 Audit-logged: IP, time &amp; device</span>
+</div>
 
-<script>
-const FONT_MAP = {{
-  standard: "Georgia,serif",
-  dancing: "'Dancing Script',cursive",
-  greatvibes: "'Great Vibes',cursive",
-  pacifico: "'Pacifico',cursive",
-}};
-let SIG_FONT = 'standard';
-
-function pickFont(el) {{
-  document.querySelectorAll('.font-opt').forEach(o => o.classList.remove('selected'));
-  el.classList.add('selected');
-  SIG_FONT = el.dataset.font;
-  updateSig();
-}}
-let SIG_IMAGE = '';
-function updateSig() {{
-  const p = document.getElementById('sig-preview');
-  const name = document.getElementById('s-name').value.trim();
-  if (SIG_IMAGE) {{
-    p.innerHTML = '<img src="' + SIG_IMAGE + '" style="max-height:56px;max-width:90%;">';
-    return;
-  }}
-  p.style.fontFamily = FONT_MAP[SIG_FONT];
-  p.textContent = name || 'Type your name above';
-  p.style.color = name ? '#10245c' : '#9ca3af';
-  p.style.fontSize = name ? '30px' : '14px';
-}}
-function loadSigImage(input) {{
-  const f = input.files && input.files[0];
-  if (!f) {{ SIG_IMAGE = ''; updateSig(); return; }}
-  if (f.size > 5 * 1024 * 1024) {{
-    alert('Signature image is too large — maximum 5 MB.'); input.value = ''; return;
-  }}
-  const img = new Image();
-  img.onload = function() {{
-    const scale = Math.min(1, 480 / img.width);
-    const c = document.createElement('canvas');
-    c.width = Math.round(img.width * scale);
-    c.height = Math.round(img.height * scale);
-    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    SIG_IMAGE = c.toDataURL('image/png');
-    updateSig();
-  }};
-  img.onerror = function() {{ alert('Could not read that image file.'); input.value = ''; }};
-  img.src = URL.createObjectURL(f);
-}}
-updateSig();
-
-async function signDoc() {{
-  const name = document.getElementById('s-name').value.trim();
-  const agree = document.getElementById('s-agree').checked;
-  const err = document.getElementById('err');
-  err.style.display = 'none';
-  if (!name) {{ err.textContent = 'Please enter your full legal name.'; err.style.display = 'block'; return; }}
-  if (!agree) {{ err.textContent = 'Please tick the confirmation checkbox to proceed.'; err.style.display = 'block'; return; }}
-  const btn = document.getElementById('sign-btn');
-  btn.disabled = true; btn.textContent = 'Signing…';
-  try {{
-    const r = await fetch(window.location.pathname, {{
-      method: 'POST', headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify({{signed_name: name, designation: document.getElementById('s-desig').value.trim(),
-                            sig_font: SIG_FONT, sig_image: SIG_IMAGE}})
-    }});
-    const d = await r.json().catch(() => ({{}}));
-    if (r.ok) {{ window.location.href = d.redirect || window.location.pathname; }}
-    else {{ err.textContent = d.detail || 'Signing failed. Please try again.'; err.style.display = 'block';
-            btn.disabled = false; btn.textContent = '✍ I Agree & Sign'; }}
-  }} catch(e) {{
-    err.textContent = 'Network error — ' + e.message; err.style.display = 'block';
-    btn.disabled = false; btn.textContent = '✍ I Agree & Sign';
-  }}
-}}
-</script>
+<script>window.SIGN_CFG = {sign_cfg_js};</script>
+<script>{_SIGN_WIDGET_JS}</script>
 </body></html>"""
     return HTMLResponse(html)
 
@@ -1930,6 +3153,7 @@ class _SignBody(BaseModel):
     designation: str = ""
     sig_font: str = "standard"
     sig_image: str = ""      # optional uploaded signature picture (data URL)
+    signatures_overlay: list[dict] | None = None   # lead-placed signatures on the page(s)
 
 
 @router.post("/sign/{onboarding_id}/{doc_type}/{token}")
@@ -1962,6 +3186,25 @@ async def document_sign(onboarding_id: str, doc_type: str, token: str,
         "user_agent": (request.headers.get("user-agent") or "")[:300],
     }
     data["signature"] = sig
+    # merge the lead's placed signature overlays so they stamp onto the page(s)
+    if body.signatures_overlay:
+        merged = list(data.get("signatures_overlay") or [])
+        for ov in body.signatures_overlay[:30]:
+            img = _clean_sig_image(str((ov or {}).get("image", "")))
+            if not img:
+                continue
+            try:
+                merged.append({
+                    "page": max(0, int(ov.get("page", 0))),
+                    "x": max(0.0, min(1.0, float(ov.get("x", 0)))),
+                    "y": max(0.0, min(1.0, float(ov.get("y", 0)))),
+                    "w": max(0.0, min(1.0, float(ov.get("w", 0.2)))),
+                    "h": max(0.0, min(1.0, float(ov.get("h", 0.08)))),
+                    "image": img,
+                })
+            except (TypeError, ValueError):
+                continue
+        data["signatures_overlay"] = merged[:30]
     _set_doc_data(rec, doc_type, data)
 
     if doc_type == "nda":

@@ -1809,10 +1809,18 @@ async def _process_reply_v2(db, reply: dict) -> str:
     return f"Sent {len(slot_infos)} general slots"
 
 
-@shared_task
-def process_reply_v2(reply: dict):
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def process_reply_v2(self, reply: dict):
     logger.info("running_process_reply_v2", email=reply.get("from_addr"))
-    return run_async(_process_reply_v2, reply)
+    try:
+        return run_async(_process_reply_v2, reply)
+    except Exception as exc:
+        # The IMAP poller already marked this message-id "seen", so without a
+        # retry a transient failure (LLM timeout, Zoho hiccup, DB blip) would
+        # drop the reply permanently. Retry so it actually gets processed.
+        logger.warning("process_reply_v2_failed_retrying", email=reply.get("from_addr"),
+                       attempt=self.request.retries + 1, error=str(exc))
+        raise self.retry(exc=exc)
 
 
 @shared_task

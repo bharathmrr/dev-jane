@@ -931,6 +931,53 @@ def html_to_pdf(body_html: str, title: str = "") -> bytes:
     return buf.getvalue()
 
 
+def _ov_frac(v, default: float = 0.0) -> float:
+    """Clamp an overlay coordinate to the 0..1 fractional range."""
+    try:
+        return max(0.0, min(1.0, float(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+def stamp_overlays(pdf_bytes: bytes, overlays: list[dict] | None) -> bytes:
+    """Flatten Adobe-style signature overlays onto a rendered PDF.
+
+    Each overlay is ``{page, x, y, w, h, image}`` where x/y/w/h are fractions
+    (0..1) of the target page's width/height and ``image`` is a validated
+    ``data:image/...`` URL. The signature is painted on top of the page content
+    (the document text underneath is never altered)."""
+    if not overlays:
+        return pdf_bytes
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        changed = False
+        for ov in overlays:
+            try:
+                img = (ov or {}).get("image") or ""
+                if not img.startswith("data:image"):
+                    continue
+                pno = int(ov.get("page", 0))
+                if not (0 <= pno < doc.page_count):
+                    continue
+                page = doc[pno]
+                pr = page.rect
+                x = _ov_frac(ov.get("x")) * pr.width
+                y = _ov_frac(ov.get("y")) * pr.height
+                w = max(0.02, _ov_frac(ov.get("w"), 0.2)) * pr.width
+                h = max(0.01, _ov_frac(ov.get("h"), 0.08)) * pr.height
+                raw = base64.b64decode(img.split(",", 1)[1])
+                page.insert_image(fitz.Rect(x, y, x + w, y + h),
+                                  stream=raw, keep_proportion=True, overlay=True)
+                changed = True
+            except Exception:
+                continue
+        if not changed:
+            return pdf_bytes
+        return doc.tobytes(deflate=True, garbage=3)
+    finally:
+        doc.close()
+
+
 def append_signature_page(pdf_bytes: bytes, doc_type: str, sig: dict | None = None,
                           internal_sig: dict | None = None) -> bytes:
     """Append an Adobe-Sign-style e-signature certificate page.

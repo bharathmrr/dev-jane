@@ -342,7 +342,6 @@ def _lead_row(lead: LeadV2, rec: OnboardingRecord | None) -> dict:
         "replied_at": _fmt(lead.replied_at),
         "booked_at": _fmt(lead.booked_at),
         "selected_slot": lead.selected_slot or "",
-        "meeting_link": lead.zoho_meeting_link or "",
         "followups": lead.follow_up_count or 0,
         "dropped": lead.opted_out,
         "onboarding": None,
@@ -706,10 +705,6 @@ async def day_block(body: _DayBlockBody, db: AsyncSession = Depends(get_db),
     return {"message": msg}
 
 
-# ---------------------------------------------------------------------------
-# Approvals (admin + approver)
-# ---------------------------------------------------------------------------
-
 def _doc_json(r: OnboardingRecord, doc_type: str) -> dict:
     raw = r.nda_draft_content if doc_type == "nda" else r.agreement_draft_content
     if raw:
@@ -764,16 +759,11 @@ def _approval_items(r: OnboardingRecord, lead: LeadV2) -> tuple[list[dict], list
 
         if prev_ok and status in (DocumentStatus.PENDING, DocumentStatus.TEAM_REVIEW,
                                   DocumentStatus.DRAFT_GENERATED):
-            # changes_requested = lead asked for a revision (NOT a rejection)
-            label = (f"{short} — Revision requested by lead ({len(comments)} "
-                     f"comment{'s' if len(comments) != 1 else ''})"
-                     if stage == "changes_requested" else f"{short} — Review & Send")
-            action.append({**base, "kind": f"{doc_type}_draft", "label": label,
-                           "since": _fmt(sent_at if stage == "changes_requested" else approved_at),
-                           "view_url": make_doc_edit_url(oid, doc_type),
-                           "display": display, "comments": len(comments)})
+            action.append({**base, "kind": f"{doc_type}_draft", "label": f"{short} — Review & Send",
+                           "since": _fmt(approved_at), "view_url": make_doc_edit_url(oid, doc_type),
+                           "display": display})
         if status == DocumentStatus.DRAFT_REJECTED:
-            label = (f"{short} — Revision requested by lead ({len(comments)} comment{'s' if len(comments) != 1 else ''})"
+            label = (f"{short} — Changes requested by lead ({len(comments)} comment{'s' if len(comments) != 1 else ''})"
                      if stage == "changes_requested" else f"{short} — Review & Send")
             action.append({**base, "kind": f"{doc_type}_draft", "label": label,
                            "since": _fmt(sent_at or approved_at),
@@ -851,6 +841,55 @@ async def approvals_act(body: _ApprovalBody, db: AsyncSession = Depends(get_db),
     if body.kind == "agreement_draft":
         return await agreement_draft_review(body.onboarding_id, review, db)
     raise HTTPException(400, "Unknown approval kind")
+
+
+# ---------------------------------------------------------------------------
+# Voice co-pilot — read-only assistant (brain behind the mic button)
+# ---------------------------------------------------------------------------
+
+class _AssistantBody(BaseModel):
+    message: str
+    history: list[dict] = []
+    context: dict | None = None
+
+
+@router.post("/api/assistant")
+async def assistant_chat(body: _AssistantBody, db: AsyncSession = Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    """One turn with the read-only voice co-pilot. Returns a spoken reply plus an
+    optional UI navigation directive for the browser to execute. The agent cannot act."""
+    from app.services.assistant import AssistantService
+    svc = AssistantService(db, user)
+    return await svc.run(body.message, body.history, body.context)
+
+
+@router.get("/api/comments")
+async def comments_feed(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    """Every lead document-change comment across all onboarding records — for the
+    dashboard comments sidebar + notifications panel. Tracks which lead, which
+    document, and when."""
+    recs = (await db.execute(select(OnboardingRecord))).scalars().all()
+    out: list[dict] = []
+    for r in recs:
+        lead = await db.get(LeadV2, r.lead_id)
+        if not lead:
+            continue
+        for doc_type in ("nda", "agreement"):
+            data = _doc_json(r, doc_type)
+            for c in reversed(data.get("comments") or []):
+                if not isinstance(c, dict):
+                    continue
+                out.append({
+                    "company": lead.business_name or lead.email,
+                    "email": lead.email,
+                    "doc_type": doc_type,
+                    "by": c.get("by") or "Lead",
+                    "text": (c.get("text") or "")[:1000],
+                    "at": c.get("at") or "",
+                    "done": bool(c.get("done")),
+                    "onboarding_id": str(r.id),
+                })
+    return {"comments": out, "open": sum(1 for c in out if not c["done"])}
 
 
 # ---------------------------------------------------------------------------

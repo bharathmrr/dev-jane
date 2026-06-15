@@ -213,28 +213,39 @@ def poll_imap(self) -> int:
         if _already_processed(msg_id):
             continue  # skip — already handled in a previous poll cycle
 
-        # Check for signed document attachments (NDA / Agreement) — process even if no body
-        attachments = reply.get("attachments") or []
-        if attachments and from_addr:
-            for att in attachments:
-                att_bytes = att.get("content")
-                att_name = att.get("filename", "attachment.pdf")
-                if att_bytes:
-                    from app.workers.onboarding_tasks import process_signed_doc_reply
-                    process_signed_doc_reply.delay(from_addr, att_bytes, att_name)
+        try:
+            # Check for signed document attachments (NDA / Agreement) — process even if no body
+            attachments = reply.get("attachments") or []
+            if attachments and from_addr:
+                for att in attachments:
+                    att_bytes = att.get("content")
+                    att_name = att.get("filename", "attachment.pdf")
+                    if att_bytes:
+                        from app.workers.onboarding_tasks import process_signed_doc_reply
+                        process_signed_doc_reply.delay(from_addr, att_bytes, att_name)
+                        queued += 1
+
+            # Skip emails with no body for text-reply processing
+            if not body:
+                continue
+
+            if reply.get("thread_token"):
+                db_msg_id = run_async(_persist_reply, reply)
+                if db_msg_id:
+                    process_inbound_message.delay(db_msg_id)
                     queued += 1
-
-        # Skip emails with no body for text-reply processing
-        if not body:
-            continue
-
-        if reply.get("thread_token"):
-            db_msg_id = run_async(_persist_reply, reply)
-            if db_msg_id:
-                process_inbound_message.delay(db_msg_id)
+            else:
+                from app.workers.v2_tasks import process_reply_v2
+                process_reply_v2.delay(reply)
                 queued += 1
-        else:
-            from app.workers.v2_tasks import process_reply_v2
-            process_reply_v2.delay(reply)
-            queued += 1
+        except Exception:
+            # Enqueue/persist failed AFTER we claimed the message-id in Redis —
+            # release the claim so the next poll retries it instead of skipping
+            # it forever (the original silent-reply-loss bug).
+            if _r is not None and msg_id:
+                try:
+                    _r.delete(f"imap:seen:{msg_id}")
+                except Exception:
+                    pass
+            raise
     return queued

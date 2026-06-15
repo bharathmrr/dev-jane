@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>E-Sign — Draw Signature</title>
+<style>
+  :root{
+    --ink:#1e293b; --accent:#00adb5; --accent-dk:#008085;
+    --line:#cbd5e1; --muted:#64748b; --bg:#f4f6f9;
+  }
+  *{box-sizing:border-box;}
+  body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);margin:0;
+       min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .card{background:#fff;border-radius:14px;box-shadow:0 6px 24px rgba(15,23,42,.10);
+        width:100%;max-width:560px;padding:26px 28px;}
+  h2{margin:0 0 2px;color:#0f172a;font-size:20px;}
+  .sub{margin:0 0 18px;color:var(--muted);font-size:13px;}
+  label{display:block;font-size:12.5px;font-weight:600;color:#334155;margin:14px 0 5px;}
+  input[type=text]{width:100%;padding:11px 12px;border:1px solid #d1d5db;border-radius:7px;font-size:14px;}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  /* Pad: CSS sets the *display* size only. Backing-store resolution is computed
+     from devicePixelRatio at runtime so strokes stay crisp on Retina/HiDPI. */
+  .pad-shell{position:relative;margin-top:6px;}
+  #pad{display:block;width:100%;height:200px;border:2px dashed var(--line);
+       border-radius:8px;background:#fafafa;cursor:crosshair;
+       touch-action:none; /* stop the browser from scrolling/zooming while signing */}
+  .pad-baseline{position:absolute;left:18px;right:18px;bottom:46px;border-top:1px solid #e2e8f0;
+                pointer-events:none;}
+  .pad-x{position:absolute;left:18px;bottom:48px;color:#94a3b8;font-size:18px;pointer-events:none;}
+  .pad-hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+            color:#94a3b8;font-size:14px;pointer-events:none;transition:opacity .15s;}
+  /* Adobe-style mini toolbar */
+  .toolbar{display:flex;align-items:center;gap:14px;margin-top:10px;flex-wrap:wrap;}
+  .swatches{display:flex;gap:8px;}
+  .swatch{width:22px;height:22px;border-radius:50%;border:2px solid #fff;
+          box-shadow:0 0 0 1px #cbd5e1;cursor:pointer;}
+  .swatch.active{box-shadow:0 0 0 2px var(--accent);}
+  .tool-btn{background:none;border:1px solid #d1d5db;border-radius:6px;color:#475569;
+            font-size:12.5px;font-weight:600;padding:6px 12px;cursor:pointer;}
+  .tool-btn:hover{background:#f1f5f9;}
+  .tool-btn:disabled{opacity:.45;cursor:not-allowed;}
+  .controls{margin-top:18px;display:flex;gap:12px;}
+  .controls button{flex:1;padding:12px;border:none;border-radius:8px;font-size:14px;
+                   font-weight:700;cursor:pointer;transition:background .15s;}
+  .clear{background:#e2e8f0;color:#475569;}
+  .clear:hover{background:#cbd5e1;}
+  .save{background:var(--accent);color:#fff;}
+  .save:hover{background:var(--accent-dk);}
+  .save:disabled{background:#9ca3af;cursor:not-allowed;}
+  #msg{display:none;margin-top:14px;padding:10px 13px;border-radius:7px;font-size:13px;}
+  #msg.err{display:block;background:#fee2e2;color:#991b1b;}
+  #msg.ok{display:block;background:#dcfce7;color:#166534;}
+  .legal{margin-top:14px;font-size:11.5px;color:#94a3b8;line-height:1.5;}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h2>Sign Below</h2>
+  <p class="sub">Draw your signature in the box. Works with mouse, touch, or stylus.</p>
+
+  <div class="row">
+    <div>
+      <label for="s-name">Full Legal Name *</label>
+      <input type="text" id="s-name" placeholder="Your full name" autocomplete="name">
+    </div>
+    <div>
+      <label for="s-desig">Designation</label>
+      <input type="text" id="s-desig" placeholder="e.g. Director">
+    </div>
+  </div>
+
+  <label>Signature</label>
+  <div class="pad-shell">
+    <canvas id="pad"></canvas>
+    <div class="pad-baseline"></div>
+    <div class="pad-x">✕</div>
+    <div class="pad-hint" id="pad-hint">Sign here</div>
+  </div>
+
+  <div class="toolbar">
+    <div class="swatches" id="swatches">
+      <span class="swatch active" data-color="#1e293b" style="background:#1e293b" title="Black"></span>
+      <span class="swatch" data-color="#1d4ed8" style="background:#1d4ed8" title="Blue"></span>
+      <span class="swatch" data-color="#b91c1c" style="background:#b91c1c" title="Red"></span>
+    </div>
+    <button class="tool-btn" id="undoBtn" disabled>↶ Undo</button>
+  </div>
+
+  <div class="controls">
+    <button class="clear" id="clearBtn">Clear</button>
+    <button class="save" id="submitBtn">Confirm Signature</button>
+  </div>
+
+  <div id="msg"></div>
+  <p class="legal">By confirming, you adopt this drawing as your electronic signature.
+     The image is captured as a transparent PNG and submitted securely to the server.</p>
+</div>
+
+<script>
+/* ============================================================================
+ * SignaturePad — vanilla, dependency-free, HiDPI-correct ink capture.
+ *
+ * Coordinate / matrix pipeline (the part the old version got wrong):
+ *
+ *   pointer event  ──(getBoundingClientRect)──►  CSS-pixel position in the
+ *   rendered box.  The canvas BACKING STORE, however, is sized in *device*
+ *   pixels (cssSize × devicePixelRatio) so lines render sharp on Retina.
+ *   We reconcile the two spaces with a single affine transform applied once
+ *   per resize:  ctx.setTransform(dpr,0,0,dpr,0,0).  After that we author
+ *   every stroke in CSS-pixel space and the GPU maps it to device pixels.
+ *   The pointer→canvas read additionally divides by (rect.width/logicalW) so
+ *   it stays correct under responsive layout *and* browser zoom.
+ * ========================================================================== */
+class SignaturePad {
+  constructor(canvas, opts = {}) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d', { willReadFrequently: true });
+    this.color   = opts.color   ?? '#1e293b';
+    this.minW    = opts.minWidth ?? 1.3;     // fast stroke → thin
+    this.maxW    = opts.maxWidth ?? 3.4;     // slow stroke → thick (pen feel)
+    this.vWeight = 0.7;                       // velocity low-pass smoothing
+    this.onChange = opts.onChange || (() => {});
+
+    this._dpr = 1;
+    this._history = [];      // ImageData ring buffer for Undo
+    this._reset();
+    this.fit();
+
+    // ResizeObserver keeps the backing store matched to the on-screen size
+    // (responsive cards, device rotation) without losing the existing ink.
+    this._ro = new ResizeObserver(() => this.fit());
+    this._ro.observe(canvas);
+    this._bind();
+  }
+
+  /* ---- HiDPI backing-store sizing (criterion #1: no blur / no clipping) ---- */
+  fit() {
+    const dpr  = Math.max(1, window.devicePixelRatio || 1);
+    const rect = this.canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const prev = this._hasInk ? this.canvas.toDataURL() : null;   // preserve drawing
+
+    this._dpr = dpr;
+    this.canvas.width  = Math.round(rect.width  * dpr);  // device px → crisp
+    this.canvas.height = Math.round(rect.height * dpr);
+    // ↑ setting width/height also clears the canvas, hence the snapshot above.
+
+    // One transform: author in CSS px, render in device px.
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this._applyStyle();
+
+    if (prev) {
+      const img = new Image();
+      img.onload = () => this.ctx.drawImage(img, 0, 0, rect.width, rect.height);
+      img.src = prev;
+    }
+  }
+
+  _applyStyle() {
+    const c = this.ctx;
+    c.strokeStyle = this.color;
+    c.fillStyle   = this.color;
+    c.lineCap  = 'round';
+    c.lineJoin = 'round';
+  }
+
+  _reset() {
+    this._drawing = false;
+    this._pts = [];
+    this._lastV = 0;
+    this._lastW = (this.minW + this.maxW) / 2;
+    this._hasInk = false;
+  }
+
+  /* ---- pointer → authored-CSS-pixel coordinate (the fixed matrix read) ---- */
+  _pos(e) {
+    const rect = this.canvas.getBoundingClientRect();
+    const logicalW = this.canvas.width  / this._dpr;   // CSS-px coord space width
+    const logicalH = this.canvas.height / this._dpr;
+    // scaleX/Y == 1 when rendered size matches; they absorb zoom & flex scaling.
+    const scaleX = logicalW / rect.width;
+    const scaleY = logicalH / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top)  * scaleY,
+      p: e.pressure > 0 && e.pressure !== 0.5 ? e.pressure : 0.5,  // stylus pressure
+    };
+  }
+
+  _bind() {
+    const cv = this.canvas;
+    cv.addEventListener('pointerdown', (e) => {
+      if (e.button !== undefined && e.button !== 0) return;       // primary only
+      cv.setPointerCapture(e.pointerId);                          // keep events on drag-out
+      this._snapshot();                                          // for Undo
+      this._drawing = true;
+      this._pts = [this._pos(e)];
+      this._lastW = (this.minW + this.maxW) / 2;
+    });
+    cv.addEventListener('pointermove', (e) => {
+      if (!this._drawing) return;
+      e.preventDefault();
+      // Coalesced events recover the full high-frequency pen/touch path that
+      // the browser batches into one move event — smoother, more accurate ink.
+      const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      for (const ev of evs) this._extend(this._pos(ev));
+    });
+    const end = (e) => {
+      if (!this._drawing) return;
+      this._drawing = false;
+      this._flush();
+      try { cv.releasePointerCapture(e.pointerId); } catch {}
+      this.onChange();
+    };
+    cv.addEventListener('pointerup', end);
+    cv.addEventListener('pointercancel', end);
+    cv.addEventListener('pointerleave', end);
+  }
+
+  /* ---- variable-width quadratic smoothing (Adobe-like ink) ---- */
+  _extend(pt) {
+    this._hasInk = true;
+    const pts = this._pts;
+    pts.push(pt);
+    if (pts.length < 3) return;
+    const n = pts.length;
+    const p0 = pts[n - 3], p1 = pts[n - 2], p2 = pts[n - 1];
+    const m1 = this._mid(p0, p1), m2 = this._mid(p1, p2);
+
+    const v = this._dist(p1, p2);                       // px / event ≈ velocity
+    this._lastV = this.vWeight * v + (1 - this.vWeight) * this._lastV;
+    const target = Math.max(this.maxW - this._lastV * 0.9, this.minW) * (0.6 + 0.8 * p2.p);
+    const w = (this._lastW + target) / 2;               // smooth width changes
+
+    const c = this.ctx;
+    c.beginPath();
+    c.lineWidth = w;
+    c.moveTo(m1.x, m1.y);
+    c.quadraticCurveTo(p1.x, p1.y, m2.x, m2.y);          // control = real sample
+    c.stroke();
+    this._lastW = w;
+  }
+
+  _flush() {
+    // A tap/dot stroke (< 3 points) leaves no curve — paint a round dot.
+    if (this._pts.length && this._pts.length < 3) {
+      const p = this._pts[0];
+      this.ctx.beginPath();
+      this.ctx.arc(p.x, p.y, this._lastW / 2, 0, Math.PI * 2);
+      this.ctx.fill();
+      this._hasInk = true;
+    }
+    this._pts = [];
+  }
+
+  _mid(a, b)  { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+  _dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+  /* ---- Undo (device-pixel ImageData ring buffer, max 20 steps) ---- */
+  _snapshot() {
+    try { this._history.push(this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height)); }
+    catch { /* tainted canvas — undo simply unavailable */ }
+    if (this._history.length > 20) this._history.shift();
+  }
+  undo() {
+    const img = this._history.pop();
+    if (!img) return;
+    const c = this.ctx;
+    c.save();
+    c.setTransform(1, 0, 0, 1, 0, 0);   // putImageData ignores transforms → identity
+    c.putImageData(img, 0, 0);
+    c.restore();
+    this._hasInk = !this.isEmpty();
+    this.onChange();
+  }
+  get canUndo() { return this._history.length > 0; }
+
+  setColor(hex) { this.color = hex; this._applyStyle(); }
+
+  clear() {
+    const c = this.ctx;
+    c.save();
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    c.restore();
+    this._history = [];
+    this._reset();
+    this.onChange();
+  }
+
+  /* ---- alpha-channel bounding box of the actual ink ---- */
+  _inkBounds() {
+    const { width: w, height: h } = this.canvas;
+    let data;
+    try { data = this.ctx.getImageData(0, 0, w, h).data; } catch { return null; }
+    let minX = w, minY = h, maxX = -1, maxY = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (data[(y * w + x) * 4 + 3] !== 0) {          // non-transparent pixel
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+        }
+      }
+    }
+    return maxX < 0 ? null : { minX, minY, maxX, maxY };
+  }
+
+  isEmpty() { return !this._inkBounds(); }
+
+  /* ---- export: ink-trimmed, downscaled to satisfy the backend size cap ----
+   * Returns a transparent data:image/png that matches the server regex
+   *   ^data:image/png;base64,[A-Za-z0-9+/=]{40,800000}$
+   * by cropping to the strokes and shrinking until base64 ≤ maxB64.        */
+  toDataURL({ maxWidth = 600, padding = 10, maxB64 = 780000 } = {}) {
+    const box = this._inkBounds();
+    if (!box) return '';                                 // empty signature
+    const pad = padding * this._dpr;
+    const sx = Math.max(0, box.minX - pad);
+    const sy = Math.max(0, box.minY - pad);
+    const sw = Math.min(this.canvas.width,  box.maxX + pad) - sx;
+    const sh = Math.min(this.canvas.height, box.maxY + pad) - sy;
+
+    let scale = Math.min(1, maxWidth / sw);              // cap output raster at maxWidth px
+    let url = '';
+    for (let i = 0; i < 5; i++) {
+      const out = document.createElement('canvas');
+      out.width  = Math.max(1, Math.round(sw * scale));
+      out.height = Math.max(1, Math.round(sh * scale));
+      out.getContext('2d').drawImage(this.canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+      url = out.toDataURL('image/png');                  // transparent → flattens cleanly into PDFs
+      const b64 = url.length - url.indexOf(',') - 1;
+      if (b64 <= maxB64) break;
+      scale *= 0.8;                                       // shrink & retry to fit the cap
+    }
+    return url;
+  }
+}
+
+/* ============================================================================
+ * Controller — captures the signature and ships a structured JSON payload to
+ * the RESTful backend (criterion #2). Mirrors the FastAPI `_SignBody` schema:
+ *   { signed_name, designation, sig_font, sig_image }
+ * ========================================================================== */
+const SIGN_API = {
+  // Build from the link the signer received, e.g.
+  //   /api/v1/documents/sign/{onboarding_id}/{doc_type}/{token}
+  // Left as window.location.pathname so this drops straight into the /sign page.
+  endpoint: window.location.pathname.includes('/documents/sign/')
+    ? window.location.pathname
+    : '/api/v1/documents/sign/REPLACE_ONBOARDING_ID/REPLACE_DOC_TYPE/REPLACE_TOKEN',
+};
+// Server cap: ^data:image/png;base64,[A-Za-z0-9+/=]{40,800000}$  (must match exactly)
+const SIG_IMAGE_RE = /^data:image\/png;base64,[A-Za-z0-9+/=]{40,800000}$/;
+
+const nameEl   = document.getElementById('s-name');
+const desigEl  = document.getElementById('s-desig');
+const hintEl   = document.getElementById('pad-hint');
+const undoBtn  = document.getElementById('undoBtn');
+const submitBtn= document.getElementById('submitBtn');
+const msgEl    = document.getElementById('msg');
+
+const pad = new SignaturePad(document.getElementById('pad'), {
+  onChange() {
+    hintEl.style.opacity = pad.isEmpty() ? '1' : '0';
+    undoBtn.disabled = !pad.canUndo;
+  },
+});
+
+document.getElementById('swatches').addEventListener('click', (e) => {
+  const sw = e.target.closest('.swatch');
+  if (!sw) return;
+  document.querySelectorAll('.swatch').forEach((s) => s.classList.remove('active'));
+  sw.classList.add('active');
+  pad.setColor(sw.dataset.color);
+});
+undoBtn.addEventListener('click', () => pad.undo());
+document.getElementById('clearBtn').addEventListener('click', () => {
+  pad.clear();
+  hide(msgEl);
+});
+
+submitBtn.addEventListener('click', submitSignature);
+
+function show(el, kind, text){ el.className = kind; el.textContent = text; }
+function hide(el){ el.className = ''; }
+
+async function submitSignature() {
+  hide(msgEl);
+  const signed_name = nameEl.value.trim();
+  if (!signed_name)  return show(msgEl, 'err', 'Please enter your full legal name.');
+  if (pad.isEmpty()) return show(msgEl, 'err', 'Please draw your signature before confirming.');
+
+  // 1) Encode + size-check BEFORE hitting the network so we never submit a
+  //    payload the server will silently reject (the old code's failure mode).
+  const sig_image = pad.toDataURL({ maxWidth: 600 });
+  if (!SIG_IMAGE_RE.test(sig_image)) {
+    return show(msgEl, 'err', 'Signature could not be encoded within size limits — please redraw a little smaller.');
+  }
+
+  // 2) Structured payload, ready for the RESTful endpoint.
+  const payload = {
+    signed_name,
+    designation: desigEl.value.trim(),
+    sig_font: 'standard',   // drawn sig uses the image; font is the server-side text fallback
+    sig_image,              // data:image/png;base64,…  (transparent, ink-trimmed)
+  };
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Submitting…';
+  try {
+    const res = await fetch(SIGN_API.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      show(msgEl, 'ok', 'Signature confirmed and submitted. ✓');
+      submitBtn.textContent = 'Signed ✓';
+      if (data.redirect) window.location.href = data.redirect;
+    } else {
+      show(msgEl, 'err', data.detail || `Submit failed (HTTP ${res.status}). Please try again.`);
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Confirm Signature';
+    }
+  } catch (err) {
+    show(msgEl, 'err', 'Network error — ' + err.message);
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Confirm Signature';
+  }
+}
+</script>
+</body>
+</html>
