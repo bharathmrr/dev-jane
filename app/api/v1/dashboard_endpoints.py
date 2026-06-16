@@ -243,6 +243,44 @@ def _sig_info(raw: str | None) -> dict | None:
         return None
 
 
+def _doc_stage_label(rec: OnboardingRecord, doc_type: str) -> str:
+    """Granular stage label for the Documents dashboard column.
+
+    Returns one of: <prefix>_sent | <prefix>_modify | lead_accept |
+                    sign_sent | signed | (raw status as fallback)
+    """
+    prefix = "nda" if doc_type == "nda" else "agr"
+    status = rec.nda_status if doc_type == "nda" else rec.agreement_status
+    content = rec.nda_draft_content if doc_type == "nda" else rec.agreement_draft_content
+    approved = (
+        status == DocumentStatus.APPROVED
+        if doc_type == "nda"
+        else status in (DocumentStatus.APPROVED, DocumentStatus.PROCEED_NEXT)
+    )
+    if approved:
+        return "signed"
+    try:
+        data = json.loads(content or "")
+        if data.get("signature"):
+            return "signed"
+        if data.get("internal_signature") or data.get("stage") == "awaiting_lead_sign":
+            return "sign_sent"
+        stage = data.get("stage") or ""
+        if stage == "accepted":
+            return "lead_accept"
+        if stage == "changes_requested":
+            return f"{prefix}_modify"
+        if stage == "review":
+            return f"{prefix}_sent"
+    except (ValueError, TypeError):
+        pass
+    if status == DocumentStatus.TEAM_REVIEW:
+        return f"{prefix}_modify"
+    if status == DocumentStatus.SENT_TO_LEAD:
+        return f"{prefix}_sent"
+    return f"{status}" if status else ""
+
+
 # ---------------------------------------------------------------------------
 # Overview
 # ---------------------------------------------------------------------------
@@ -357,11 +395,13 @@ def _lead_row(lead: LeadV2, rec: OnboardingRecord | None) -> dict:
             "nda_status": rec.nda_status,
             "nda_display": rec.nda_status_display or "",
             "nda_signed": _signed(rec.nda_draft_content),
+            "nda_stage": _doc_stage_label(rec, "nda"),
             "nda_edit_url": make_doc_edit_url(oid, "nda"),
             "nda_sign_url": make_doc_sign_url(oid, "nda"),
             "agreement_status": rec.agreement_status,
             "agreement_display": rec.agreement_status_display or "",
             "agreement_signed": _signed(rec.agreement_draft_content),
+            "agreement_stage": _doc_stage_label(rec, "agreement"),
             "agreement_edit_url": make_doc_edit_url(oid, "agreement"),
             "agreement_sign_url": make_doc_sign_url(oid, "agreement"),
         }

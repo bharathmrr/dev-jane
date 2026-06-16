@@ -1000,7 +1000,8 @@ async def _process_reply_v2(db, reply: dict) -> str:
         )
     ).scalar_one_or_none()
 
-    # If BOOKED and the meeting has already passed, reset to SENT for rescheduling
+    # If BOOKED: reset to SENT when the slot has passed, or keep as BOOKED so
+    # cancel/reschedule replies can still be processed for future bookings.
     if not lead:
         booked_lead = (
             await db.execute(
@@ -1029,8 +1030,9 @@ async def _process_reply_v2(db, reply: dict) -> str:
                 booked_lead.offered_slots_json = None
                 booked_lead.follow_up_count = 0
                 booked_lead.reminder_sent_at = None
-                lead = booked_lead
                 logger.info("booked_lead_reset_for_reschedule", email=from_addr)
+            # Always route the booked lead so cancel/reschedule are processed.
+            lead = booked_lead
 
     if not lead:
         logger.info("no_matching_sent_lead", email=from_addr)
@@ -1382,6 +1384,52 @@ async def _process_reply_v2(db, reply: dict) -> str:
         lead.replied_at = datetime.now(timezone.utc)
         logger.info("scheduled_followup_confirmed", email=from_addr, date=followup_date)
         return f"Scheduled follow-up confirmed for {followup_date}"
+
+    # ── cancel ─────────────────────────────────────────────────────────────────
+    if analysis["intent"] == "cancel":
+        if lead.status == LeadStatus.BOOKED and lead.booking_id:
+            zoho_cancel = ZohoBookingsService()
+            cancelled = await asyncio.to_thread(zoho_cancel.cancel_booking, lead.booking_id)
+            if cancelled:
+                try:
+                    import dateutil.parser as _dup
+                    from zoneinfo import ZoneInfo as _ZI
+                    _IST = _ZI("Asia/Kolkata")
+                    _slot_dt = _dup.parse(lead.selected_slot or "").replace(tzinfo=_IST)
+                    release_slot_lock(_slot_dt.strftime("%d-%b-%Y"), _slot_dt.strftime("%H:%M"))
+                except Exception:
+                    pass
+                lead.status = LeadStatus.SENT
+                lead.booking_id = None
+                lead.selected_slot = None
+                lead.booked_at = None
+                lead.offered_slots_json = None
+                lead.replied_at = datetime.now(timezone.utc)
+                _simple_reply("Re: Your Booking — Jane Aerospace", [
+                    f"Hi {greeting_name},",
+                    "No problem at all — I've cancelled your meeting booking.",
+                    "Whenever you're ready to reschedule, just reply and I'll sort out a new time for you.",
+                ])
+                logger.info("cancel_booking_done", email=from_addr)
+                return "Booking cancelled via email reply"
+            else:
+                lead.replied_at = datetime.now(timezone.utc)
+                _simple_reply("Re: Your Booking — Jane Aerospace", [
+                    f"Hi {greeting_name},",
+                    "I tried to cancel your booking but ran into an issue on our end.",
+                    "I'll take care of it manually and send you a confirmation shortly.",
+                ])
+                logger.warning("cancel_booking_zoho_failed", email=from_addr)
+                return "Cancel: Zoho cancel failed — manual follow-up needed"
+        else:
+            lead.replied_at = datetime.now(timezone.utc)
+            _simple_reply("Re: Jane Aerospace", [
+                f"Hi {greeting_name},",
+                "Noted — there's no active booking on file for you at the moment.",
+                "If you'd like to schedule a meeting, feel free to reply and I'll arrange it.",
+            ])
+            logger.info("cancel_no_active_booking", email=from_addr)
+            return "Cancel: no active booking — acknowledged"
 
     # ── reschedule: 30-min undo window ─────────────────────────────────────────
     if analysis["intent"] == "reschedule":

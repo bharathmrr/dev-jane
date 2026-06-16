@@ -978,7 +978,7 @@ def stamp_overlays(pdf_bytes: bytes, overlays: list[dict] | None) -> bytes:
         doc.close()
 
 
-def append_signature_page(pdf_bytes: bytes, doc_type: str, sig: dict | None = None,
+def append_signature_page(pdf_bytes: bytes, doc_type: str, sig: dict | None = None,  # noqa: ARG001
                           internal_sig: dict | None = None) -> bytes:
     """Append an Adobe-Sign-style e-signature certificate page.
 
@@ -1144,15 +1144,11 @@ def append_signature_page(pdf_bytes: bytes, doc_type: str, sig: dict | None = No
         return y0 + TOTAL_H
 
     # ── draw signer blocks ────────────────────────────────────────────────────
-    cust_name  = (sig or {}).get("company_name", "Counterparty") if sig else "Counterparty"
     japl_name  = (internal_sig or {}).get("company_name", "Jane Aerospace Private Limited")
 
     y = float(INFO_Y + 26 + BLOCK_GAP)
     y = _signer_block(y, internal_sig, "Authorised Signatory", japl_name,
                       pending=(internal_sig is None))
-    y += BLOCK_GAP
-    y = _signer_block(y, sig, "Authorised Signatory", cust_name,
-                      pending=(sig is None))
 
     # ── legal footer ──────────────────────────────────────────────────────────
     footer_y = y + 14

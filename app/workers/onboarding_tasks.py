@@ -960,6 +960,60 @@ def _kyc_stage_label(rec: OnboardingRecord) -> str:
     return "Form Sent"
 
 
+def _nda_stage_short(rec: OnboardingRecord) -> str:
+    """Short stage label for sheets: nda_sent / nda_modify / lead_accept / sign_sent / signed."""
+    import json as _json
+    if rec.nda_status == DocumentStatus.APPROVED:
+        return "signed"
+    try:
+        data = _json.loads(rec.nda_draft_content or "")
+        if data.get("signature"):
+            return "signed"
+        if data.get("internal_signature") or data.get("stage") == "awaiting_lead_sign":
+            return "sign_sent"
+        stage = data.get("stage") or ""
+        if stage == "accepted":
+            return "lead_accept"
+        if stage == "changes_requested":
+            return "nda_modify"
+        if stage == "review":
+            return "nda_sent"
+    except (ValueError, TypeError, AttributeError):
+        pass
+    if rec.nda_status == DocumentStatus.TEAM_REVIEW:
+        return "nda_modify"
+    if rec.nda_status == DocumentStatus.SENT_TO_LEAD:
+        return "nda_sent"
+    return str(getattr(rec.nda_status, "value", rec.nda_status) or "")
+
+
+def _agr_stage_short(rec: OnboardingRecord) -> str:
+    """Short stage label for sheets: agr_sent / agr_modify / lead_accept / sign_sent / signed."""
+    import json as _json
+    if rec.agreement_status in (DocumentStatus.APPROVED, DocumentStatus.PROCEED_NEXT):
+        return "signed"
+    try:
+        data = _json.loads(rec.agreement_draft_content or "")
+        if data.get("signature"):
+            return "signed"
+        if data.get("internal_signature") or data.get("stage") == "awaiting_lead_sign":
+            return "sign_sent"
+        stage = data.get("stage") or ""
+        if stage == "accepted":
+            return "lead_accept"
+        if stage == "changes_requested":
+            return "agr_modify"
+        if stage == "review":
+            return "agr_sent"
+    except (ValueError, TypeError, AttributeError):
+        pass
+    if rec.agreement_status == DocumentStatus.TEAM_REVIEW:
+        return "agr_modify"
+    if rec.agreement_status == DocumentStatus.SENT_TO_LEAD:
+        return "agr_sent"
+    return str(getattr(rec.agreement_status, "value", rec.agreement_status) or "")
+
+
 def _col(idx: int) -> str:
     """0-based column index → A, B, … Z, AA, …"""
     result = ""
@@ -1058,9 +1112,9 @@ async def _export_to_sheets(db: AsyncSession, onboarding_id: str) -> None:
         kyc_status_label,
         _fmt(kyc.created_at) if kyc else "",
         _fmt(rec.kyc_approved_at),
-        rec.nda_status or "",
+        _nda_stage_short(rec),
         _fmt(rec.nda_sent_at),
-        rec.agreement_status or "",
+        _agr_stage_short(rec),
         _fmt(rec.agreement_sent_at),
         kyc.gstin_number if kyc else "",
         kyc.pan_number if kyc else "",
@@ -1172,6 +1226,116 @@ def export_onboarding_to_sheets(self, onboarding_id: str) -> None:
     try:
         run_async(_export_to_sheets, onboarding_id)
     except Exception as exc:
+        raise self.retry(exc=exc)
+
+
+# ---------------------------------------------------------------------------
+# Process signed-document email reply (lead emails back a signed PDF)
+# ---------------------------------------------------------------------------
+
+async def _process_signed_doc_reply(
+    db: AsyncSession, from_addr: str, pdf_b64: str, filename: str
+) -> None:
+    import base64 as _b64
+    import json as _json
+
+    lead = (await db.execute(
+        select(LeadV2).where(LeadV2.email == from_addr)
+    )).scalar_one_or_none()
+    if not lead:
+        logger.info("signed_doc_reply_no_lead", email=from_addr)
+        return
+
+    rec = (await db.execute(
+        select(OnboardingRecord).where(OnboardingRecord.lead_id == lead.id)
+    )).scalar_one_or_none()
+    if not rec:
+        logger.info("signed_doc_reply_no_onboarding", email=from_addr)
+        return
+
+    # Determine which document based on filename then fall back to current stage
+    name_lower = filename.lower()
+    if "agreement" in name_lower:
+        doc_type = "agreement"
+    elif "nda" in name_lower or "non-disclosure" in name_lower or "nondisclosure" in name_lower:
+        doc_type = "nda"
+    elif rec.nda_status == DocumentStatus.SENT_TO_LEAD:
+        doc_type = "nda"
+    elif rec.agreement_status == DocumentStatus.SENT_TO_LEAD:
+        doc_type = "agreement"
+    else:
+        logger.info("signed_doc_reply_cannot_determine_type",
+                    email=from_addr, filename=filename)
+        return
+
+    now = _now_ist()
+
+    if doc_type == "nda":
+        if rec.nda_status not in (DocumentStatus.SENT_TO_LEAD,):
+            logger.info("signed_doc_reply_nda_wrong_status",
+                        email=from_addr, status=rec.nda_status)
+            return
+        try:
+            data = _json.loads(rec.nda_draft_content or "{}")
+        except (ValueError, TypeError):
+            data = {}
+        data["signed_pdf_received_at"] = now.isoformat()
+        data["signed_pdf_filename"] = filename
+        data["signed_pdf_b64"] = pdf_b64
+        rec.nda_draft_content = _json.dumps(data, ensure_ascii=False)
+        rec.nda_status = DocumentStatus.SIGNED_RECEIVED
+        rec.nda_status_display = f"Signed NDA received via email ({_fmt(now)})"
+    else:
+        if rec.agreement_status not in (DocumentStatus.SENT_TO_LEAD,):
+            logger.info("signed_doc_reply_agr_wrong_status",
+                        email=from_addr, status=rec.agreement_status)
+            return
+        try:
+            data = _json.loads(rec.agreement_draft_content or "{}")
+        except (ValueError, TypeError):
+            data = {}
+        data["signed_pdf_received_at"] = now.isoformat()
+        data["signed_pdf_filename"] = filename
+        data["signed_pdf_b64"] = pdf_b64
+        rec.agreement_draft_content = _json.dumps(data, ensure_ascii=False)
+        rec.agreement_status = DocumentStatus.SIGNED_RECEIVED
+        rec.agreement_status_display = f"Signed Agreement received via email ({_fmt(now)})"
+
+    await db.commit()
+
+    kyc_result = await db.execute(
+        select(KYCSubmission)
+        .where(KYCSubmission.onboarding_id == rec.id)
+        .order_by(KYCSubmission.attempt_number.desc())
+    )
+    kyc = kyc_result.scalars().first()
+    company_name = (kyc.company_name if kyc else None) or lead.business_name
+    contact_name = (kyc.contact_name if kyc else None) or lead.contact_name or lead.business_name
+
+    from app.services.onboarding_email import notify_team_signed_doc_received
+    notify_team_signed_doc_received(
+        lead_name=contact_name,
+        company_name=company_name,
+        onboarding_id=str(rec.id),
+        doc_type=doc_type.upper(),
+    )
+
+    log_pipeline(
+        "SIGNED_DOC_EMAIL_RECEIVED",
+        company=company_name,
+        email=from_addr,
+        detail=f"Signed {doc_type.upper()} PDF received via email reply: {filename}",
+    )
+    await _export_to_sheets(db, str(rec.id))
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
+def process_signed_doc_reply(self, from_addr: str, pdf_b64: str, filename: str) -> None:
+    """Process an inbound email reply that contains a signed NDA or Agreement PDF."""
+    try:
+        run_async(_process_signed_doc_reply, from_addr, pdf_b64, filename)
+    except Exception as exc:
+        logger.warning("process_signed_doc_reply_failed", email=from_addr, error=str(exc))
         raise self.retry(exc=exc)
 
 

@@ -221,8 +221,13 @@ def poll_imap(self) -> int:
                     att_bytes = att.get("content")
                     att_name = att.get("filename", "attachment.pdf")
                     if att_bytes:
+                        import base64 as _b64
                         from app.workers.onboarding_tasks import process_signed_doc_reply
-                        process_signed_doc_reply.delay(from_addr, att_bytes, att_name)
+                        process_signed_doc_reply.delay(
+                            from_addr,
+                            _b64.b64encode(att_bytes).decode(),
+                            att_name,
+                        )
                         queued += 1
 
             # Skip emails with no body for text-reply processing

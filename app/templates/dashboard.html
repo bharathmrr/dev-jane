@@ -2041,9 +2041,23 @@
       }).join('') ||
         '<tr><td colspan="4" style="text-align:center;color:var(--mut);padding:28px;">No onboarding records yet</td></tr>'}</tbody></table></div>`;
     }
+    function docStageChip(stage) {
+      const map = {
+        nda_sent:    ['c-blue',   'Sent for Review'],
+        agr_sent:    ['c-blue',   'Sent for Review'],
+        nda_modify:  ['c-amber',  'Changes Requested'],
+        agr_modify:  ['c-amber',  'Changes Requested'],
+        lead_accept: ['c-blue',   'Terms Accepted'],
+        sign_sent:   ['c-purple', 'Awaiting Signature'],
+        signed:      ['c-green',  '&#10003; Signed'],
+      };
+      if (!stage) return '';
+      const [cls, label] = map[stage] || ['c-gray', stage];
+      return `<span class="chip ${cls}">${label}</span>`;
+    }
     function docCell(o, k) {
-      let h = chip(o[k + '_status']);
-      if (o[k + '_signed']) h += ' <span class="chip c-green">✓ SIGNED</span>';
+      const stage = o[k + '_stage'];
+      let h = stage ? docStageChip(stage) : chip(o[k + '_status']);
       h += `<br><a class="btn ${canAct() ? 'btn-p' : 'btn-o'}" style="padding:5px 11px;font-size:11px;margin-top:5px;" target="_blank" href="${o[k + '_edit_url']}">${ic(canAct() ? 'edit' : 'eye')} ${canAct() ? 'Edit & Preview' : 'Preview'}</a>
     <button class="btn btn-o" style="padding:5px 11px;font-size:11px;margin-top:5px;" onclick="navigator.clipboard.writeText('${o[k + '_sign_url']}');toast('Signing link copied')">${ic('copy')} Sign Link</button>`;
       return h;

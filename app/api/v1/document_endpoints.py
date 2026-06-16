@@ -42,6 +42,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.base import DocumentStatus
 from app.db.models import KYCSubmission, LeadV2, OnboardingRecord
@@ -342,6 +343,7 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
     comments = data.get("comments") or []
     live_mode = data.get("mode") == "live"
     base = "/api/v1/documents"
+    organizer_name_json = json.dumps(settings.ORGANIZER_NAME)
     data_json = json.dumps({
         "replacements": data.get("replacements", []),
         "signatory_name": data.get("signatory_name", ""),
@@ -363,6 +365,10 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
         signed_badge += f'<span class="chip" style="background:{bg};color:{fg};">{txt}</span>'
     signed_btn = (f'<a class="btn b-blue" target="_blank" href="{base}/signed/{onboarding_id}/{doc_type}/{token}">⬇ Signed PDF</a>'
                   if (signed or internal_sig) else "")
+    sign_topbar_btn = (
+        f'<button class="btn b-green" onclick="internalSign()">✍ Sign &amp; Send to Lead</button>'
+        if (stage == "accepted" and not internal_sig and not signed) else ""
+    )
 
     # Lead comments panel
     comments_html = ""
@@ -391,7 +397,6 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
     <div class="note" style="background:#ecfdf5;border-left-color:#16a34a;color:#14532d;">
       The lead accepted the Terms &amp; Conditions. Sign on behalf of Jane Aerospace —
       the internally-signed document is then emailed to the lead for their signature.</div>
-    <div class="fld"><label>Authorised Representative Name</label><input type="text" id="int-name" placeholder="Full name"></div>
     <div class="fld"><label>Designation</label><input type="text" id="int-desig" placeholder="e.g. Director"></div>
     <div class="fld"><label>Signature Style</label>
       <select id="int-font" style="width:100%;padding:9px 11px;border:1.5px solid #cbd5e1;border-radius:7px;font-size:13px;">
@@ -399,8 +404,7 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
       </select></div>
     <div class="fld"><label>Or Upload Signature Image (PNG/JPG)</label>
       <input type="file" id="int-sigimg" accept=".png,.jpg,.jpeg" onchange="loadIntSig(this)" style="font-size:12px;">
-      <div id="int-sig-preview" style="margin-top:6px;"></div></div>
-    <button class="btn b-green" style="width:100%;justify-content:center;" onclick="internalSign()">✍ Sign &amp; Send to Lead</button>"""
+      <div id="int-sig-preview" style="margin-top:6px;"></div></div>"""
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -456,6 +460,7 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
   <a class="btn b-line" href="{base}/editor/{onboarding_id}/{doc_type}/{token}" title="Edit the full document content">📝 Live Editor</a>
   <button class="btn b-line" onclick="resetDoc()" title="Rebuild values from KYC data">↺ Reset</button>
   {signed_btn}
+  {sign_topbar_btn}
   <button class="btn b-green" onclick="sendToLead()">📨 Send to Lead for Review</button>
 </div>
 
@@ -481,6 +486,7 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
 <script>
 const BASE = '{base}';
 const OID = '{onboarding_id}', DT = '{doc_type}', TOK = '{token}';
+const ORGANIZER_NAME = {organizer_name_json};
 const initial = {data_json};
 let timer = null;
 
@@ -600,21 +606,22 @@ function loadIntSig(input) {{
 }}
 
 async function internalSign() {{
-  const name = (document.getElementById('int-name') || {{}}).value || '';
-  if (!name.trim()) {{ alert('Enter the authorised representative name.'); return; }}
-  if (!confirm(`Sign this document as ${{name}} on behalf of Jane Aerospace and email it to the lead for counter-signature?`)) return;
+  if (!confirm(`Sign this document as ${{ORGANIZER_NAME}} on behalf of Jane Aerospace and email it to the lead for counter-signature?`)) return;
   const r = await fetch(`${{BASE}}/internal-sign/${{OID}}/${{DT}}/${{TOK}}`, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{
-      signed_name: name.trim(),
+      signed_name: ORGANIZER_NAME,
       designation: (document.getElementById('int-desig') || {{}}).value || '',
       sig_font: (document.getElementById('int-font') || {{}}).value || 'standard',
       sig_image: INT_SIG_IMAGE,
     }})
   }});
   const d = await r.json().catch(() => ({{}}));
-  alert(r.ok ? (d.message || 'Signed and sent.') : (d.detail || 'Signing failed'));
-  if (r.ok) location.reload();
+  if (!r.ok) {{ alert(d.detail || 'Signing failed'); return; }}
+  alert(d.message || 'Signed and sent.');
+  const pv = document.getElementById('pv');
+  if (pv) pv.src = `${{BASE}}/signed/${{OID}}/${{DT}}/${{TOK}}`;
+  location.reload();
 }}
 
 render();
@@ -1517,8 +1524,6 @@ async def document_live_editor(onboarding_id: str, doc_type: str, token: str,
     <div class="rb-row">
       <button class="tb" onmousedown="return false" onclick="insertNote()" title="Insert note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3v5h5"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg></button>
       <button class="tb" onmousedown="return false" onclick="insertClause()" title="Add a clause / paragraph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/><line x1="19" y1="13" x2="19" y2="21"/><line x1="15" y1="17" x2="23" y2="17"/></svg></button>
-      <button class="tb" onmousedown="return false" onclick="document.getElementById('sig-file').click()" title="Insert signature image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19c3-1 4-7 6-7s2 4 4 4 2-9 4-9"/><line x1="3" y1="21" x2="21" y2="21"/></svg></button>
-      <input type="file" id="sig-file" accept=".png,.jpg,.jpeg" style="display:none" onchange="insertSigImage(this)">
       <button class="tb" onmousedown="return false" onclick="findReplace()" title="Find &amp; replace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
       <button class="tb" onmousedown="return false" onclick="cmd('removeFormat')" title="Clear formatting"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h15"/><path d="M9 4 6 20"/><line x1="5" y1="20" x2="11" y2="20"/><line x1="14" y1="14" x2="21" y2="21"/><line x1="21" y1="14" x2="14" y2="21"/></svg></button>
     </div><span class="rb-cap">Insert</span>
@@ -1700,31 +1705,6 @@ function insertNote() {{
 
 function insertClause() {{
   cmd('insertHTML', `<p style="font-size:10.5pt;text-align:justify;"><b>New Clause.</b>&nbsp;Type the clause text here…</p>`);
-}}
-
-function insertSigImage(input) {{
-  const f = input.files && input.files[0];
-  if (!f) return;
-  if (f.size > 5 * 1024 * 1024) {{ alert('Signature image too large — max 5 MB.'); input.value = ''; return; }}
-  const img = new Image();
-  img.onload = function() {{
-    const scale = Math.min(1, 480 / img.width);
-    const c = document.createElement('canvas');
-    c.width = Math.round(img.width * scale);
-    c.height = Math.round(img.height * scale);
-    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    // Size by a target signature HEIGHT (~48pt): pick the width that yields it
-    // from the image's aspect ratio, so portrait / oversized uploads can't blow
-    // out the signature cell. Width is used (not height) because it is the
-    // dimension the PDF sanitizer keeps and the PDF engine renders reliably.
-    const w = Math.max(30, Math.min(260, Math.round(48 * (c.width / c.height))));
-    cmd('insertHTML',
-        '<img class="sig-img" src="' + c.toDataURL('image/png') +
-        '" style="width:' + w + 'pt;vertical-align:middle;">&nbsp;');
-    input.value = '';
-  }};
-  img.onerror = function() {{ alert('Could not read that image file.'); input.value = ''; }};
-  img.src = URL.createObjectURL(f);
 }}
 
 // ── Signature image resize / move toolbar ────────────────────────────────────
@@ -2534,7 +2514,7 @@ def _make_edit_url(onboarding_id: str, doc_type: str) -> str:
 
 
 class _InternalSignBody(BaseModel):
-    signed_name: str
+    signed_name: str = ""
     designation: str = ""
     sig_font: str = "standard"
     sig_image: str = ""      # optional uploaded signature picture (data URL)
@@ -2554,12 +2534,11 @@ async def document_internal_sign(onboarding_id: str, doc_type: str, token: str,
         raise HTTPException(409, "Document already signed by the lead")
     if data.get("internal_signature"):
         raise HTTPException(409, "Document already internally signed")
-    if not body.signed_name.strip():
-        raise HTTPException(400, "Representative name is required")
+    rep_name = body.signed_name.strip() or settings.ORGANIZER_NAME
 
     now = _now_ist()
     data["internal_signature"] = {
-        "signed_name": body.signed_name.strip()[:200],
+        "signed_name": rep_name[:200],
         "designation": body.designation.strip()[:200] or "Authorised Signatory",
         "sig_font": body.sig_font if body.sig_font in ("standard", "dancing", "greatvibes", "pacifico") else "standard",
         "sig_image": _clean_sig_image(body.sig_image),
@@ -2571,7 +2550,7 @@ async def document_internal_sign(onboarding_id: str, doc_type: str, token: str,
     data["stage"] = "awaiting_lead_sign"
     short = "NDA" if doc_type == "nda" else "Agreement"
     _apply_status(rec, doc_type, DocumentStatus.SENT_TO_LEAD,
-                  f"{short} Internally Signed by {body.signed_name.strip()} ({_fmt(now)}) — Sent to Lead for Signature")
+                  f"{short} Internally Signed by {rep_name} ({_fmt(now)}) — Sent to Lead for Signature")
     _set_doc_data(rec, doc_type, data)
     await db.commit()
 
@@ -2587,9 +2566,9 @@ async def document_internal_sign(onboarding_id: str, doc_type: str, token: str,
     )
     _crm_stage_safe(rec, lead, onboarding_id,
                     stage=f"{short} Sent for E-Sign",
-                    detail=f"Internally signed by {body.signed_name.strip()}; signing link emailed to {to_email}")
+                    detail=f"Internally signed by {rep_name}; signing link emailed to {to_email}")
     logger.info("document_internal_signed", onboarding_id=onboarding_id, doc_type=doc_type,
-                by=body.signed_name.strip(), to=to_email)
+                by=rep_name, to=to_email)
     return {"message": f"Signed on behalf of Jane Aerospace and sent to {to_email} for counter-signature."}
 
 

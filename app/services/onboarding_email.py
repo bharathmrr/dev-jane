@@ -155,9 +155,18 @@ def _sig() -> str:
 
 
 def _wrap(body: str) -> str:
+    inner = body + _sig()
     return (
-        '<div style="font-family:Arial,sans-serif;font-size:15px;color:#222;max-width:640px;margin:0 auto;">'
-        + body + _sig() + "</div>"
+        '<!DOCTYPE html><html lang="en"><head>'
+        '<meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta http-equiv="X-UA-Compatible" content="IE=edge">'
+        '</head>'
+        '<body style="margin:0;padding:0;background:#ffffff;">'
+        '<div style="font-family:Arial,sans-serif;font-size:15px;color:#222222;'
+        'max-width:640px;margin:40px auto;padding:0 24px 48px;">'
+        + inner +
+        '</div></body></html>'
     )
 
 

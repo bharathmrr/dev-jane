@@ -286,6 +286,17 @@ def analyze_reply_intent(reply_body: str, today_str: str) -> dict:
     if any(w in body_lower for w in ooo_kws):
         default_res["intent"] = "out_of_office"
 
+    # Cancel (pure cancellation — no rescheduling)
+    cancel_kws = ["cancel my meeting", "cancel the meeting", "cancel my booking",
+                  "cancel the booking", "cancel my appointment", "cancel my slot",
+                  "i want to cancel", "please cancel", "want to cancel",
+                  "cancel it", "cancel this", "need to cancel",
+                  "cannot attend", "can't attend", "won't be able to attend",
+                  "unable to attend", "won't make it", "can't make it"]
+    if any(w in body_lower for w in cancel_kws):
+        default_res["intent"] = "cancel"
+        return default_res
+
     # Reschedule
     reschedule_kws = ["wrong slot", "by mistake", "booked by mistake", "wrong time",
                       "accidentally", "can we change", "cancel and", "want to reschedule",
@@ -388,6 +399,7 @@ def analyze_reply_intent(reply_body: str, today_str: str) -> dict:
         "Intent values:\n"
         "- \"book\": specific date AND time given. Set date + time (24h). morning=09:00, afternoon=14:00, evening=17:00.\n"
         "- \"list_slots\": wants available slots. Set specific_date (single day), after_date (range), or week (this/next).\n"
+        "- \"cancel\": wants to cancel an existing booking ('cancel my meeting', 'can't attend', 'unable to attend', 'cancel the appointment').\n"
         "- \"decline\": not interested / unsubscribe / stop emailing / no thank you.\n"
         "- \"reschedule\": 'wrong slot', 'by mistake', 'booked accidentally', 'cancel and rebook'.\n"
         "- \"out_of_office\": OOO auto-reply. Extract return_date if mentioned.\n"
