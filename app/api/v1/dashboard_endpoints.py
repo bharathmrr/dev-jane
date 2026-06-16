@@ -252,11 +252,7 @@ def _doc_stage_label(rec: OnboardingRecord, doc_type: str) -> str:
     prefix = "nda" if doc_type == "nda" else "agr"
     status = rec.nda_status if doc_type == "nda" else rec.agreement_status
     content = rec.nda_draft_content if doc_type == "nda" else rec.agreement_draft_content
-    approved = (
-        status == DocumentStatus.APPROVED
-        if doc_type == "nda"
-        else status in (DocumentStatus.APPROVED, DocumentStatus.PROCEED_NEXT)
-    )
+    approved = status in (DocumentStatus.APPROVED, DocumentStatus.PROCEED_NEXT)
     if approved:
         return "signed"
     try:
@@ -286,9 +282,22 @@ def _doc_stage_label(rec: OnboardingRecord, doc_type: str) -> str:
 # ---------------------------------------------------------------------------
 
 @router.get("/api/overview")
-async def overview(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    leads = (await db.execute(select(LeadV2))).scalars().all()
-    recs = (await db.execute(select(OnboardingRecord))).scalars().all()
+async def overview(days: int = 0, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
+    leads_q = select(LeadV2)
+    if days > 0:
+        threshold = dt.datetime.now(_IST) - dt.timedelta(days=days)
+        leads_q = leads_q.where(LeadV2.created_at >= threshold)
+    
+    leads = (await db.execute(leads_q)).scalars().all()
+    
+    if days > 0 and not leads:
+        recs = []
+    else:
+        recs_q = select(OnboardingRecord)
+        if days > 0:
+            recs_q = recs_q.where(OnboardingRecord.lead_id.in_([l.id for l in leads]))
+        recs = (await db.execute(recs_q)).scalars().all()
+
     rec_by_lead = {r.lead_id: r for r in recs}
 
     funnel = [0] * len(STAGES)

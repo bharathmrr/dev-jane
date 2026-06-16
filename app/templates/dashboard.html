@@ -5,26 +5,37 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Jane Aerospace — Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <style>
     :root {
-      --b900: #0c2344;
-      --b800: #13315e;
-      --b700: #1a3a6b;
+      --b950: #060f1e;
+      --b900: #0b1f3a;
+      --b800: #0f2847;
+      --b700: #1a3360;
       --b600: #1a56db;
-      --b500: #2f6bf0;
+      --b500: #2563eb;
+      --b400: #3b82f6;
       --b100: #dbeafe;
       --b50: #eff6ff;
       --ink: #0f172a;
-      --mut: #475569;
+      --ink2: #1e293b;
+      --mut: #64748b;
+      --mut2: #94a3b8;
       --line: #e2e8f0;
+      --bd: #e2e8f0;
       --ok: #16a34a;
       --warn: #d97706;
       --bad: #dc2626;
-      --bg: #f4f7fc;
+      --bg: #eef2f8;
+      --bg2: #f8fafc;
       --card: #ffffff;
-      --r: 14px;
-      --sh: 0 1px 3px rgba(12, 35, 68, .08), 0 4px 16px rgba(12, 35, 68, .06);
+      --r: 12px;
+      --sh: 0 1px 3px rgba(10, 25, 60, .06), 0 4px 16px rgba(10, 25, 60, .07);
+      --sh2: 0 8px 32px rgba(10, 25, 60, .14);
+      --sidebar-w: 240px;
     }
 
     * {
@@ -34,10 +45,12 @@
     }
 
     body {
-      font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+      font-family: 'Inter', 'Segoe UI', system-ui, Arial, sans-serif;
       background: var(--bg);
       color: var(--ink);
       font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
 
     svg.ic {
@@ -76,30 +89,34 @@
       align-items: center;
       justify-content: center;
       z-index: 100;
-      background: radial-gradient(1100px 600px at 80% -10%, #2f6bf0 0%, transparent 60%),
-        linear-gradient(135deg, var(--b900) 0%, var(--b600) 130%);
+      background: var(--b950);
+      background-image:
+        radial-gradient(ellipse 900px 600px at 70% -5%, rgba(37, 99, 235, .4) 0%, transparent 65%),
+        radial-gradient(ellipse 600px 400px at 10% 90%, rgba(124, 58, 237, .25) 0%, transparent 60%);
     }
 
     .login-card {
       background: #fff;
-      border-radius: 20px;
-      padding: 44px;
+      border-radius: 18px;
+      padding: 40px 44px;
       width: 400px;
       max-width: 92vw;
-      box-shadow: 0 24px 80px rgba(0, 0, 0, .4);
+      box-shadow: 0 32px 80px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .05);
     }
 
     .login-card h1 {
-      font-size: 20px;
-      color: var(--b700);
-      margin: 20px 0 6px;
+      font-size: 21px;
+      font-weight: 800;
+      color: var(--ink);
+      margin: 18px 0 5px;
+      letter-spacing: -.01em;
     }
 
     .login-card .sub {
-      font-size: 13px;
+      font-size: 12.5px;
       color: var(--mut);
-      margin-bottom: 24px;
-      line-height: 1.5;
+      margin-bottom: 22px;
+      line-height: 1.6;
     }
 
     .fld {
@@ -136,40 +153,62 @@
     .btn {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
+      gap: 6px;
       border: none;
-      border-radius: 9px;
-      font-weight: 700;
+      border-radius: 8px;
+      font-weight: 600;
       cursor: pointer;
-      padding: 10px 18px;
-      font-size: 13px;
-      transition: filter .12s;
+      padding: 9px 16px;
+      font-size: 12.5px;
+      font-family: inherit;
+      transition: all .14s;
+      white-space: nowrap;
     }
 
     .btn:hover {
-      filter: brightness(1.08);
+      filter: brightness(1.07);
+    }
+
+    .btn:active {
+      transform: scale(.97);
     }
 
     .btn-p {
-      background: var(--b600);
+      background: var(--b500);
       color: #fff;
+      box-shadow: 0 2px 8px rgba(37, 99, 235, .3);
+    }
+
+    .btn-p:hover {
+      background: var(--b600);
+      box-shadow: 0 4px 14px rgba(37, 99, 235, .4);
     }
 
     .btn-g {
       background: var(--ok);
       color: #fff;
+      box-shadow: 0 2px 8px rgba(22, 163, 74, .25);
     }
 
     .btn-r {
       background: #fff;
       color: var(--bad);
-      border: 1.5px solid #fecaca;
+      border: 1.5px solid #fca5a5;
+    }
+
+    .btn-r:hover {
+      background: #fef2f2;
     }
 
     .btn-o {
       background: #fff;
-      color: var(--b700);
-      border: 1.5px solid #c7d4ee;
+      color: var(--ink2);
+      border: 1.5px solid var(--line);
+    }
+
+    .btn-o:hover {
+      background: var(--bg);
+      border-color: #94a3b8;
     }
 
     .btn-w {
@@ -181,18 +220,19 @@
     .btn-block {
       width: 100%;
       justify-content: center;
-      padding: 13px;
-      font-size: 15px;
+      padding: 12px;
+      font-size: 14px;
     }
 
     #login-err {
       display: none;
-      background: #fee2e2;
+      background: #fef2f2;
       color: #991b1b;
       font-size: 12.5px;
       padding: 10px 13px;
       border-radius: 8px;
       margin: 6px 0 12px;
+      border: 1px solid #fecaca;
     }
 
     /* ---------------- shell ---------------- */
@@ -205,164 +245,230 @@
       left: 0;
       top: 0;
       bottom: 0;
-      width: 232px;
-      background: linear-gradient(180deg, var(--b900), var(--b800));
+      width: var(--sidebar-w);
+      background: var(--b950);
       color: #c5d4ec;
       display: flex;
       flex-direction: column;
       z-index: 20;
+      border-right: 1px solid rgba(255, 255, 255, .05);
     }
 
     .sidebar .logo {
-      padding: 22px 20px 18px;
+      padding: 20px 18px 16px;
       color: #fff;
       font-size: 13px;
-      border-bottom: 1px solid rgba(255, 255, 255, .1);
+      border-bottom: 1px solid rgba(255, 255, 255, .07);
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      letter-spacing: .04em;
+      font-weight: 800;
+    }
+
+    .sidebar .logo .logo-sub {
+      font-size: 9.5px;
+      font-weight: 500;
+      color: #6a84b0;
+      display: block;
+      letter-spacing: .08em;
+      margin-top: 1px;
     }
 
     .nav {
       flex: 1;
-      padding: 12px 10px;
+      padding: 10px 10px;
       overflow-y: auto;
+    }
+
+    .nav-section-label {
+      font-size: 9.5px;
+      font-weight: 700;
+      color: #3d5a8a;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      padding: 14px 14px 6px;
+      display: block;
     }
 
     .nav a {
       display: flex;
       align-items: center;
-      gap: 11px;
-      padding: 10px 13px;
-      color: #aebfdd;
-      font-size: 13.5px;
-      border-radius: 9px;
+      gap: 10px;
+      padding: 9px 12px;
+      color: #7d9ac8;
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 8px;
       text-decoration: none;
       cursor: pointer;
-      margin-bottom: 2px;
+      margin-bottom: 1px;
+      transition: background .12s, color .12s;
+      position: relative;
     }
 
     .nav a:hover {
-      background: rgba(255, 255, 255, .07);
-      color: #fff;
+      background: rgba(255, 255, 255, .06);
+      color: #c5d4ec;
     }
 
     .nav a.active {
-      background: var(--b600);
+      background: rgba(26, 86, 219, .2);
       color: #fff;
       font-weight: 600;
-      box-shadow: 0 4px 14px rgba(26, 86, 219, .4);
+    }
+
+    .nav a.active::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 5px;
+      bottom: 5px;
+      width: 3px;
+      border-radius: 0 3px 3px 0;
+      background: var(--b400);
     }
 
     .nav .badge {
       margin-left: auto;
-      background: var(--bad);
+      background: #ef4444;
       color: #fff;
-      font-size: 10px;
+      font-size: 9.5px;
       font-weight: 800;
       border-radius: 99px;
-      padding: 1px 7px;
+      padding: 2px 7px;
+      line-height: 1.2;
     }
 
     .who {
-      padding: 14px 18px;
-      border-top: 1px solid rgba(255, 255, 255, .1);
+      padding: 12px 14px;
+      border-top: 1px solid rgba(255, 255, 255, .07);
       font-size: 12px;
       display: flex;
       align-items: center;
       gap: 10px;
+      background: rgba(0, 0, 0, .12);
     }
 
     .who .av {
-      width: 34px;
-      height: 34px;
-      border-radius: 50%;
-      background: var(--b600);
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, var(--b500), #7c3aed);
       color: #fff;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 800;
-      font-size: 14px;
+      font-size: 13px;
       flex: none;
+      letter-spacing: .02em;
     }
 
     .who b {
-      color: #fff;
+      color: #e2eaf6;
       display: block;
-      font-size: 12.5px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .who span {
+      color: #5a78a8;
+      font-size: 10.5px;
     }
 
     .who button {
       background: none;
       border: none;
-      color: #8fa6cc;
+      color: #3d5a8a;
       cursor: pointer;
       margin-left: auto;
       padding: 6px;
+      border-radius: 6px;
+      transition: color .12s, background .12s;
     }
 
     .who button:hover {
       color: #fff;
+      background: rgba(255, 255, 255, .08);
     }
 
-    /* topbar */
+    /* ── topbar ── */
     .topbar {
       position: fixed;
-      left: 232px;
+      left: var(--sidebar-w);
       right: 0;
       top: 0;
-      height: 60px;
-      background: rgba(255, 255, 255, .92);
-      backdrop-filter: blur(8px);
+      height: 58px;
+      background: #fff;
       border-bottom: 1px solid var(--line);
       display: flex;
       align-items: center;
-      gap: 14px;
-      padding: 0 26px;
+      gap: 12px;
+      padding: 0 24px;
       z-index: 15;
     }
 
-    .topbar h2 {
-      font-size: 16.5px;
-      color: var(--b700);
+    .topbar-left {
+      display: flex;
+      flex-direction: column;
       margin-right: auto;
+    }
+
+    .topbar h2 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--ink);
       display: flex;
       align-items: center;
-      gap: 9px;
+      gap: 7px;
+      line-height: 1.1;
+    }
+
+    .topbar-sub {
+      font-size: 11px;
+      color: var(--mut);
+      margin-top: 1px;
+      font-weight: 400;
     }
 
     .gsearch {
       display: flex;
       align-items: center;
       gap: 8px;
-      background: #f1f5f9;
-      border: 1.5px solid transparent;
+      background: var(--bg);
+      border: 1.5px solid var(--line);
       border-radius: 9px;
-      padding: 8px 13px;
-      width: 300px;
+      padding: 7px 12px;
+      width: 260px;
       color: var(--mut);
+      transition: border-color .15s, box-shadow .15s;
     }
 
     .gsearch:focus-within {
-      border-color: var(--b600);
+      border-color: var(--b400);
       background: #fff;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, .1);
     }
 
     .gsearch input {
       border: none;
       background: none;
       outline: none;
-      font-size: 13px;
+      font-size: 12.5px;
       width: 100%;
+      font-family: inherit;
     }
 
     .main {
-      margin-left: 232px;
-      padding: 84px 26px 40px;
+      margin-left: var(--sidebar-w);
+      padding: 78px 24px 40px;
     }
 
-    /* cards */
+    /* ── KPI + cards ── */
     .cards {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
       gap: 14px;
       margin-bottom: 20px;
     }
@@ -375,12 +481,13 @@
       display: flex;
       gap: 13px;
       align-items: center;
+      border: 1px solid rgba(226, 232, 240, .6);
     }
 
     .card .ico {
       width: 40px;
       height: 40px;
-      border-radius: 11px;
+      border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -388,47 +495,48 @@
     }
 
     .card .num {
-      font-size: 23px;
+      font-size: 22px;
       font-weight: 800;
-      color: var(--b700);
+      color: var(--ink);
       line-height: 1.1;
     }
 
     .card .lbl {
-      font-size: 11px;
+      font-size: 10.5px;
       color: var(--mut);
       text-transform: uppercase;
-      letter-spacing: .04em;
+      letter-spacing: .05em;
       font-weight: 600;
+      margin-top: 1px;
     }
 
-    /* gradient KPI tiles (Command-Center style) */
+    /* gradient KPI tiles */
     .card.kpi {
       position: relative;
       display: block;
       color: #fff;
       border: none;
-      padding: 17px 18px 15px;
-      border-radius: 16px;
+      padding: 18px 18px 16px;
+      border-radius: 14px;
       overflow: hidden;
-      box-shadow: 0 10px 26px rgba(15, 23, 42, .14);
-      min-height: 116px;
-      transition: transform .12s, box-shadow .12s;
+      box-shadow: 0 4px 20px rgba(15, 23, 42, .18);
+      min-height: 118px;
+      transition: transform .15s, box-shadow .15s;
     }
 
     .card.kpi:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 16px 34px rgba(15, 23, 42, .20);
+      transform: translateY(-3px);
+      box-shadow: 0 12px 32px rgba(15, 23, 42, .24);
     }
 
     .card.kpi .kpi-ico {
       position: absolute;
-      top: 15px;
-      right: 15px;
-      width: 38px;
-      height: 38px;
+      top: 16px;
+      right: 16px;
+      width: 40px;
+      height: 40px;
       border-radius: 10px;
-      background: rgba(255, 255, 255, .20);
+      background: rgba(255, 255, 255, .18);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -437,60 +545,76 @@
     .card.kpi .kpi-ico svg {
       width: 20px;
       height: 20px;
-      color: #fff;
+      color: rgba(255, 255, 255, .9);
     }
 
     .card.kpi .kpi-lbl {
-      font-size: 10.5px;
+      font-size: 10px;
       font-weight: 700;
-      letter-spacing: .06em;
+      letter-spacing: .08em;
       text-transform: uppercase;
-      opacity: .93;
-      padding-right: 46px;
+      opacity: .85;
+      padding-right: 50px;
     }
 
     .card.kpi .kpi-num {
-      font-size: 30px;
-      font-weight: 800;
-      line-height: 1.1;
-      margin-top: 9px;
+      font-size: 32px;
+      font-weight: 900;
+      line-height: 1;
+      margin-top: 10px;
+      letter-spacing: -.02em;
     }
 
     .card.kpi .kpi-sub {
-      font-size: 11.5px;
-      opacity: .92;
-      margin-top: 5px;
+      font-size: 11px;
+      opacity: .8;
+      margin-top: 6px;
+      font-weight: 500;
     }
 
+    /* ── panels ── */
     .panel {
       background: var(--card);
       border-radius: var(--r);
       padding: 20px 22px;
       box-shadow: var(--sh);
-      margin-bottom: 20px;
+      margin-bottom: 18px;
+      border: 1px solid rgba(226, 232, 240, .5);
     }
 
     .panel h3 {
-      font-size: 12.5px;
-      color: var(--b700);
+      font-size: 11.5px;
+      color: var(--ink2);
       text-transform: uppercase;
-      letter-spacing: .06em;
-      margin-bottom: 14px;
+      letter-spacing: .07em;
+      font-weight: 700;
+      margin-bottom: 16px;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 7px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .section-header h3 {
+      margin-bottom: 0;
     }
 
     .grid2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 20px;
+      gap: 18px;
     }
 
     .grid3 {
       display: grid;
       grid-template-columns: 2fr 1fr;
-      gap: 20px;
+      gap: 18px;
     }
 
     @media(max-width:1100px) {
@@ -501,7 +625,7 @@
       }
     }
 
-    /* tables */
+    /* ── tables ── */
     table {
       width: 100%;
       border-collapse: collapse;
@@ -510,18 +634,20 @@
 
     th {
       text-align: left;
-      font-size: 10.5px;
+      font-size: 10px;
       color: var(--mut);
       text-transform: uppercase;
-      letter-spacing: .05em;
-      padding: 9px 10px;
+      letter-spacing: .06em;
+      font-weight: 700;
+      padding: 10px 12px;
       border-bottom: 2px solid var(--line);
       white-space: nowrap;
+      background: #f8fafc;
     }
 
     td {
-      padding: 10px;
-      border-bottom: 1px solid #f1f5f9;
+      padding: 10px 12px;
+      border-bottom: 1px solid #f0f4fa;
       vertical-align: middle;
     }
 
@@ -530,12 +656,18 @@
     }
 
     tbody tr:hover {
-      background: var(--b50);
+      background: #f5f8ff;
+    }
+
+    tbody tr:last-child td {
+      border-bottom: none;
     }
 
     .chip {
-      display: inline-block;
-      padding: 3px 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 9px;
       border-radius: 99px;
       font-size: 10.5px;
       font-weight: 700;
@@ -545,7 +677,12 @@
 
     .c-gray {
       background: #f1f5f9;
-      color: #475569;
+      color: #64748b;
+    }
+
+    .c-gray-dark {
+      background: #e2e8f0;
+      color: #374151;
     }
 
     .c-blue {
@@ -579,19 +716,35 @@
       justify-content: center;
       width: 30px;
       height: 30px;
-      border-radius: 8px;
+      border-radius: 7px;
       border: 1.5px solid var(--line);
       background: #fff;
-      color: var(--b700);
+      color: var(--mut);
       cursor: pointer;
       margin: 0 2px;
       transition: all .12s;
     }
 
     .ibtn:hover {
-      border-color: var(--b600);
-      color: var(--b600);
+      border-color: var(--b400);
+      color: var(--b500);
       background: var(--b50);
+    }
+
+    .badge {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      background: #ef4444;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 800;
+      border-radius: 99px;
+      padding: 2px 5px;
+      line-height: 1.2;
+      border: 2px solid #fff;
+      min-width: 18px;
+      text-align: center;
     }
 
     .steps {
@@ -609,6 +762,88 @@
 
     .step.done {
       background: var(--b600);
+    }
+
+    /* document pipeline circles */
+    .doc-card {
+      background: #fff;
+      border: 1px solid var(--bd);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      transition: box-shadow .15s;
+    }
+
+    .doc-card:hover {
+      box-shadow: 0 4px 18px rgba(15, 23, 42, .08);
+    }
+
+    .doc-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .doc-pipeline {
+      display: flex;
+      align-items: center;
+      gap: 0;
+    }
+
+    .dp-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      border: 2px solid #cbd5e1;
+      background: #fff;
+      flex: none;
+      transition: background .2s, border-color .2s;
+    }
+
+    .dp-dot.done {
+      background: #16a34a;
+      border-color: #16a34a;
+    }
+
+    .dp-dot.active {
+      border-color: #1a56db;
+      background: #eff6ff;
+    }
+
+    .dp-line {
+      width: 16px;
+      height: 2px;
+      background: #e2e8f0;
+      flex: none;
+      transition: background .2s;
+    }
+
+    .dp-line.done {
+      background: #16a34a;
+    }
+
+    .doc-cols {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+    }
+
+    .doc-col-lbl {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--mut);
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      margin-bottom: 5px;
+    }
+
+    @media(max-width:680px) {
+      .doc-cols {
+        grid-template-columns: 1fr;
+      }
     }
 
     .bar-row {
@@ -916,13 +1151,14 @@
       color: var(--bad);
     }
 
-    /* drawer */
+    /* ── drawer ── */
     #drawer-wrap {
       position: fixed;
       inset: 0;
-      background: rgba(12, 35, 68, .45);
+      background: rgba(7, 16, 32, .5);
       z-index: 50;
       display: none;
+      backdrop-filter: blur(2px);
     }
 
     #drawer {
@@ -930,18 +1166,44 @@
       right: 0;
       top: 0;
       bottom: 0;
-      width: 560px;
+      width: 580px;
       max-width: 96vw;
       background: #fff;
-      box-shadow: -12px 0 40px rgba(0, 0, 0, .25);
+      box-shadow: -16px 0 48px rgba(0, 0, 0, .22);
       overflow-y: auto;
-      padding: 26px 28px;
-      animation: slidein .22s ease;
+      animation: slidein .2s cubic-bezier(.3, 0, .2, 1);
+    }
+
+    .drawer-head {
+      position: sticky;
+      top: 0;
+      background: var(--b900);
+      color: #fff;
+      padding: 18px 24px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      z-index: 2;
+    }
+
+    .drawer-head h2 {
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      flex: 1;
+    }
+
+    .drawer-head .chip {
+      border: 1px solid rgba(255, 255, 255, .2);
+    }
+
+    .drawer-body {
+      padding: 20px 24px 32px;
     }
 
     @keyframes slidein {
       from {
-        transform: translateX(60px);
+        transform: translateX(48px);
         opacity: 0;
       }
 
@@ -952,7 +1214,7 @@
     }
 
     #drawer h2 {
-      font-size: 18px;
+      font-size: 17px;
       color: var(--b700);
     }
 
@@ -1116,15 +1378,30 @@
       position: fixed;
       bottom: 24px;
       right: 24px;
-      background: var(--b900);
+      background: var(--ink);
       color: #fff;
       padding: 13px 20px;
-      border-radius: 11px;
+      border-radius: 10px;
       font-size: 13px;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+      font-weight: 500;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, .32);
       z-index: 90;
       display: none;
       max-width: 380px;
+      border-left: 4px solid var(--b400);
+      animation: toast-in .18s ease;
+    }
+
+    @keyframes toast-in {
+      from {
+        transform: translateY(16px);
+        opacity: 0;
+      }
+
+      to {
+        transform: none;
+        opacity: 1;
+      }
     }
 
     /* kebab action menu */
@@ -1277,29 +1554,129 @@
       background: #fafbfc;
     }
 
+    /* ── extra utilities ── */
+    .view-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .view-title {
+      font-size: 17px;
+      font-weight: 800;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .view-subtitle {
+      font-size: 12px;
+      color: var(--mut);
+      margin-top: 2px;
+    }
+
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .filter-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 12px;
+      border-radius: 99px;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--bg);
+      color: var(--mut);
+      border: 1.5px solid var(--line);
+      transition: all .12s;
+    }
+
+    .filter-chip:hover,
+    .filter-chip.on {
+      background: var(--b50);
+      color: var(--b600);
+      border-color: var(--b400);
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--line);
+      margin: 14px 0;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--mut);
+    }
+
+    .empty-state svg {
+      width: 44px;
+      height: 44px;
+      opacity: .3;
+      margin-bottom: 12px;
+    }
+
+    .empty-state p {
+      font-size: 13px;
+    }
+
+    .stat-delta {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 5px;
+    }
+
+    .stat-delta.up {
+      background: #dcfce7;
+      color: #15803d;
+    }
+
+    .stat-delta.down {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .stat-delta.flat {
+      background: #f1f5f9;
+      color: #64748b;
+    }
+
     @media(max-width:900px) {
-      .sidebar {
-        width: 62px;
+      :root {
+        --sidebar-w: 62px;
       }
 
       .sidebar .logo span,
+      .sidebar .logo .logo-sub,
       .nav a span,
+      .nav-section-label,
       .who div,
       .nav .badge {
         display: none;
       }
 
-      .topbar {
-        left: 62px;
-      }
-
       .main {
-        margin-left: 62px;
-        padding: 80px 12px 30px;
+        padding: 76px 12px 30px;
       }
 
       .gsearch {
-        width: 160px;
+        width: 150px;
       }
     }
   </style>
@@ -1336,16 +1713,19 @@
   <div id="app">
     <div class="sidebar">
       <div class="logo">
-        <svg width="34" height="34" viewBox="0 0 48 48">
+        <svg width="32" height="32" viewBox="0 0 48 48">
           <circle cx="24" cy="24" r="22" fill="#1a56db" />
           <path d="M10 30 L38 14 L30 26 L36 30 L26 30 L20 36 L22 28 Z" fill="#fff" />
         </svg>
-        <span>JANE AEROSPACE</span>
+        <div>
+          <span>JANE AEROSPACE</span>
+          <span class="logo-sub">COMMAND CENTER</span>
+        </div>
       </div>
       <div class="nav" id="nav"></div>
       <div class="who">
         <div class="av" id="who-av">A</div>
-        <div><b id="who-name">—</b><span id="who-role" style="font-size:11px;">—</span></div>
+        <div><b id="who-name">—</b><span id="who-role">—</span></div>
         <button onclick="logout()" title="Sign out"><svg class="ic" viewBox="0 0 24 24">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
             <polyline points="16 17 21 12 16 7" />
@@ -1355,32 +1735,56 @@
     </div>
 
     <div class="topbar">
-      <h2 id="page-title">Overview</h2>
+      <div class="topbar-left">
+        <h2 id="page-title">Overview</h2>
+        <span class="topbar-sub" id="topbar-sub"></span>
+      </div>
       <div class="gsearch"><svg class="ic" viewBox="0 0 24 24">
           <circle cx="11" cy="11" r="8" />
           <path d="m21 21-4.3-4.3" />
         </svg>
         <input id="g-q" placeholder="Search leads, companies…" oninput="globalSearch()">
       </div>
+
+      <div style="position:relative; display:inline-flex; align-items:center; margin-left: 6px;">
+        <svg class="ic" viewBox="0 0 24 24" style="position:absolute;left:10px;pointer-events:none;color:var(--mut);">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+        <select id="ov-time-filter" onchange="handleTimeFilter()"
+          style="appearance:none; border:1.5px solid var(--line); border-radius:10px; padding:8.5px 32px; background:#fff; font-size:13px; font-weight:600; color:#475569; cursor:pointer; outline:none; font-family:inherit; transition:all 0.2s;">
+          <option value="0">All Time</option>
+          <option value="7">Last 7 Days</option>
+          <option value="30">Last 30 Days</option>
+          <option value="90">Last 90 Days</option>
+          <option value="365">Last 1 Year</option>
+        </select>
+        <svg class="ic" viewBox="0 0 24 24"
+          style="position:absolute;right:10px;width:14px;height:14px;pointer-events:none;color:var(--mut);">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </div>
+
       <button class="btn btn-p" id="btn-add" onclick="openModal('add')"><svg class="ic" viewBox="0 0 24 24">
           <line x1="12" y1="5" x2="12" y2="19" />
           <line x1="5" y1="12" x2="19" y2="12" />
         </svg> Add Lead</button>
       <div style="position:relative;">
         <button class="btn btn-o" id="notif-btn" onclick="toggleNotifications(event)" title="Notifications"
-          style="position:relative;"><svg class="ic" viewBox="0 0 24 24">
+          style="position:relative;padding:9px 11px;"><svg class="ic" viewBox="0 0 24 24">
             <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
             <path d="M13.73 21a2 2 0 0 1-3.46 0" />
           </svg><span id="notif-badge" class="badge" style="display:none;"></span></button>
         <div id="notif-pop"
-          style="display:none;position:absolute;top:46px;right:0;width:360px;max-height:70vh;overflow:auto;background:#fff;border:1px solid var(--bd);border-radius:12px;box-shadow:0 16px 44px rgba(15,23,42,.20);z-index:90;">
+          style="display:none;position:absolute;top:48px;right:0;width:370px;max-height:72vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 20px 52px rgba(10,25,60,.22);z-index:90;">
         </div>
       </div>
-      <button class="btn btn-o" onclick="openComments()" title="Lead document comments" style="position:relative;"><svg
-          class="ic" viewBox="0 0 24 24">
+      <button class="btn btn-o" onclick="openComments()" title="Lead comments"
+        style="position:relative;padding:9px 11px;"><svg class="ic" viewBox="0 0 24 24">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg><span id="cmt-badge" class="badge" style="display:none;"></span></button>
-      <button class="btn btn-o" onclick="refreshAll()" title="Refresh"><svg class="ic" viewBox="0 0 24 24">
+      <button class="btn btn-o" onclick="refreshAll()" title="Refresh data" style="padding:9px 11px;"><svg class="ic"
+          viewBox="0 0 24 24">
           <path d="M21 12a9 9 0 1 1-2.64-6.36" />
           <polyline points="21 3 21 9 15 9" />
         </svg></button>
@@ -1499,20 +1903,42 @@
     }
 
     const NAVS = [
-      ['overview', 'Overview', 'home'], ['kanban', 'Pipeline Board', 'kanban'], ['leads', 'Leads', 'users2'],
-      ['sheet', 'Sheet', 'table'], ['bookings', 'Bookings', 'cal'], ['docs', 'Documents', 'doc'],
-      ['approvals', 'Notifications', 'check2'], ['logs', 'Activity', 'clock'],
-      ['users', 'Users', 'shield'],
+      ['overview', 'Overview', 'home', 'MAIN'],
+      ['kanban', 'Pipeline Board', 'kanban', null],
+      ['leads', 'Leads', 'users2', null],
+      ['sheet', 'Sheet View', 'table', null],
+      ['bookings', 'Bookings', 'cal', 'PIPELINE'],
+      ['docs', 'Documents', 'doc', null],
+      ['approvals', 'Notifications', 'check2', 'OPERATIONS'],
+      ['logs', 'Activity Log', 'clock', null],
+      ['users', 'Users', 'shield', 'SYSTEM'],
     ];
+    const NAV_SUBS = {
+      overview: () => `${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}`,
+      kanban: () => `${LEADS.length} leads tracked`,
+      leads: () => `${LEADS.filter(l => !l.dropped).length} active leads`,
+      sheet: () => 'Live sync with Google Sheets',
+      bookings: () => 'Meeting calendar',
+      docs: () => `${LEADS.filter(l => l.onboarding).length} onboarding records`,
+      approvals: () => 'Pending reviews & alerts',
+      logs: () => 'Full audit trail',
+      users: () => 'Team access control',
+    };
     function buildNav() {
-      document.getElementById('nav').innerHTML = NAVS
-        .filter(([v]) => !(v === 'users' && ROLE !== 'admin') && !(v === 'bulk' && !canAct()))
-        .map(([v, l, i]) => `<a data-view="${v}" onclick="nav('${v}')">${ic(i)}<span>${l}</span>${v === 'approvals' ? '<span class="badge" id="apr-badge" style="display:none;"></span>' : ''}</a>`).join('');
+      let html = '';
+      NAVS.filter(([v]) => !(v === 'users' && ROLE !== 'admin') && !(v === 'bulk' && !canAct()))
+        .forEach(([v, l, i, section]) => {
+          if (section) html += `<span class="nav-section-label">${section}</span>`;
+          html += `<a data-view="${v}" onclick="nav('${v}')">${ic(i)}<span>${l}</span>${v === 'approvals' ? '<span class="badge" id="apr-badge" style="display:none;"></span>' : ''}</a>`;
+        });
+      document.getElementById('nav').innerHTML = html;
     }
     function nav(v) {
       document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('active', a.dataset.view === v));
       NAVS.forEach(([x]) => { const el = document.getElementById('view-' + x); if (el) el.style.display = x === v ? 'block' : 'none'; });
-      document.getElementById('page-title').innerHTML = ic(NAVS.find(([x]) => x === v)[2]) + ' ' + NAVS.find(([x]) => x === v)[1];
+      const entry = NAVS.find(([x]) => x === v);
+      document.getElementById('page-title').innerHTML = ic(entry[2]) + ' ' + entry[1];
+      const sub = NAV_SUBS[v]; if (sub) document.getElementById('topbar-sub').textContent = sub();
       ({
         overview: loadOverview, kanban: renderKanban, leads: renderLeadsView, sheet: loadSheet, bookings: loadBookings,
         docs: renderDocs, approvals: loadApprovals, bulk: renderBulk, logs: loadLogs, users: loadUsers
@@ -1523,28 +1949,36 @@
       const a = document.querySelector('.nav a.active');
       if (a && a.dataset.view !== 'leads') nav('leads'); renderLeadsView();
     }
+    function handleTimeFilter() {
+      const a = document.querySelector('.nav a.active');
+      if (a && a.dataset.view !== 'overview') nav('overview'); else loadOverview();
+    }
 
     /* ============================ overview ============================ */
     async function loadOverview() {
-      try { OV = await api('/overview'); } catch (e) { return; }
+      const days = document.getElementById('ov-time-filter') ? document.getElementById('ov-time-filter').value : '0';
+      try { OV = await api('/overview?days=' + days); } catch (e) { return; }
       const t = OV.totals;
       const pct = (a, b) => b > 0 ? Math.round(a / b * 100) : 0;
-      // Business KPIs: engagement, active deals, win rate — outcomes, not booking/reply counts.
-      const cardDefs = [
-        ['Total Leads', t.leads, 'users2', '#dbeafe', '#1e40af', ''],
-        ['Engaged', t.replied, 'inbox', '#dcfce7', '#15803d', pct(t.replied, t.leads) + '% reply rate'],
-        ['Active Deals', t.onboarding, 'zap', '#ede9fe', '#6d28d9', pct(t.onboarding, t.leads) + '% of leads'],
-        ['NDAs Signed', t.nda_signed, 'doc', '#e0e7ff', '#4338ca', ''],
-        ['Deals Won', t.agreement_signed, 'check2', '#dcfce7', '#15803d', pct(t.agreement_signed, t.leads) + '% win rate'],
-        ['Action Needed', t.pending_approvals, 'clock', '#fee2e2', '#b91c1c', 'approvals to review'],
+      // Gradient KPI tiles — each with gradient, icon, number, label, sub-label
+      const kpiDefs = [
+        { lbl: 'Total Leads', val: t.leads, sub: 'in the pipeline', icon: 'users2', grad: 'linear-gradient(135deg,#1a56db,#2563eb)' },
+        { lbl: 'Engaged', val: t.replied, sub: pct(t.replied, t.leads) + '% reply rate', icon: 'inbox', grad: 'linear-gradient(135deg,#059669,#16a34a)' },
+        { lbl: 'Active Deals', val: t.onboarding, sub: pct(t.onboarding, t.leads) + '% conversion', icon: 'zap', grad: 'linear-gradient(135deg,#7c3aed,#a855f7)' },
+        { lbl: 'NDAs Signed', val: t.nda_signed, sub: 'documents executed', icon: 'doc', grad: 'linear-gradient(135deg,#0891b2,#06b6d4)' },
+        { lbl: 'Deals Won', val: t.agreement_signed, sub: pct(t.agreement_signed, t.leads) + '% win rate', icon: 'check2', grad: 'linear-gradient(135deg,#15803d,#22c55e)' },
+        { lbl: 'Action Needed', val: t.pending_approvals, sub: 'pending approvals', icon: 'clock', grad: 'linear-gradient(135deg,#b45309,#d97706)' },
       ];
       document.getElementById('view-overview').innerHTML = `
-    <div class="cards">${cardDefs.map(c => `<div class="card">
-      <div class="ico" style="background:${c[3]};color:${c[4]};">${ic(c[2])}</div>
-      <div><div class="num">${c[1]}</div><div class="lbl">${c[0]}</div>${c[5] ? `<div style="font-size:10.5px;color:var(--mut);margin-top:1px;">${c[5]}</div>` : ''}</div></div>`).join('')}</div>
+    <div class="cards">${kpiDefs.map(k => `<div class="card kpi" style="background:${k.grad};">
+      <div class="kpi-ico">${ic(k.icon)}</div>
+      <div class="kpi-lbl">${k.lbl}</div>
+      <div class="kpi-num">${k.val}</div>
+      <div class="kpi-sub">${k.sub}</div>
+    </div>`).join('')}</div>
     <div class="grid3">
-      <div class="panel"><h3>${ic('chart')} 14-Day Activity</h3><canvas id="ch-bar" height="105"></canvas></div>
-      <div class="panel"><h3>${ic('chart')} Lead Status Split</h3><canvas id="ch-pie" height="105"></canvas></div>
+      <div class="panel"><h3>${ic('chart')} 14-Day Activity</h3><canvas id="ch-bar" height="110"></canvas></div>
+      <div class="panel"><h3>${ic('chart')} Lead Status Split</h3><canvas id="ch-pie" height="110"></canvas></div>
     </div>
     <div class="grid2">
       <div class="panel"><h3>${ic('zap')} Conversion Funnel</h3><div id="ov-funnel"></div></div>
@@ -1613,19 +2047,47 @@
     function renderLeadsView() {
       const q = (document.getElementById('g-q').value || '').toLowerCase();
       const rows = LEADS.filter(l => !q || l.email.toLowerCase().includes(q) || (l.company || '').toLowerCase().includes(q));
-      document.getElementById('view-leads').innerHTML = `<div class="panel" style="overflow-x:auto;">
-    <table><thead><tr><th></th><th>Lead</th><th>Stage</th><th>Sent</th><th>Replied</th><th>Booked</th><th>Actions</th></tr></thead>
-    <tbody>${rows.map(l => `<tr ${l.dropped ? 'style="opacity:.5;"' : ''}>
-      <td><button class="ibtn" title="View full details" onclick="openDrawer('${l.lead_id}')">${ic('eye')}</button></td>
-      <td><b>${esc(l.company)}</b>${l.dropped ? ' <span class="chip c-red">DROPPED</span>' : ''}<br>
-        <span style="color:var(--mut);font-size:12px;">${ic('mail', 'width:12px;height:12px;')} ${esc(l.email)}</span>
-        ${l.phone ? `<span style="color:var(--mut);font-size:12px;margin-left:8px;">${ic('phone', 'width:12px;height:12px;')} ${esc(l.phone)}</span>` : ''}</td>
-      <td><span class="chip c-blue">${esc(l.stage)}</span>${steps(l.stage_index)}</td>
-      <td style="font-size:12px;">${esc(l.sent_at) || '—'}${l.followups ? `<br><span style="font-size:10.5px;color:var(--mut);">+${l.followups} follow-ups</span>` : ''}</td>
-      <td style="font-size:12px;">${esc(l.replied_at) || '—'}</td>
-      <td style="font-size:12px;">${esc(l.booked_at) || '—'}${l.selected_slot ? `<br><span style="font-size:10.5px;color:var(--mut);">${esc(l.selected_slot)}</span>` : ''}${l.meeting_link ? `<br><a href="${esc(l.meeting_link)}" target="_blank" style="font-size:11px;font-weight:700;">🔗 Join Meeting ↗</a>` : ''}</td>
-      <td>${leadActionBtns(l)}</td></tr>`).join('') ||
-        '<tr><td colspan="7" style="text-align:center;color:var(--mut);padding:28px;">No leads found</td></tr>'}</tbody></table></div>`;
+      const active = rows.filter(l => !l.dropped).length;
+      document.getElementById('view-leads').innerHTML = `
+    <div class="view-header">
+      <div>
+        <div class="view-title">${ic('users2')} All Leads</div>
+        <div class="view-subtitle">${active} active · ${rows.length - active} dropped${q ? ` · filtered: "${esc(q)}"` : ''}</div>
+      </div>
+      ${canAct() ? `<button class="btn btn-p" onclick="openModal('add')">${ic('plus')} Add Lead</button>` : ''}
+    </div>
+    <div class="panel" style="overflow-x:auto;padding:0;">
+    <table><thead><tr>
+      <th style="width:40px;"></th>
+      <th>Company / Lead</th>
+      <th>Pipeline Stage</th>
+      <th>Outreach</th>
+      <th>Reply</th>
+      <th>Booking</th>
+      <th style="width:48px;"></th>
+    </tr></thead>
+    <tbody>${rows.map(l => `<tr ${l.dropped ? 'style="opacity:.45;"' : ''}>
+      <td style="padding:8px 10px;"><button class="ibtn" title="View details" onclick="openDrawer('${l.lead_id}')">${ic('eye')}</button></td>
+      <td style="min-width:200px;">
+        <div style="font-weight:700;font-size:13px;color:var(--ink);">${esc(l.company)}</div>
+        <div style="color:var(--mut);font-size:11.5px;margin-top:2px;">${esc(l.email)}</div>
+        ${l.phone ? `<div style="color:var(--mut2);font-size:11px;">${esc(l.phone)}</div>` : ''}
+        ${l.dropped ? '<span class="chip c-red" style="margin-top:3px;">DROPPED</span>' : ''}
+      </td>
+      <td>
+        <span class="chip c-blue" style="margin-bottom:4px;">${esc(l.stage)}</span>
+        ${steps(l.stage_index)}
+      </td>
+      <td style="font-size:12px;color:var(--ink2);">${esc(l.sent_at) || '<span style="color:var(--mut2);">—</span>'}
+        ${l.followups ? `<br><span class="chip c-gray" style="font-size:9.5px;margin-top:3px;">+${l.followups} follow-ups</span>` : ''}</td>
+      <td style="font-size:12px;color:var(--ink2);">${esc(l.replied_at) || '<span style="color:var(--mut2);">—</span>'}</td>
+      <td style="font-size:12px;color:var(--ink2);">${esc(l.booked_at) || '<span style="color:var(--mut2);">—</span>'}
+        ${l.selected_slot ? `<br><span style="font-size:10.5px;color:var(--mut);">${esc(l.selected_slot)}</span>` : ''}
+        ${l.meeting_link ? `<br><a href="${esc(l.meeting_link)}" target="_blank" style="font-size:11px;font-weight:700;color:var(--b500);">🔗 Join ↗</a>` : ''}</td>
+      <td style="padding:8px 10px;">${leadActionBtns(l)}</td>
+    </tr>`).join('') ||
+        '<tr><td colspan="7" style="text-align:center;color:var(--mut);padding:40px 20px;">No leads found</td></tr>'}
+    </tbody></table></div>`;
     }
     function leadActionBtns(l) {
       return `<button class="kebab" onclick="openLeadMenu(event,'${l.lead_id}')" title="Actions">⋮</button>`;
@@ -1804,7 +2266,12 @@
       const pop = document.getElementById('notif-pop');
       NOTIF_OPEN = !NOTIF_OPEN;
       pop.style.display = NOTIF_OPEN ? 'block' : 'none';
-      if (NOTIF_OPEN) renderNotifPanel();
+      if (NOTIF_OPEN) {
+        renderNotifPanel();
+        // Optimistically clear badge — viewed = read
+        const b = document.getElementById('notif-badge');
+        if (b) b.style.display = 'none';
+      }
     }
     async function renderNotifPanel() {
       const pop = document.getElementById('notif-pop');
@@ -2029,27 +2496,15 @@
     }
 
     /* ============================ documents ============================ */
-    function renderDocs() {
-      const rows = LEADS.filter(l => l.onboarding);
-      document.getElementById('view-docs').innerHTML = `<div class="panel" style="overflow-x:auto;">
-    <table><thead><tr><th>Company</th><th>KYC</th><th>NDA</th><th>Agreement</th></tr></thead><tbody>${rows.map(l => {
-        const o = l.onboarding; return `<tr>
-      <td><b>${esc(l.company)}</b><br><span style="font-size:11.5px;color:var(--mut);">${esc(l.email)}</span><br>
-        <span class="chip ${o.company_type === 'overseas' ? 'c-amber' : 'c-blue'}">${o.company_type === 'overseas' ? 'Overseas' : 'Indian'}</span></td>
-      <td>${chip(o.kyc_status)}<br><a class="btn btn-o" style="padding:5px 11px;font-size:11px;margin-top:5px;" target="_blank" href="${o.kyc_view_url}">${ic('eye')} View</a></td>
-      <td>${docCell(o, 'nda')}</td><td>${docCell(o, 'agreement')}</td></tr>`;
-      }).join('') ||
-        '<tr><td colspan="4" style="text-align:center;color:var(--mut);padding:28px;">No onboarding records yet</td></tr>'}</tbody></table></div>`;
-    }
     function docStageChip(stage) {
       const map = {
-        nda_sent:    ['c-blue',   'Sent for Review'],
-        agr_sent:    ['c-blue',   'Sent for Review'],
-        nda_modify:  ['c-amber',  'Changes Requested'],
-        agr_modify:  ['c-amber',  'Changes Requested'],
-        lead_accept: ['c-blue',   'Terms Accepted'],
-        sign_sent:   ['c-purple', 'Awaiting Signature'],
-        signed:      ['c-green',  '&#10003; Signed'],
+        nda_sent: ['c-blue', 'Sent for Review'],
+        agr_sent: ['c-blue', 'Sent for Review'],
+        nda_modify: ['c-amber', 'Changes Requested'],
+        agr_modify: ['c-amber', 'Changes Requested'],
+        lead_accept: ['c-blue', 'Terms Accepted'],
+        sign_sent: ['c-purple', 'Awaiting Signature'],
+        signed: ['c-green', '&#10003; Signed'],
       };
       if (!stage) return '';
       const [cls, label] = map[stage] || ['c-gray', stage];
@@ -2061,6 +2516,54 @@
       h += `<br><a class="btn ${canAct() ? 'btn-p' : 'btn-o'}" style="padding:5px 11px;font-size:11px;margin-top:5px;" target="_blank" href="${o[k + '_edit_url']}">${ic(canAct() ? 'edit' : 'eye')} ${canAct() ? 'Edit & Preview' : 'Preview'}</a>
     <button class="btn btn-o" style="padding:5px 11px;font-size:11px;margin-top:5px;" onclick="navigator.clipboard.writeText('${o[k + '_sign_url']}');toast('Signing link copied')">${ic('copy')} Sign Link</button>`;
       return h;
+    }
+    function docPipeline(o) {
+      const kycDone = ['APPROVED', 'PROCEED_NEXT'].includes(o.kyc_status);
+      const ndaSent = !!o.nda_stage;
+      const ndaSign = o.nda_stage === 'signed';
+      const agrSent = !!o.agreement_stage;
+      const agrSign = o.agreement_stage === 'signed';
+      const dot = (done, tip) => `<div class="dp-dot${done ? ' done' : ''}" title="${tip}"></div>`;
+      const line = done => `<div class="dp-line${done ? ' done' : ''}"></div>`;
+      return `<div class="doc-pipeline" title="KYC → NDA → NDA Signed → Agreement → Agreement Signed">
+        ${dot(kycDone, 'KYC')}${line(ndaSent)}${dot(ndaSent, 'NDA Sent')}${line(ndaSign)}${dot(ndaSign, 'NDA Signed')}${line(agrSent)}${dot(agrSent, 'Agreement Sent')}${line(agrSign)}${dot(agrSign, 'Agreement Signed')}
+      </div>`;
+    }
+    function renderDocs() {
+      const rows = LEADS.filter(l => l.onboarding);
+      if (!rows.length) {
+        document.getElementById('view-docs').innerHTML = '<div class="panel" style="text-align:center;color:var(--mut);padding:48px;">No onboarding records yet</div>';
+        return;
+      }
+      const cards = rows.map(l => {
+        const o = l.onboarding;
+        return `<div class="doc-card">
+          <div class="doc-card-head">
+            <div>
+              <b style="font-size:13px;">${esc(l.company)}</b>
+              <span class="chip ${o.company_type === 'overseas' ? 'c-amber' : 'c-blue'}" style="margin-left:7px;font-size:10px;">${o.company_type === 'overseas' ? 'Overseas' : 'Indian'}</span>
+              <br><span style="font-size:11px;color:var(--mut);">${esc(l.email)}</span>
+            </div>
+            ${docPipeline(o)}
+          </div>
+          <div class="doc-cols">
+            <div>
+              <div class="doc-col-lbl">KYC</div>
+              ${chip(o.kyc_status)}
+              <br><a class="btn btn-o" style="padding:4px 9px;font-size:11px;margin-top:5px;" target="_blank" href="${o.kyc_view_url}">${ic('eye')} View</a>
+            </div>
+            <div>
+              <div class="doc-col-lbl">NDA</div>
+              ${docCell(o, 'nda')}
+            </div>
+            <div>
+              <div class="doc-col-lbl">Agreement</div>
+              ${docCell(o, 'agreement')}
+            </div>
+          </div>
+        </div>`;
+      });
+      document.getElementById('view-docs').innerHTML = `<div style="max-width:900px;">${cards.join('')}</div>`;
     }
 
     /* ============================ approvals ============================ */

@@ -1,11 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Book a Meeting</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: #f5f7fa;
@@ -15,18 +21,39 @@
       justify-content: center;
       padding: 24px;
     }
+
     .card {
       background: #fff;
       border-radius: 12px;
-      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+      box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
       padding: 40px 36px;
       width: 100%;
       max-width: 440px;
     }
-    .logo { font-size: 22px; font-weight: 700; color: #1e40af; margin-bottom: 6px; }
-    .subtitle { font-size: 14px; color: #6b7280; margin-bottom: 32px; }
-    label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 6px; }
-    input, select {
+
+    .logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: #1e40af;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: #6b7280;
+      margin-bottom: 32px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 6px;
+    }
+
+    input,
+    select {
       width: 100%;
       padding: 10px 14px;
       border: 1px solid #d1d5db;
@@ -38,8 +65,17 @@
       transition: border-color 0.15s;
       appearance: none;
     }
-    input:focus, select:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.12); }
-    .field { margin-bottom: 20px; }
+
+    input:focus,
+    select:focus {
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+    }
+
+    .field {
+      margin-bottom: 20px;
+    }
+
     .btn {
       width: 100%;
       padding: 12px;
@@ -53,8 +89,15 @@
       margin-top: 8px;
       transition: background 0.15s;
     }
-    .btn:hover { background: #1d4ed8; }
-    .select-wrap { position: relative; }
+
+    .btn:hover {
+      background: #1d4ed8;
+    }
+
+    .select-wrap {
+      position: relative;
+    }
+
     .select-wrap::after {
       content: "▾";
       position: absolute;
@@ -67,6 +110,7 @@
     }
   </style>
 </head>
+
 <body>
   <div class="card">
     <div class="logo">Schedule a Meeting</div>
@@ -182,4 +226,5 @@
     </form>
   </div>
 </body>
+
 </html>

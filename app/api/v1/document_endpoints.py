@@ -365,9 +365,10 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
         signed_badge += f'<span class="chip" style="background:{bg};color:{fg};">{txt}</span>'
     signed_btn = (f'<a class="btn b-blue" target="_blank" href="{base}/signed/{onboarding_id}/{doc_type}/{token}">⬇ Signed PDF</a>'
                   if (signed or internal_sig) else "")
+    needs_internal_sign = (stage == "accepted" and not internal_sig and not signed)
     sign_topbar_btn = (
-        f'<button class="btn b-green" onclick="internalSign()">✍ Sign &amp; Send to Lead</button>'
-        if (stage == "accepted" and not internal_sig and not signed) else ""
+        f'<button class="btn b-green" onclick="openSignModal()">✍ Sign &amp; Send to Lead</button>'
+        if needs_internal_sign else ""
     )
 
     # Lead comments panel
@@ -382,29 +383,15 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
             for c in reversed(comments[-10:]))
         comments_html = f'<div class="sec">Lead Comments ({len(comments)})</div>{items}'
 
-    # Internal signature panel — appears once the lead accepts the T&C
+    # Internal signature — only show status note in panel; form lives in the modal
     internal_html = ""
-    if not signed:
-        if internal_sig:
-            internal_html = (f'<div class="sec">Internal Signature</div>'
-                             f'<div class="note" style="background:#ecfdf5;border-left-color:#16a34a;color:#14532d;">'
-                             f'Signed by <b>{internal_sig.get("signed_name", "")}</b> '
-                             f'({internal_sig.get("designation") or "Authorised Signatory"}) '
-                             f'on {internal_sig.get("signed_at", "")}. The document was emailed to the lead for counter-signature.</div>')
-        elif stage == "accepted":
-            internal_html = """
-    <div class="sec">Internal Signature — Required</div>
-    <div class="note" style="background:#ecfdf5;border-left-color:#16a34a;color:#14532d;">
-      The lead accepted the Terms &amp; Conditions. Sign on behalf of Jane Aerospace —
-      the internally-signed document is then emailed to the lead for their signature.</div>
-    <div class="fld"><label>Designation</label><input type="text" id="int-desig" placeholder="e.g. Director"></div>
-    <div class="fld"><label>Signature Style</label>
-      <select id="int-font" style="width:100%;padding:9px 11px;border:1.5px solid #cbd5e1;border-radius:7px;font-size:13px;">
-        <option value="standard">Standard</option><option value="dancing">Cursive</option>
-      </select></div>
-    <div class="fld"><label>Or Upload Signature Image (PNG/JPG)</label>
-      <input type="file" id="int-sigimg" accept=".png,.jpg,.jpeg" onchange="loadIntSig(this)" style="font-size:12px;">
-      <div id="int-sig-preview" style="margin-top:6px;"></div></div>"""
+    if not signed and internal_sig:
+        internal_html = (f'<div class="sec">Internal Signature</div>'
+                         f'<div class="note" style="background:#ecfdf5;border-left-color:#16a34a;color:#14532d;">'
+                         f'✓ Signed by <b>{internal_sig.get("signed_name", "")}</b> '
+                         f'({internal_sig.get("designation") or "Authorised Signatory"}) '
+                         f'on {internal_sig.get("signed_at", "")}. '
+                         f'Document emailed to lead for counter-signature.</div>')
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -447,21 +434,87 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
         border-radius:5px;margin-bottom:14px;line-height:1.5;}}
   .addbtn{{background:#fff;color:#1a3a6b;border:1.5px dashed #94a3b8;border-radius:7px;padding:8px;width:100%;
           font-size:12px;font-weight:700;cursor:pointer;}}
+  /* Internal sign modal */
+  .modal-overlay{{position:fixed;inset:0;background:rgba(7,16,32,.55);z-index:100;
+    display:none;align-items:center;justify-content:center;backdrop-filter:blur(2px);}}
+  .modal-overlay.open{{display:flex;}}
+  .modal-box{{background:#fff;border-radius:14px;width:420px;max-width:94vw;
+    box-shadow:0 20px 60px rgba(7,16,32,.3);overflow:hidden;}}
+  .modal-head{{background:#0c2344;color:#fff;padding:16px 20px;display:flex;align-items:center;gap:10px;}}
+  .modal-head h3{{font-size:14px;font-weight:800;letter-spacing:.02em;flex:1;}}
+  .modal-head button{{background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:6px;
+    width:28px;height:28px;font-size:16px;cursor:pointer;line-height:1;}}
+  .modal-body{{padding:20px;}}
+  .modal-note{{background:#ecfdf5;border-left:3px solid #16a34a;color:#14532d;
+    padding:9px 12px;border-radius:5px;font-size:12px;line-height:1.5;margin-bottom:16px;}}
+  .modal-fld{{margin-bottom:12px;}}
+  .modal-fld label{{display:block;font-size:11.5px;font-weight:700;color:#374151;margin-bottom:4px;}}
+  .modal-fld input,.modal-fld select{{width:100%;padding:9px 11px;border:1.5px solid #cbd5e1;
+    border-radius:7px;font-size:13px;font-family:inherit;}}
+  .modal-fld input:focus,.modal-fld select:focus{{outline:none;border-color:#1a56db;
+    box-shadow:0 0 0 3px rgba(26,86,219,.12);}}
+  .modal-upload-zone{{border:2px dashed #c7d4ee;border-radius:8px;background:#f8fafc;
+    padding:18px;text-align:center;cursor:pointer;transition:border-color .15s;margin-bottom:8px;}}
+  .modal-upload-zone:hover{{border-color:#1a56db;background:#eff6ff;}}
+  .modal-footer{{display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;
+    border-top:1px solid #e5eaf2;}}
   @media(max-width:760px){{.split{{flex-direction:column;}}.panel{{width:100%;max-width:100%;height:55%;}}
     .pv{{height:45%;}}}}
 </style></head>
 <body>
+
+<!-- Internal signing modal (only relevant when stage==accepted and not yet signed) -->
+<div class="modal-overlay" id="sign-modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>✍ Sign on Behalf of Jane Aerospace</h3>
+      <button onclick="closeSignModal()" title="Cancel">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-note">
+        The lead has accepted the Terms &amp; Conditions. Sign below and the counter-signed document
+        will be emailed to the lead automatically for their signature.
+      </div>
+      <div class="modal-fld">
+        <label>Designation</label>
+        <input type="text" id="int-desig" placeholder="e.g. Director, Authorised Signatory">
+      </div>
+      <div class="modal-fld">
+        <label>Signature Style</label>
+        <select id="int-font">
+          <option value="standard">Standard</option>
+          <option value="dancing">Cursive</option>
+        </select>
+      </div>
+      <div class="modal-fld">
+        <label>Upload Signature Image (PNG / JPG)</label>
+        <div class="modal-upload-zone" onclick="document.getElementById('int-sigimg').click()">
+          🖊 Click to upload signature image
+          <div style="font-size:11px;color:#64748b;margin-top:4px;">PNG or JPG recommended</div>
+          <input type="file" id="int-sigimg" accept=".png,.jpg,.jpeg" onchange="loadIntSig(this)" style="display:none;">
+        </div>
+        <div id="int-sig-preview" style="margin-top:6px;"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn b-line" onclick="closeSignModal()">Cancel</button>
+      <button class="btn b-green" onclick="internalSign()">✍ Sign &amp; Send to Lead</button>
+    </div>
+  </div>
+</div>
+
 <div class="topbar">
   <span class="ttl">✈ JANE AEROSPACE</span>
   <span class="sub">{label} — {lead.business_name} ({'Overseas' if _is_overseas(rec) else 'Indian'} template)</span>
   <span class="chip">{status}</span>{signed_badge}
   <span class="grow"></span>
   <span id="saved">Saved ✓</span>
+  <button class="btn b-line" id="edit-toggle" onclick="toggleEditMode()" title="Toggle edit mode">🔒 View Only</button>
   <a class="btn b-line" href="{base}/editor/{onboarding_id}/{doc_type}/{token}" title="Edit the full document content">📝 Live Editor</a>
-  <button class="btn b-line" onclick="resetDoc()" title="Rebuild values from KYC data">↺ Reset</button>
+  <button class="btn b-line" id="btn-reset" onclick="resetDoc()" title="Rebuild values from KYC data" style="display:none">↺ Reset</button>
   {signed_btn}
   {sign_topbar_btn}
-  <button class="btn b-green" onclick="sendToLead()">📨 Send to Lead for Review</button>
+  <button class="btn b-green" id="btn-send" onclick="sendToLead()" style="display:none">📨 Send to Lead</button>
 </div>
 
 <div class="split">
@@ -605,20 +658,31 @@ function loadIntSig(input) {{
   img.src = URL.createObjectURL(f);
 }}
 
+function openSignModal() {{
+  document.getElementById('sign-modal').classList.add('open');
+}}
+function closeSignModal() {{
+  document.getElementById('sign-modal').classList.remove('open');
+}}
+document.getElementById('sign-modal').addEventListener('click', function(e) {{
+  if (e.target === this) closeSignModal();
+}});
+
 async function internalSign() {{
-  if (!confirm(`Sign this document as ${{ORGANIZER_NAME}} on behalf of Jane Aerospace and email it to the lead for counter-signature?`)) return;
+  const desig = (document.getElementById('int-desig') || {{}}).value || '';
+  const font  = (document.getElementById('int-font') || {{}}).value || 'standard';
   const r = await fetch(`${{BASE}}/internal-sign/${{OID}}/${{DT}}/${{TOK}}`, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{
       signed_name: ORGANIZER_NAME,
-      designation: (document.getElementById('int-desig') || {{}}).value || '',
-      sig_font: (document.getElementById('int-font') || {{}}).value || 'standard',
+      designation: desig,
+      sig_font: font,
       sig_image: INT_SIG_IMAGE,
     }})
   }});
   const d = await r.json().catch(() => ({{}}));
   if (!r.ok) {{ alert(d.detail || 'Signing failed'); return; }}
-  alert(d.message || 'Signed and sent.');
+  closeSignModal();
   const pv = document.getElementById('pv');
   if (pv) pv.src = `${{BASE}}/signed/${{OID}}/${{DT}}/${{TOK}}`;
   location.reload();
@@ -627,6 +691,32 @@ async function internalSign() {{
 render();
 document.getElementById('sig-name').value = initial.signatory_name || '';
 document.getElementById('sig-email').value = initial.signatory_email || '';
+
+// ── Edit mode toggle ──────────────────────────────────────────────────────
+var _editMode = false;
+function toggleEditMode() {{
+  _editMode = !_editMode;
+  var btn = document.getElementById('edit-toggle');
+  var allInputs = document.querySelectorAll('.panel input, .panel select, .panel textarea, .panel button:not(#edit-toggle)');
+  var btnReset = document.getElementById('btn-reset');
+  var btnSend = document.getElementById('btn-send');
+  if (_editMode) {{
+    btn.textContent = '✏ Edit Mode'; btn.style.background = '#fef3c7'; btn.style.color = '#92400e'; btn.style.borderColor = '#fcd34d';
+    allInputs.forEach(function(el) {{ el.removeAttribute('disabled'); }});
+    if (btnReset) btnReset.style.display = '';
+    if (btnSend) btnSend.style.display = '';
+  }} else {{
+    btn.textContent = '🔒 View Only'; btn.style.background = ''; btn.style.color = ''; btn.style.borderColor = '';
+    allInputs.forEach(function(el) {{ el.setAttribute('disabled', 'disabled'); }});
+    if (btnReset) btnReset.style.display = 'none';
+    if (btnSend) btnSend.style.display = 'none';
+  }}
+}}
+// Start in view-only mode — disable all inputs by default
+(function() {{
+  var allInputs = document.querySelectorAll('.panel input, .panel select, .panel textarea, .panel button:not(#edit-toggle)');
+  allInputs.forEach(function(el) {{ el.setAttribute('disabled', 'disabled'); }});
+}})();
 </script>
 </body></html>"""
     return HTMLResponse(html)
@@ -2577,15 +2667,11 @@ async def document_internal_sign(onboarding_id: str, doc_type: str, token: str,
 # braces need no {{ }} escaping. document_sign_page injects them with single
 # {placeholders}; dynamic values reach the JS through window.SIGN_CFG.
 _SIGN_WIDGET_CSS = """
-  .fonts{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:6px;}
-  .font-opt{border:2px solid #d1d5db;border-radius:8px;padding:10px 8px;text-align:center;
-            font-size:21px;cursor:pointer;color:#1a3a6b;background:#fff;transition:all .15s;}
-  .font-opt.selected{border-color:#1a56db;background:#eff6ff;box-shadow:0 0 0 3px rgba(26,86,219,.15);}
-  .sigtabs{display:flex;gap:4px;border-bottom:2px solid #e5e9f2;margin:6px 0 14px;}
-  .sigtab{background:none;border:none;padding:10px 18px;font-size:14px;font-weight:600;color:#64748b;
+  .sigtabs{display:flex;gap:0;border-bottom:2px solid #e5e9f2;margin:6px 0 14px;}
+  .sigtab{background:none;border:none;padding:10px 22px;font-size:14px;font-weight:600;color:#64748b;
           cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;width:auto;border-radius:0;}
-  .sigtab:hover{background:none;color:#1a56db;}
-  .sigtab.active{color:#1a3a6b;border-bottom-color:#1a56db;}
+  .sigtab:hover{background:#f8fafc;color:#1a56db;}
+  .sigtab.active{color:#1a3a6b;border-bottom-color:#1a56db;background:#f8fafc;}
   .sigpanel{display:none;}
   .sigpanel.active{display:block;}
   .pad-shell{position:relative;}
@@ -2626,10 +2712,7 @@ window.SIGW = (function () {
   var DRAW_MAX_W = CFG.drawMaxWidth || 600, UP_MAX_W = CFG.uploadMaxWidth || 480;
   // server contract: ^data:image/(png|jpeg);base64,[A-Za-z0-9+/=]{40,800000}$
   var SIG_RE = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+\/=]{40,800000}$/;
-  var FONT_MAP = { standard: 'Georgia,serif', dancing: "'Dancing Script',cursive",
-                   greatvibes: "'Great Vibes',cursive", pacifico: "'Pacifico',cursive" };
-
-  var mode = 'type', sigFont = 'standard', sigWidthPt = CFG.defaultPt || 150;
+  var mode = 'upload', sigWidthPt = CFG.defaultPt || 150;
   var drawnURL = '', uploadURL = '', uploadImg = null, pad = null;
   function $(id) { return document.getElementById(id); }
   function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
@@ -2797,14 +2880,8 @@ window.SIGW = (function () {
     for (i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].dataset.mode === m);
     var panels = document.querySelectorAll('.sigpanel');
     for (i = 0; i < panels.length; i++) panels[i].classList.toggle('active', panels[i].dataset.panel === m);
-    $('resize-bar').style.display = (m === 'type') ? 'none' : 'flex';
-    if (m === 'draw' && pad) pad.fit();      // canvas now visible -> size it
+    if (m === 'draw' && pad) pad.fit();
     updatePreview();
-  }
-  function pickFont(el) {
-    var opts = document.querySelectorAll('.font-opt'), i;
-    for (i = 0; i < opts.length; i++) opts[i].classList.remove('selected');
-    el.classList.add('selected'); sigFont = el.dataset.font; updatePreview();
   }
   function onNameInput() { updatePreview(); }
   function loadUpload(input) {
@@ -2825,20 +2902,13 @@ window.SIGW = (function () {
     updatePreview();
   }
   function updatePreview() {
-    var prev = $('sig-preview'), name = ($('s-name').value || '').trim();
-    if (mode === 'type') {
-      prev.style.fontFamily = FONT_MAP[sigFont];
-      prev.textContent = name || 'Type your name above';
-      prev.style.color = name ? '#10245c' : '#9ca3af';
-      prev.style.fontSize = name ? '30px' : '14px';
-      return;
-    }
+    var prev = $('sig-preview');
     var img = currentImage();
     if (img) {
       prev.innerHTML = '<img src="' + img + '" style="width:' + sigWidthPt + 'px;max-width:100%;height:auto;">';
     } else {
       prev.style.fontFamily = 'Georgia,serif'; prev.style.color = '#9ca3af'; prev.style.fontSize = '14px';
-      prev.textContent = (mode === 'draw') ? 'Draw your signature above' : 'Upload a signature image';
+      prev.textContent = (mode === 'draw') ? 'Draw your signature here' : 'Upload your signature image';
     }
   }
   function showErr(msg) { var e = $('err'); e.textContent = msg; e.style.display = 'block'; }
@@ -2847,17 +2917,11 @@ window.SIGW = (function () {
     $('err').style.display = 'none';
     var name = ($('s-name').value || '').trim();
     if (!name) { showErr('Please enter your full legal name.'); return; }
-    var sigImage = '';
-    if (mode === 'draw') {
-      if (!drawnURL) { showErr('Please draw your signature.'); return; }
-      sigImage = drawnURL;
-    } else if (mode === 'upload') {
-      if (!uploadURL) { showErr('Please upload your signature image.'); return; }
-      sigImage = uploadURL;
-    }
-    // self-validate against the server regex so nothing is silently dropped
+    var sigImage = mode === 'draw' ? drawnURL : uploadURL;
+    if (mode === 'draw' && !sigImage) { showErr('Please draw your signature in the box above.'); return; }
+    if (mode === 'upload' && !sigImage) { showErr('Please upload a signature image (PNG or JPG).'); return; }
     if (sigImage && !SIG_RE.test(sigImage)) {
-      showErr('Signature could not be encoded within size limits — please redraw a little smaller.'); return;
+      showErr('Signature image could not be processed — please try a smaller file or redraw.'); return;
     }
     if (!$('s-agree').checked) { showErr('Please tick the confirmation checkbox to proceed.'); return; }
 
@@ -2868,8 +2932,8 @@ window.SIGW = (function () {
         body: JSON.stringify({
           signed_name: name,
           designation: ($('s-desig').value || '').trim(),
-          sig_font: (mode === 'type') ? sigFont : 'standard',   // TYPE -> font; DRAW/UPLOAD -> standard
-          sig_image: sigImage                                   // '' for TYPE, data URL otherwise
+          sig_font: 'standard',
+          sig_image: sigImage
         })
       });
       var d = await r.json().catch(function () { return {}; });
@@ -2897,7 +2961,7 @@ window.SIGW = (function () {
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
-  return { switchTab: switchTab, pickFont: pickFont, onNameInput: onNameInput, loadUpload: loadUpload,
+  return { switchTab: switchTab, onNameInput: onNameInput, loadUpload: loadUpload,
            resize: resize, undo: function () { pad.undo(); }, clearPad: function () { pad.clear(); },
            signDoc: signDoc };
 })();
@@ -2952,123 +3016,176 @@ async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: 
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign {label} — Jane Aerospace</title>
-<link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600&family=Great+Vibes&family=Pacifico&display=swap" rel="stylesheet">
 <style>{_SIGN_WIDGET_CSS}</style>
 <style>
   *{{box-sizing:border-box;margin:0;}}
-  :root{{--navy:#15315f;--ink:#0f172a;--muted:#64748b;--line:#e6eaf0;--blue:#2563eb;}}
+  :root{{--navy:#15315f;--ink:#0f172a;--muted:#64748b;--line:#e6eaf0;--blue:#2563eb;--green:#16a34a;}}
   body{{font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;color:var(--ink);
-    background:linear-gradient(180deg,#e9eff8,#f5f8fc 260px);min-height:100vh;padding:0 16px 44px;
-    -webkit-font-smoothing:antialiased;}}
-  .topbar{{display:flex;align-items:center;justify-content:space-between;gap:12px;max-width:880px;
-    margin:0 auto;padding:18px 4px 20px;}}
-  .brand{{display:flex;align-items:center;gap:10px;font-weight:800;color:var(--navy);font-size:17px;}}
-  .brand .logo{{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--navy),var(--blue));
-    color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;}}
-  .secure{{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#15803d;
-    background:#dcfce7;border:1px solid #bbf7d0;border-radius:99px;padding:5px 12px;}}
-  .wrap{{max-width:880px;margin:0 auto;}}
-  .card{{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;margin-bottom:18px;
-    box-shadow:0 1px 2px rgba(16,24,40,.04),0 14px 34px rgba(16,40,90,.08);}}
-  .card-head{{display:flex;align-items:flex-start;gap:14px;padding:18px 26px;border-bottom:1px solid var(--line);
-    background:linear-gradient(180deg,#fbfdff,#f5f9fe);}}
-  .step{{width:30px;height:30px;flex:none;border-radius:50%;background:var(--navy);color:#fff;font-weight:800;
-    font-size:14px;display:flex;align-items:center;justify-content:center;}}
-  .card-head h1{{font-size:16px;color:var(--navy);margin:1px 0 3px;}}
-  .card-head .sub{{font-size:12.5px;color:var(--muted);line-height:1.5;}}
-  .card-pad{{padding:22px 26px;}}
-  .parties{{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}}
-  .party{{flex:1;min-width:170px;background:#f8fafc;border:1px solid var(--line);border-radius:11px;padding:11px 14px;}}
-  .party .role{{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;font-weight:800;}}
-  .party .pname{{font-size:13.5px;font-weight:700;color:var(--ink);margin-top:3px;}}
-  .vs{{color:#c2ccda;font-weight:800;font-size:17px;}}
-  .viewer{{border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:16px;}}
-  .viewer-bar{{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 14px;
-    background:#f1f5f9;border-bottom:1px solid var(--line);font-size:12px;color:#475569;font-weight:700;}}
-  .viewer iframe{{width:100%;height:560px;border:none;display:block;background:#fff;}}
-  .btn-ghost{{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--blue);
-    text-decoration:none;background:#eff6ff;border:1px solid #dbeafe;border-radius:7px;padding:5px 11px;}}
-  label{{display:block;font-size:12.5px;font-weight:600;color:#334155;margin:0 0 6px;}}
+    background:#f0f4fa;min-height:100vh;padding:0 0 56px;-webkit-font-smoothing:antialiased;}}
+
+  /* ── topbar ── */
+  .topbar{{background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:space-between;
+    gap:12px;padding:0 24px;height:52px;position:sticky;top:0;z-index:100;
+    box-shadow:0 2px 8px rgba(0,0,0,.18);}}
+  .brand{{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px;letter-spacing:.02em;}}
+  .brand .logo{{width:28px;height:28px;border-radius:6px;background:rgba(255,255,255,.15);
+    display:flex;align-items:center;justify-content:center;font-size:14px;}}
+  .doc-label{{font-size:12px;font-weight:600;color:rgba(255,255,255,.55);}}
+  .secure{{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:#86efac;}}
+
+  /* ── layout ── */
+  .wrap{{max-width:860px;margin:0 auto;padding:22px 16px 0;}}
+
+  /* ── cards ── */
+  .card{{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:16px;
+    box-shadow:0 1px 3px rgba(16,24,40,.05),0 8px 24px rgba(16,40,90,.07);}}
+  .card-head{{display:flex;align-items:center;gap:12px;padding:15px 22px;border-bottom:1px solid var(--line);
+    background:#f8fafc;}}
+  .step-badge{{width:26px;height:26px;flex:none;border-radius:50%;background:var(--navy);color:#fff;font-weight:800;
+    font-size:12px;display:flex;align-items:center;justify-content:center;}}
+  .card-head h2{{font-size:15px;font-weight:700;color:var(--navy);}}
+  .card-pad{{padding:20px 22px;}}
+
+  /* ── parties ── */
+  .parties{{display:flex;align-items:center;gap:10px;margin-bottom:14px;}}
+  .party{{flex:1;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:0;}}
+  .party .role{{font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8;font-weight:800;}}
+  .party .pname{{font-size:13px;font-weight:700;color:var(--ink);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
+  .vs{{color:#c2ccda;font-weight:800;font-size:16px;flex:none;}}
+
+  /* ── document viewer ── */
+  .viewer-wrap{{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;}}
+  .viewer-bar{{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;
+    background:#f1f5f9;border-bottom:1px solid var(--line);font-size:12px;color:#475569;font-weight:600;}}
+  .viewer-bar a{{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:var(--blue);
+    text-decoration:none;background:#eff6ff;border:1px solid #dbeafe;border-radius:6px;padding:4px 10px;}}
+  .viewer iframe{{width:100%;height:56vh;min-height:340px;border:none;display:block;background:#fff;}}
+  .scroll-to-sign{{display:block;width:100%;background:linear-gradient(135deg,var(--navy),#1e4080);
+    color:#fff;border:none;padding:12px;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:.01em;
+    text-align:center;transition:background .15s;}}
+  .scroll-to-sign:hover{{background:linear-gradient(135deg,#1e4080,#2563eb);}}
+
+  /* ── form fields ── */
+  .frow{{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;}}
+  label.lbl{{display:block;font-size:12px;font-weight:700;color:#374151;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em;}}
   .req{{color:#e11d48;}}
-  input[type=text]{{width:100%;padding:11px 13px;border:1.5px solid #d6dce6;border-radius:9px;font-size:14px;
+  input[type=text]{{width:100%;padding:10px 13px;border:1.5px solid #d6dce6;border-radius:8px;font-size:14px;
     color:var(--ink);background:#fff;transition:border-color .15s,box-shadow .15s;}}
-  input[type=text]:focus{{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.14);}}
-  .two-col{{display:grid;grid-template-columns:1fr 1fr;gap:16px;}}
-  .consent{{display:flex;gap:12px;align-items:flex-start;margin:20px 0 0;font-size:12.5px;color:#374151;
-    line-height:1.55;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:14px 16px;}}
-  .consent input{{margin-top:2px;width:18px;height:18px;flex:none;accent-color:#16a34a;}}
-  #err{{display:none;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;padding:11px 14px;
-    border-radius:9px;font-size:13px;margin:14px 0 0;}}
-  .sign-btn{{margin-top:18px;width:100%;border:none;border-radius:12px;padding:15px 28px;font-size:16px;
-    font-weight:800;color:#fff;cursor:pointer;letter-spacing:.2px;background:linear-gradient(135deg,#16a34a,#15803d);
-    box-shadow:0 8px 20px rgba(22,163,74,.28);transition:transform .08s,box-shadow .15s,background .15s;}}
-  .sign-btn:hover{{box-shadow:0 10px 26px rgba(22,163,74,.36);}}
+  input[type=text]:focus{{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.12);}}
+
+  /* ── sig section ── */
+  .sig-section-label{{font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.04em;
+    margin:0 0 8px;}}
+  .upload-zone{{border:2px dashed #c7d4ee;border-radius:10px;background:#f8fafc;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:28px 20px;cursor:pointer;transition:border-color .15s,background .15s;text-align:center;}}
+  .upload-zone:hover{{border-color:var(--blue);background:#eff6ff;}}
+  .upload-zone input[type=file]{{display:none;}}
+  .upload-zone .upload-icon{{font-size:32px;margin-bottom:8px;}}
+  .upload-zone .upload-lbl{{font-size:13.5px;font-weight:700;color:var(--navy);}}
+  .upload-zone .upload-hint{{font-size:11.5px;color:var(--muted);margin-top:3px;}}
+  #upload-preview{{margin-top:10px;display:none;border:1px solid var(--line);border-radius:8px;
+    padding:10px;background:#fff;}}
+
+  /* ── preview ── */
+  #sig-preview{{border:1px dashed #c7d4ee;border-radius:8px;background:#fbfdff;min-height:60px;
+    display:flex;align-items:center;padding:8px 18px;font-size:30px;color:#10245c;
+    font-family:Georgia,serif;margin-top:6px;overflow:hidden;}}
+  #sig-preview img{{height:auto;}}
+  .resize-bar{{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;color:#475569;}}
+  .resize-bar button{{width:30px;height:30px;border:1px solid #d1d5db;border-radius:6px;background:#fff;
+    font-size:16px;font-weight:700;color:var(--navy);cursor:pointer;line-height:1;padding:0;}}
+  .resize-bar button:hover{{background:#eff6ff;}}
+  .resize-bar .pt{{min-width:56px;text-align:center;font-weight:700;color:var(--navy);font-size:12px;}}
+
+  /* ── consent & submit ── */
+  .consent{{display:flex;gap:11px;align-items:flex-start;margin:18px 0 0;font-size:12.5px;color:#374151;
+    line-height:1.55;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:13px 15px;}}
+  .consent input{{margin-top:2px;width:17px;height:17px;flex:none;accent-color:var(--green);}}
+  #err{{display:none;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;padding:10px 14px;
+    border-radius:8px;font-size:13px;margin:12px 0 0;}}
+  .sign-btn{{margin-top:16px;width:100%;border:none;border-radius:11px;padding:15px 28px;font-size:15px;
+    font-weight:800;color:#fff;cursor:pointer;letter-spacing:.2px;
+    background:linear-gradient(135deg,var(--green),#15803d);
+    box-shadow:0 6px 18px rgba(22,163,74,.28);transition:transform .08s,box-shadow .15s;}}
+  .sign-btn:hover{{box-shadow:0 8px 24px rgba(22,163,74,.36);}}
   .sign-btn:active{{transform:translateY(1px);}}
   .sign-btn:disabled{{background:#9ca3af;box-shadow:none;cursor:not-allowed;}}
-  .trust{{max-width:880px;margin:4px auto 0;display:flex;align-items:center;justify-content:center;gap:20px;
-    flex-wrap:wrap;color:#94a3b8;font-size:11.5px;}}
-  .trust span{{display:inline-flex;align-items:center;gap:6px;}}
-  @media(max-width:640px){{.two-col{{grid-template-columns:1fr;}}.card-pad{{padding:18px 16px;}}
-    .card-head{{padding:15px 16px;}}.viewer iframe{{height:62vh;}}.topbar{{padding:14px 2px 16px;}}}}
+
+  /* ── trust footer ── */
+  .trust{{max-width:860px;margin:6px auto 0;padding:0 16px;display:flex;align-items:center;
+    justify-content:center;gap:18px;flex-wrap:wrap;color:#94a3b8;font-size:11px;}}
+  .trust span{{display:inline-flex;align-items:center;gap:5px;}}
+
+  @media(max-width:600px){{
+    .frow{{grid-template-columns:1fr;gap:11px;}}
+    .card-pad{{padding:16px;}}
+    .card-head{{padding:12px 16px;}}
+    .viewer iframe{{height:52vh;}}
+    .topbar{{padding:0 14px;}}
+  }}
 </style></head>
 <body>
 <div class="topbar">
   <div class="brand"><span class="logo">✈</span> Jane Aerospace</div>
-  <span class="secure">🔒 Secure e-signature</span>
+  <span class="doc-label">{label}</span>
+  <span class="secure">🔒 Secure Signing</span>
 </div>
 <div class="wrap">
+
+  <!-- Card 1: Parties + Document -->
   <div class="card">
     <div class="card-head">
-      <div class="step">1</div>
-      <div><h1>Review the {label}</h1>
-        <div class="sub">Read the full document below — scroll, zoom, or download it before you sign.</div></div>
+      <div class="step-badge">1</div>
+      <h2>Review Document</h2>
     </div>
     <div class="card-pad">
       <div class="parties">
-        <div class="party"><div class="role">Disclosing Party</div><div class="pname">Jane Aerospace Private Limited</div></div>
+        <div class="party">
+          <div class="role">Disclosing Party</div>
+          <div class="pname">Jane Aerospace Private Limited</div>
+        </div>
         <span class="vs">⇄</span>
-        <div class="party"><div class="role">Counterparty</div><div class="pname">{lead.business_name}</div></div>
+        <div class="party">
+          <div class="role">Counterparty</div>
+          <div class="pname">{lead.business_name}</div>
+        </div>
       </div>
-      <div class="viewer">
-        <div class="viewer-bar"><span>📄 {label}</span>
-          <a class="btn-ghost" href="{pdf_url}" target="_blank">Open / download ↗</a></div>
-        <iframe src="{pdf_url}#toolbar=1" title="Document preview"></iframe>
+      <div class="viewer-wrap">
+        <div class="viewer-bar">
+          <span>📄 {label}</span>
+          <a href="{pdf_url}" target="_blank">⬇ Download PDF ↗</a>
+        </div>
+        <iframe src="{pdf_url}#toolbar=1" title="Document preview" id="doc-frame"></iframe>
+        <button class="scroll-to-sign" onclick="document.getElementById('sign-section').scrollIntoView({{behavior:'smooth'}})">
+          ✍ Ready to Sign? Click here →
+        </button>
       </div>
     </div>
   </div>
 
-  <div class="card">
+  <!-- Card 2: Sign -->
+  <div class="card" id="sign-section">
     <div class="card-head">
-      <div class="step">2</div>
-      <div><h1>Sign electronically</h1>
-        <div class="sub">Adopt your signature below, tick the consent box, then confirm.</div></div>
+      <div class="step-badge">2</div>
+      <h2>Sign Electronically</h2>
     </div>
     <div class="card-pad">
-      <div class="two-col">
+      <div class="frow">
         <div>
-          <label>Full Legal Name <span class="req">*</span></label>
+          <label class="lbl">Full Legal Name <span class="req">*</span></label>
           <input type="text" id="s-name" value="{sig_name}" placeholder="Your full name" oninput="SIGW.onNameInput()">
         </div>
         <div>
-          <label>Designation</label>
+          <label class="lbl">Designation</label>
           <input type="text" id="s-desig" placeholder="e.g. Director">
         </div>
       </div>
 
-      <label style="margin-top:16px;">Your Signature</label>
+      <div class="sig-section-label">Your Signature</div>
       <div class="sigtabs" id="sig-tabs">
-        <button type="button" class="sigtab active" data-mode="type"   onclick="SIGW.switchTab('type')">Type</button>
-        <button type="button" class="sigtab"        data-mode="draw"   onclick="SIGW.switchTab('draw')">Draw</button>
-        <button type="button" class="sigtab"        data-mode="upload" onclick="SIGW.switchTab('upload')">Upload</button>
-      </div>
-
-      <div class="sigpanel active" data-panel="type">
-        <div class="fonts" id="font-row">
-          <div class="font-opt selected" data-font="standard"   style="font-family:Georgia,serif;"           onclick="SIGW.pickFont(this)">Signature</div>
-          <div class="font-opt"          data-font="dancing"    style="font-family:'Dancing Script',cursive;" onclick="SIGW.pickFont(this)">Signature</div>
-          <div class="font-opt"          data-font="greatvibes" style="font-family:'Great Vibes',cursive;"     onclick="SIGW.pickFont(this)">Signature</div>
-          <div class="font-opt"          data-font="pacifico"   style="font-family:'Pacifico',cursive;"        onclick="SIGW.pickFont(this)">Signature</div>
-        </div>
+        <button type="button" class="sigtab" data-mode="draw" onclick="SIGW.switchTab('draw')">✏ Draw</button>
+        <button type="button" class="sigtab active" data-mode="upload" onclick="SIGW.switchTab('upload')">⬆ Upload Image</button>
       </div>
 
       <div class="sigpanel" data-panel="draw">
@@ -3079,25 +3196,28 @@ async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: 
         </div>
         <div class="pad-tools">
           <div class="swatches" id="sig-swatches">
-            <span class="swatch active" data-color="#10245c" style="background:#10245c" title="Black"></span>
+            <span class="swatch active" data-color="#10245c" style="background:#10245c" title="Navy"></span>
             <span class="swatch"        data-color="#1d4ed8" style="background:#1d4ed8" title="Blue"></span>
-            <span class="swatch"        data-color="#b91c1c" style="background:#b91c1c" title="Red"></span>
+            <span class="swatch"        data-color="#111827" style="background:#111827" title="Black"></span>
           </div>
           <button type="button" class="mini-btn" id="pad-undo" onclick="SIGW.undo()" disabled>↶ Undo</button>
-          <button type="button" class="mini-btn" id="pad-clear" onclick="SIGW.clearPad()">Clear</button>
+          <button type="button" class="mini-btn" onclick="SIGW.clearPad()">Clear</button>
         </div>
       </div>
 
-      <div class="sigpanel" data-panel="upload">
-        <label style="margin-top:4px;">Upload a PNG / JPG of your signature
-          <span style="color:#9ca3af;font-weight:400;">(used as your signature image)</span></label>
-        <input type="file" id="s-sigimg" accept=".png,.jpg,.jpeg" onchange="SIGW.loadUpload(this)"
-               style="font-size:13px;margin-top:4px;">
+      <div class="sigpanel active" data-panel="upload">
+        <div class="upload-zone" onclick="document.getElementById('s-sigimg').click()">
+          <div class="upload-icon">🖊</div>
+          <div class="upload-lbl">Click to upload signature image</div>
+          <div class="upload-hint">PNG or JPG · Max 5 MB</div>
+          <input type="file" id="s-sigimg" accept=".png,.jpg,.jpeg" onchange="SIGW.loadUpload(this)">
+        </div>
+        <div id="upload-preview"></div>
       </div>
 
-      <label style="margin-top:14px;">Signature Preview</label>
-      <div id="sig-preview">Type your name above</div>
-      <div class="resize-bar" id="resize-bar" style="display:none;">
+      <label class="lbl" style="margin-top:14px;">Signature Preview</label>
+      <div id="sig-preview">Upload your signature image</div>
+      <div class="resize-bar" id="resize-bar" style="display:flex;">
         <span>Size</span>
         <button type="button" onclick="SIGW.resize(-1)" title="Smaller">&minus;</button>
         <span class="pt" id="sig-pt">150 pt</span>
@@ -3106,23 +3226,47 @@ async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: 
 
       <div class="consent">
         <input type="checkbox" id="s-agree">
-        <span>I confirm that I am an authorised signatory of <strong>{lead.business_name}</strong>,
-        I have read and understood this {label} in full, and I agree to be legally bound by its terms.
-        I understand that adopting my signature and clicking "I Agree &amp; Sign" constitutes my electronic signature.</span>
+        <span>I confirm I am an authorised signatory of <strong>{lead.business_name}</strong> and have read this
+        {label} in full. Clicking "I Agree &amp; Sign" constitutes my legally binding electronic signature under the
+        IT Act, 2000.</span>
       </div>
       <div id="err"></div>
       <button id="sign-btn" class="sign-btn" onclick="SIGW.signDoc()">✍ I Agree &amp; Sign</button>
     </div>
   </div>
+
 </div>
 <div class="trust">
   <span>🔒 Encrypted in transit</span>
-  <span>⚖ Legally binding · IT Act, 2000</span>
-  <span>📋 Audit-logged: IP, time &amp; device</span>
+  <span>⚖ Legally binding · IT Act 2000</span>
+  <span>📋 Audit-logged: IP, timestamp, device</span>
 </div>
-
 <script>window.SIGN_CFG = {sign_cfg_js};</script>
 <script>{_SIGN_WIDGET_JS}</script>
+<script>
+  // Show upload preview when file is loaded
+  document.getElementById('s-sigimg') && (function(){{
+    var orig = SIGW.loadUpload;
+    SIGW.loadUpload = function(inp) {{ orig(inp); updateUploadPreview(inp); }};
+    function updateUploadPreview(inp) {{
+      var pv = document.getElementById('upload-preview');
+      if (!pv) return;
+      var f = inp.files && inp.files[0];
+      if (!f) {{ pv.style.display = 'none'; pv.innerHTML = ''; return; }}
+      var url = URL.createObjectURL(f);
+      pv.style.display = 'block';
+      pv.innerHTML = '<img src="' + url + '" style="max-height:80px;max-width:100%;border-radius:6px;">';
+    }}
+  }})();
+
+  // Auto-scroll to sign section when page loads (lead arrives via email link)
+  window.addEventListener('load', function() {{
+    setTimeout(function() {{
+      var s = document.getElementById('sign-section');
+      if (s) s.scrollIntoView({{behavior: 'smooth', block: 'start'}});
+    }}, 600);
+  }});
+</script>
 </body></html>"""
     return HTMLResponse(html)
 
