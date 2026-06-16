@@ -12,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 _WIDGET_FILE = pathlib.Path(__file__).parent.parent / "zoho_widget" / "index.html"
 _WIDGET_DASH_FILE = pathlib.Path(__file__).parent.parent / "zoho_widget" / "dashboard.html"
+_DASHBOARD_FILE = pathlib.Path(__file__).parent / "templates" / "dashboard.html"
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -78,6 +79,11 @@ def create_app() -> FastAPI:
     def _widget_dash_html():
         return HTMLResponse(_WIDGET_DASH_FILE.read_text(encoding="utf-8"), headers=_no_cache)
 
+    def _dashboard_html():
+        return HTMLResponse(_DASHBOARD_FILE.read_text(encoding="utf-8"), headers=_no_cache)
+
+    app.add_api_route("/", _dashboard_html, response_class=HTMLResponse, include_in_schema=False)
+    app.add_api_route("/dashboard", _dashboard_html, response_class=HTMLResponse, include_in_schema=False)
     app.add_api_route("/zoho-widget", _widget_html, response_class=HTMLResponse, include_in_schema=False)
     app.add_api_route("/zoho-widget/dashboard", _widget_dash_html, response_class=HTMLResponse, include_in_schema=False)
 

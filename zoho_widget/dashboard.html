@@ -3,338 +3,466 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Onboarding Dashboard</title>
+<title>Pipeline Dashboard</title>
 <script src="https://live.zwidgets.com/js-sdk/1.0.3/ZohoEmbeddedAppSDK.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;background:#f5f7fb;color:#1a1a2e;font-size:13px}
-.wrap{padding:16px}
-.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
-.header h1{font-size:17px;color:#1a3a6b;font-weight:700}
-.refresh-btn{background:#1a56db;color:#fff;border:none;padding:7px 14px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600}
-.refresh-btn:hover{opacity:.85}
-.stats{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
-.stat-card{background:#fff;border-radius:10px;padding:12px 18px;box-shadow:0 1px 5px rgba(0,0,0,.07);flex:1;min-width:100px;text-align:center}
-.stat-num{font-size:22px;font-weight:700;color:#1a3a6b}
-.stat-label{font-size:11px;color:#888;margin-top:2px}
-.search-bar{margin-bottom:12px}
-.search-bar input{width:100%;padding:8px 12px;border:1px solid #dce1f0;border-radius:8px;font-size:13px;outline:none}
-.search-bar input:focus{border-color:#1a56db}
-table{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 5px rgba(0,0,0,.07)}
-thead{background:#1a3a6b;color:#fff}
-thead th{padding:10px 12px;text-align:left;font-size:11px;font-weight:600;letter-spacing:.4px}
-tbody tr{border-bottom:1px solid #f0f2f8;transition:background .1s}
-tbody tr:hover{background:#f5f8ff}
-tbody tr:last-child{border-bottom:none}
-td{padding:9px 12px;font-size:12px;vertical-align:middle}
-.pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700}
-.pill-green{background:#d4edda;color:#155724}
-.pill-yellow{background:#fff3cd;color:#856404}
-.pill-red{background:#f8d7da;color:#721c24}
-.pill-blue{background:#cce5ff;color:#004085}
-.pill-grey{background:#e2e3e5;color:#383d41}
-.pill-orange{background:#ffe5cc;color:#7a3500}
-.score-bar{display:flex;align-items:center;gap:6px}
-.bar-bg{background:#e8ecf6;border-radius:6px;height:6px;width:60px;overflow:hidden}
-.bar-fill{background:#1a56db;height:100%;border-radius:6px;transition:width .3s}
-.bar-fill.complete{background:#28a745}
-.bar-fill.mid{background:#ffc107}
-.btn-start{background:#28a745;color:#fff;border:none;padding:5px 11px;border-radius:5px;font-size:11px;cursor:pointer;font-weight:600;white-space:nowrap}
-.btn-start:hover{opacity:.85}
-.btn-start:disabled{opacity:.5;cursor:not-allowed}
-.btn-cancel{background:#dc3545;color:#fff;border:none;padding:5px 11px;border-radius:5px;font-size:11px;cursor:pointer;font-weight:600;white-space:nowrap}
-.btn-cancel:hover{opacity:.85}
-.btn-cancel:disabled{opacity:.5;cursor:not-allowed}
-.btn-view{background:#1a56db;color:#fff;border:none;padding:5px 11px;border-radius:5px;font-size:11px;cursor:pointer;font-weight:600}
-.btn-view:hover{opacity:.85}
-.action-badge{display:inline-block;padding:3px 8px;border-radius:5px;font-size:10px;font-weight:700;background:#fff3cd;color:#856404;border:1px solid #ffc107}
-.action-badge.complete{background:#d4edda;color:#155724;border-color:#28a745}
-.action-badge.waiting{background:#e2e3e5;color:#383d41;border-color:#ccc}
-.loading{text-align:center;padding:40px;color:#888}
-.empty{text-align:center;padding:30px;color:#aaa;font-size:13px}
-.toast{position:fixed;bottom:20px;right:20px;padding:10px 18px;border-radius:8px;font-size:12px;font-weight:600;color:#fff;z-index:9999;opacity:0;transition:opacity .3s}
-.toast.show{opacity:1}
-.toast.ok{background:#28a745}
-.toast.err{background:#dc3545}
-.tab-bar{display:flex;gap:4px;margin-bottom:14px}
-.tab{padding:7px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid #dce1f0;background:#fff;color:#555}
-.tab.active{background:#1a3a6b;color:#fff;border-color:#1a3a6b}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --navy:#050F1F;--blue:#1a56db;--blue2:#2563EB;--teal:#0891b2;
+  --green:#059669;--green2:#10B981;--amber:#d97706;--red:#dc2626;--violet:#7c3aed;
+  --bg:#EEF2F7;--surface:#FFFFFF;--surface2:#F8FAFC;
+  --border:#E2E8F0;--border2:#CBD5E1;
+  --text:#0F172A;--text2:#334155;--text3:#64748B;--text4:#94A3B8;
+  --shadow-sm:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.05);
+  --shadow-md:0 4px 12px rgba(0,0,0,.1);
+  --font:'Inter',Arial,sans-serif;
+}
+html,body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:13px;min-height:100vh;-webkit-font-smoothing:antialiased}
+.wrap{padding:12px;display:flex;flex-direction:column;gap:10px}
+
+/* ── Header ────────────────────── */
+.hdr{
+  background:linear-gradient(135deg,var(--navy),#0D2547);
+  border-radius:12px;padding:12px 14px;
+  display:flex;align-items:center;gap:10px;
+  box-shadow:var(--shadow-md)
+}
+.hdr-mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--blue),var(--teal));display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;box-shadow:0 2px 6px rgba(26,86,219,.4)}
+.hdr-info{flex:1;min-width:0}
+.hdr-title{color:#fff;font-size:14px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.2px}
+.hdr-sub{color:rgba(255,255,255,.4);font-size:9px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;margin-top:1px}
+.live{display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:var(--green2)}
+.pulse{width:6px;height:6px;border-radius:50%;background:var(--green2);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
+.ref-btn{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.8);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:10px;font-weight:700;font-family:var(--font);display:flex;align-items:center;gap:4px;transition:.15s;flex-shrink:0}
+.ref-btn:hover{background:rgba(255,255,255,.2)}
+.ref-btn.spin svg{animation:spin .65s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── KPI Strip ─────────────────── */
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:7px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center;box-shadow:var(--shadow-sm);position:relative;overflow:hidden;transition:.18s ease}
+.kpi:hover{box-shadow:var(--shadow-md);transform:translateY(-1px)}
+.kpi::after{content:'';position:absolute;top:0;left:0;width:100%;height:3px;background:var(--kc,var(--blue));border-radius:10px 10px 0 0}
+.kpi-icon{font-size:15px;margin-bottom:3px;display:block}
+.kpi-val{font-size:20px;font-weight:900;color:var(--text);line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.3px}
+.kpi-lbl{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text4);margin-top:2px}
+.kpi-sub{font-size:9px;color:var(--text3);margin-top:3px;font-weight:600}
+
+/* ── Alert ─────────────────────── */
+.alert{border-radius:10px;padding:10px 12px;display:flex;align-items:flex-start;gap:8px;border:1px solid #FDE68A;background:linear-gradient(135deg,#FFFBEB,#FEF3C7)}
+.alert.crit{border-color:#FECDD3;background:linear-gradient(135deg,#FFF1F2,#FFE4E6)}
+.al-icon{font-size:17px;flex-shrink:0;padding-top:1px}
+.al-body{flex:1}
+.al-title{font-size:11px;font-weight:700;color:#92400E;margin-bottom:5px}
+.alert.crit .al-title{color:#9F1239}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chip{display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:20px;font-size:9px;font-weight:700;border:1px solid transparent}
+.cw{background:#FEF3C7;color:#92400E;border-color:#FDE68A}
+.ci{background:#DBEAFE;color:#1D4ED8;border-color:#BFDBFE}
+.cg{background:#D1FAE5;color:#065F46;border-color:#A7F3D0}
+.cp{background:#EDE9FE;color:#5B21B6;border-color:#DDD6FE}
+
+/* ── Charts Row ────────────────── */
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+/* ── Panel ─────────────────────── */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden}
+.ph{padding:9px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px}
+.ph-t{font-size:11px;font-weight:700;color:var(--text);flex:1}
+.ph-b{background:#EFF6FF;color:var(--blue);font-size:8px;font-weight:700;padding:2px 6px;border-radius:8px}
+.pb{padding:11px 12px}
+
+/* ── Toolbar ───────────────────── */
+.toolbar{padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.seg{display:flex;background:var(--surface2);border-radius:6px;padding:2px;border:1px solid var(--border)}
+.sb{padding:4px 9px;border-radius:4px;border:none;cursor:pointer;font-size:9px;font-weight:500;color:var(--text3);background:none;font-family:var(--font);transition:.12s;white-space:nowrap}
+.sb.on{background:var(--surface);color:var(--text);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.sb.hot{color:var(--red)}
+.search{display:flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;flex:1;max-width:220px}
+.search input{border:none;background:none;outline:none;font-size:11px;color:var(--text);width:100%;font-family:var(--font)}
+.search input::placeholder{color:var(--text4)}
+
+/* ── Table ─────────────────────── */
+.tbl-wrap{overflow-x:auto;max-height:380px;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{padding:7px 10px;text-align:left;background:var(--surface2);font-size:8px;font-weight:700;color:var(--text4);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:1;white-space:nowrap;cursor:pointer}
+th:hover{color:var(--text2)}
+td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--surface2)}
+.co{font-weight:700;color:var(--text);font-size:11px}
+.co-sub{font-size:9px;color:var(--text4);margin-top:1px}
+.co-em{font-size:9px;color:var(--blue);margin-top:1px}
+
+/* ── Badge ─────────────────────── */
+.badge{display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:20px;font-size:8px;font-weight:700;border:1px solid transparent;white-space:nowrap}
+.bd{width:4px;height:4px;border-radius:50%;flex-shrink:0}
+.bpend{background:#FEF9C3;color:#A16207;border-color:#FDE68A}.bpend .bd{background:#A16207}
+.brev{background:#DBEAFE;color:#1D4ED8;border-color:#BFDBFE}.brev .bd{background:#1D4ED8}
+.bappr{background:#D1FAE5;color:#065F46;border-color:#A7F3D0}.bappr .bd{background:#059669}
+.brej{background:#FEE2E2;color:#991B1B;border-color:#FECACA}.brej .bd{background:#dc2626}
+.bsent{background:#E0F2FE;color:#0369A1;border-color:#BAE6FD}.bsent .bd{background:#0284C7}
+.bsign{background:#F0FDF4;color:#166534;border-color:#86EFAC}.bsign .bd{background:#16A34A}
+.bdraft{background:var(--surface2);color:var(--text3);border-color:var(--border)}.bdraft .bd{background:var(--text4)}
+.bcomp{background:#D1FAE5;color:#065F46;border-color:#6EE7B7;font-weight:800}.bcomp .bd{background:var(--green)}
+.bna{background:var(--surface2);color:var(--text4);font-style:italic}.bna .bd{background:var(--border2)}
+
+/* ── Score ─────────────────────── */
+.sr{display:flex;align-items:center;gap:4px}
+.sbg{flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden;min-width:40px}
+.sf{height:100%;border-radius:3px;transition:width .6s ease}
+.sn{font-size:9px;font-weight:800;color:var(--text3);width:22px;text-align:right}
+
+/* ── Action buttons ────────────── */
+.act{display:inline-flex;align-items:center;gap:2px;padding:3px 7px;border:1px solid transparent;border-radius:5px;cursor:pointer;font-size:8px;font-weight:800;font-family:var(--font);transition:.12s;white-space:nowrap}
+.act:disabled{opacity:.5;cursor:not-allowed}
+.a-ok{background:#D1FAE5;color:#065F46;border-color:#A7F3D0}.a-ok:not(:disabled):hover{background:#A7F3D0}
+.a-no{background:#FEE2E2;color:#991B1B;border-color:#FECACA}.a-no:not(:disabled):hover{background:#FECACA}
+
+/* ── Modal ─────────────────────── */
+.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)}
+.modal{background:var(--surface);border-radius:12px;padding:20px;max-width:300px;width:90%;box-shadow:0 12px 32px rgba(0,0,0,.2)}
+.modal h3{font-size:14px;font-weight:800;margin-bottom:5px}
+.modal p{font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.5}
+.modal-acts{display:flex;gap:6px;justify-content:flex-end}
+.m-btn{padding:7px 14px;border-radius:7px;border:none;cursor:pointer;font-size:11px;font-weight:700;font-family:var(--font);transition:.12s}
+.m-cancel{background:var(--surface2);color:var(--text3);border:1px solid var(--border)}
+.m-ok{background:var(--green);color:#fff}
+.m-no{background:var(--red);color:#fff}
+
+/* ── Loading / empty ───────────── */
+.sk{background:linear-gradient(90deg,var(--surface2) 25%,var(--border) 50%,var(--surface2) 75%);background-size:400%;animation:shim 1.4s ease infinite;border-radius:8px}
+@keyframes shim{0%{background-position:100%}100%{background-position:0}}
+.sk-kpi{height:76px}.sk-row{height:36px;margin-bottom:6px}.sk-chart{height:140px}
+.empty{text-align:center;padding:24px 16px;color:var(--text4)}
+.empty-icon{font-size:26px;margin-bottom:6px}
+
+/* ── Toast ─────────────────────── */
+.toast{position:fixed;bottom:12px;right:12px;background:var(--navy);color:#fff;padding:8px 13px;border-radius:8px;font-size:11px;font-weight:600;box-shadow:var(--shadow-md);z-index:200;opacity:0;transform:translateY(6px);transition:.22s;pointer-events:none}
+.toast.on{opacity:1;transform:translateY(0)}
+.toast.success{background:var(--green)}
+.toast.error{background:var(--red)}
+
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="header">
-    <h1>🚀 Onboarding Dashboard</h1>
-    <button class="refresh-btn" onclick="loadAll()">↻ Refresh</button>
+<div class="wrap" id="app">
+  <div style="text-align:center;padding:40px;color:#94A3B8">
+    <div style="font-size:24px;margin-bottom:8px">⏳</div>
+    <div style="font-size:12px;font-weight:500">Initialising…</div>
   </div>
-
-  <!-- Stats -->
-  <div class="stats" id="stats">
-    <div class="stat-card"><div class="stat-num" id="s-total">—</div><div class="stat-label">Total Leads</div></div>
-    <div class="stat-card"><div class="stat-num" id="s-booked">—</div><div class="stat-label">Booked</div></div>
-    <div class="stat-card"><div class="stat-num" id="s-onboarding">—</div><div class="stat-label">In Onboarding</div></div>
-    <div class="stat-card"><div class="stat-num" id="s-action">—</div><div class="stat-label">Action Needed</div></div>
-    <div class="stat-card"><div class="stat-num" id="s-complete">—</div><div class="stat-label">Complete</div></div>
-  </div>
-
-  <!-- Tabs -->
-  <div class="tab-bar">
-    <div class="tab active" id="tab-all" onclick="switchTab('all')">All Leads</div>
-    <div class="tab" id="tab-action" onclick="switchTab('action')">⚠ Action Needed</div>
-    <div class="tab" id="tab-booked" onclick="switchTab('booked')">Ready to Start</div>
-    <div class="tab" id="tab-complete" onclick="switchTab('complete')">✅ Complete</div>
-  </div>
-
-  <!-- Search -->
-  <div class="search-bar">
-    <input type="text" id="search" placeholder="Search by name, company or email…" oninput="renderTable()">
-  </div>
-
-  <!-- Table -->
-  <div id="table-wrap"><div class="loading">Loading…</div></div>
 </div>
-
-<!-- Toast -->
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast-el"></div>
 
 <script>
-var API = "https://barrier-thirteen-untidy.ngrok-free.dev/api/v1";
-var _leads = [];
-var _onboarding = [];
-var _currentTab = "all";
+const API = 'https://barrier-thirteen-untidy.ngrok-free.dev/api/v1';
+let _stats=null,_summary=null,_ob=[],_ab=null,_loading=false;
+let _tab='all',_search='',_confirm=null;
+let _doughnutInst=null,_barInst=null;
 
-ZOHO.embeddedApp.on("PageLoad", function() { loadAll(); });
-ZOHO.embeddedApp.init();
+// ── Utils ──────────────────────────────────────────────────────────────────
+const fmt=n=>n==null?'—':Number(n).toLocaleString('en-IN');
+const pct=n=>n==null?'—':(+n).toFixed(1)+'%';
+const daysSince=iso=>{if(!iso)return null;return Math.floor((Date.now()-new Date(iso))/864e5)};
+const scoreClr=n=>n>=8?'#059669':n>=5?'#d97706':'#dc2626';
+function badgeCls(v){
+  if(!v||v==='N/A'||v==='not_started')return 'bna';
+  const s=v.toLowerCase();
+  if(s.includes('pend'))return 'bpend';if(s.includes('review'))return 'brev';
+  if(s.includes('approv'))return 'bappr';if(s.includes('reject'))return 'brej';
+  if(s.includes('draft'))return 'bdraft';if(s.includes('sent'))return 'bsent';
+  if(s.includes('sign'))return 'bsign';if(s.includes('complet')||s==='done')return 'bcomp';
+  return 'bdraft';
+}
+const dispSt=v=>{if(!v||v==='N/A')return 'N/A';return v.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())};
+const hexToRgba=(hex,a)=>{const r=parseInt(hex.slice(1,3),16);const g=parseInt(hex.slice(3,5),16);const b=parseInt(hex.slice(5,7),16);return `rgba(${r},${g},${b},${a})`};
 
-function loadAll() {
-  document.getElementById("table-wrap").innerHTML = '<div class="loading">Loading…</div>';
-  var h = {"ngrok-skip-browser-warning": "1"};
-  Promise.all([
-    fetch(API + "/v2/leads", {headers: h}).then(function(r){ return r.json(); }),
-    fetch(API + "/onboarding/list", {headers: h}).then(function(r){ return r.json(); })
-  ]).then(function(results) {
-    _leads = results[0] || [];
-    _onboarding = results[1] || [];
-    updateStats();
-    renderTable();
-  }).catch(function(e) {
-    document.getElementById("table-wrap").innerHTML = '<div class="empty">⚠ Failed to load data. Check API connection.</div>';
-  });
+function toast(msg,type='default'){
+  const el=document.getElementById('toast-el');
+  el.textContent=msg;el.className=`toast on${type!=='default'?' '+type:''}`;
+  setTimeout(()=>el.classList.remove('on'),2800);
 }
 
-function updateStats() {
-  var booked = _leads.filter(function(l){ return l.status === "BOOKED"; });
-  var needsAction = _onboarding.filter(function(o){
-    return o.pending_action && o.pending_action.type !== "waiting" && o.pending_action.type !== "complete";
-  });
-  var complete = _onboarding.filter(function(o){
-    return o.pending_action && o.pending_action.type === "complete";
-  });
-  document.getElementById("s-total").textContent = _leads.length;
-  document.getElementById("s-booked").textContent = booked.length;
-  document.getElementById("s-onboarding").textContent = _onboarding.length;
-  document.getElementById("s-action").textContent = needsAction.length;
-  document.getElementById("s-complete").textContent = complete.length;
+// ── API ────────────────────────────────────────────────────────────────────
+async function safeFetch(url){try{const r=await fetch(url);return r.ok?r.json():null;}catch{return null;}}
+
+async function loadData(){
+  _loading=true;render();
+  const[s,sm,ob,ab]=await Promise.all([
+    safeFetch(`${API}/v2/dashboard/stats`),
+    safeFetch(`${API}/onboarding/pipeline-summary.json`),
+    safeFetch(`${API}/onboarding/list`),
+    safeFetch(`${API}/v2/ab-stats`),
+  ]);
+  if(s)_stats=s;if(sm)_summary=sm;
+  if(ob)_ob=Array.isArray(ob)?ob:ob?.items||ob?.data||[];
+  if(ab)_ab=ab;
+  _loading=false;render();initCharts();
 }
 
-function switchTab(tab) {
-  _currentTab = tab;
-  ["all","action","booked","complete"].forEach(function(t){
-    document.getElementById("tab-" + t).classList.toggle("active", t === tab);
-  });
-  renderTable();
+async function doAction(id,type,action){
+  let url;
+  if(type==='kyc')url=`${API}/onboarding/kyc/review/${id}`;
+  else if(type==='nda')url=`${API}/onboarding/nda/sign-review/${id}`;
+  else url=`${API}/onboarding/agreement/sign-review/${id}`;
+  try{
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,notes:''})});
+    toast(r.ok?`${type.toUpperCase()} ${action}d ✓`:'Action failed',r.ok?'success':'error');
+    if(r.ok)setTimeout(loadData,1200);
+  }catch{toast('Network error','error');}
+  closeModal();
 }
 
-function getOnboarding(leadId) {
-  return _onboarding.find(function(o){ return o.lead_id === leadId; }) || null;
-}
-
-function renderTable() {
-  var q = (document.getElementById("search").value || "").toLowerCase();
-
-  // Build combined rows
-  var rows = _leads.filter(function(l) {
-    if (q && !((l.email||"").toLowerCase().includes(q) ||
-               (l.business_name||"").toLowerCase().includes(q) ||
-               (l.contact_name||"").toLowerCase().includes(q))) return false;
-
-    var ob = getOnboarding(l.id);
-    var pa = ob ? ob.pending_action : null;
-
-    if (_currentTab === "action") {
-      return pa && pa.type !== "waiting" && pa.type !== "complete";
-    }
-    if (_currentTab === "booked") {
-      return l.status === "BOOKED" && !ob;
-    }
-    if (_currentTab === "complete") {
-      return pa && pa.type === "complete";
-    }
-    return true; // all
-  });
-
-  if (!rows.length) {
-    document.getElementById("table-wrap").innerHTML = '<div class="empty">No leads found.</div>';
-    return;
-  }
-
-  // Sort: action needed first, then by stage score desc
-  rows.sort(function(a, b) {
-    var oa = getOnboarding(a.id), ob2 = getOnboarding(b.id);
-    var pa = oa ? oa.pending_action : null, pb = ob2 ? ob2.pending_action : null;
-    var aAction = pa && pa.type !== "waiting" && pa.type !== "complete" ? 1 : 0;
-    var bAction = pb && pb.type !== "waiting" && pb.type !== "complete" ? 1 : 0;
-    if (bAction !== aAction) return bAction - aAction;
-    var aScore = oa ? oa.stage_score : -1;
-    var bScore = ob2 ? ob2.stage_score : -1;
-    return bScore - aScore;
-  });
-
-  var html = [
-    '<table>',
-    '<thead><tr>',
-    '<th>#</th>',
-    '<th>Lead / Company</th>',
-    '<th>Email</th>',
-    '<th>Lead Status</th>',
-    '<th>KYC</th>',
-    '<th>NDA</th>',
-    '<th>Agreement</th>',
-    '<th>Score</th>',
-    '<th>Next Action</th>',
-    '<th>Action</th>',
-    '</tr></thead><tbody>'
-  ];
-
-  rows.forEach(function(lead, i) {
-    var ob = getOnboarding(lead.id);
-    var pa = ob ? ob.pending_action : null;
-
-    html.push('<tr>');
-    html.push('<td style="color:#aaa">' + (i+1) + '</td>');
-
-    // Name + company
-    html.push('<td><strong>' + esc(lead.contact_name || lead.business_name || "—") + '</strong>' +
-      (lead.business_name && lead.contact_name ? '<br><span style="color:#888;font-size:11px">' + esc(lead.business_name) + '</span>' : '') +
-      '</td>');
-
-    html.push('<td style="color:#555">' + esc(lead.email || "—") + '</td>');
-
-    // Lead status
-    html.push('<td>' + statusPill(lead.status) + '</td>');
-
-    if (ob) {
-      html.push('<td>' + stagePill(ob.kyc_status, "kyc") + '</td>');
-      html.push('<td>' + stagePill(ob.nda_status, "doc") + '</td>');
-      html.push('<td>' + stagePill(ob.agreement_status, "doc") + '</td>');
-
-      // Score bar
-      var pct = Math.round((ob.stage_score / 11) * 100);
-      var barClass = pct >= 80 ? "complete" : pct >= 40 ? "mid" : "";
-      html.push('<td><div class="score-bar"><div class="bar-bg"><div class="bar-fill ' + barClass + '" style="width:' + pct + '%"></div></div>' +
-        '<span style="font-size:11px;font-weight:600;color:#1a3a6b">' + ob.stage_score + '/11</span></div></td>');
-
-      // Pending action
-      if (pa) {
-        var badgeClass = pa.type === "complete" ? "complete" : pa.type === "waiting" ? "waiting" : "";
-        html.push('<td><span class="action-badge ' + badgeClass + '">' + esc(pa.label) + '</span></td>');
-      } else {
-        html.push('<td>—</td>');
+// ── Chart Init ─────────────────────────────────────────────────────────────
+function initCharts(){
+  // Doughnut
+  const dc=document.getElementById('doughnut-canvas');
+  if(dc&&_stats){
+    if(_doughnutInst)_doughnutInst.destroy();
+    const t=_stats.total_leads||0,s=_stats.sent_leads||0,r=_stats.replied_leads||0,b=_stats.booked_leads||0;
+    _doughnutInst=new Chart(dc.getContext('2d'),{
+      type:'doughnut',
+      data:{
+        labels:['Not Sent','Sent·No Reply','Replied·Not Booked','Booked ✓'],
+        datasets:[{data:[Math.max(0,t-s),Math.max(0,s-r),Math.max(0,r-b),b],
+          backgroundColor:['#E2E8F0','#BAE6FD','#FDE68A','#6EE7B7'],
+          borderColor:['#CBD5E1','#7DD3FC','#FCD34D','#34D399'],borderWidth:1.5,hoverOffset:4}]
+      },
+      options:{responsive:true,maintainAspectRatio:false,cutout:'68%',
+        plugins:{
+          legend:{position:'bottom',labels:{font:{family:'Inter',size:9,weight:'600'},padding:7,boxWidth:7,usePointStyle:true,color:'#64748B'}},
+          tooltip:{callbacks:{label:c=>` ${c.label}: ${(c.raw||0).toLocaleString('en-IN')}`},bodyFont:{family:'Inter',size:10}}
+        }
       }
-
-      // Cancel button
-      html.push('<td><button class="btn-cancel" onclick="cancelOnboarding(\'' + lead.id + '\', this)">✕ Cancel</button></td>');
-
-    } else {
-      html.push('<td colspan="4" style="color:#bbb;font-size:11px">Not started</td>');
-      html.push('<td>—</td>');
-      // Start button for all leads
-      html.push('<td><button class="btn-start" onclick="startOnboarding(\'' + lead.id + '\', this)">▶ Start</button></td>');
+    });
+  }
+  // A/B Bar
+  const bc=document.getElementById('ab-canvas');
+  if(bc&&_ab){
+    if(_barInst)_barInst.destroy();
+    const variants=_ab.variants||_ab||{};
+    const keys=Object.keys(variants).filter(k=>variants[k]);
+    if(keys.length){
+      const clrs={A:'#1a56db',B:'#059669',C:'#d97706'};
+      _barInst=new Chart(bc.getContext('2d'),{
+        type:'bar',
+        data:{
+          labels:keys,
+          datasets:[
+            {label:'Sent',data:keys.map(k=>variants[k]?.sent||0),backgroundColor:keys.map(k=>hexToRgba(clrs[k]||'#94A3B8',.25)),borderColor:keys.map(k=>clrs[k]||'#94A3B8'),borderWidth:2,borderRadius:4,borderSkipped:false},
+            {label:'Replied',data:keys.map(k=>variants[k]?.replied||0),backgroundColor:keys.map(k=>clrs[k]||'#94A3B8'),borderColor:keys.map(k=>clrs[k]||'#94A3B8'),borderWidth:2,borderRadius:4,borderSkipped:false},
+          ]
+        },
+        options:{responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{position:'top',labels:{font:{family:'Inter',size:9,weight:'600'},boxWidth:7,usePointStyle:true,padding:7,color:'#64748B'}},
+            tooltip:{bodyFont:{family:'Inter',size:10}}},
+          scales:{
+            y:{beginAtZero:true,grid:{color:'#F1F5F9'},ticks:{font:{family:'Inter',size:9},color:'#64748B'}},
+            x:{grid:{display:false},ticks:{font:{family:'Inter',size:10,weight:'700'},color:'#334155'}}
+          }
+        }
+      });
     }
+  }
+}
 
-    html.push('</tr>');
+// ── Modal ──────────────────────────────────────────────────────────────────
+function promptAction(id,type,action,company){
+  _confirm={id,type,action,company};
+  const ov=document.createElement('div');ov.className='modal-ov';ov.id='modal-ov';
+  ov.onclick=e=>{if(e.target===ov)closeModal();};
+  ov.innerHTML=`<div class="modal">
+    <h3>${action==='approve'?'Confirm Approval':'Confirm Rejection'}</h3>
+    <p>${action==='approve'?'Approve':'Reject'} <strong>${type.toUpperCase()}</strong> for <strong>${company}</strong>?</p>
+    <div class="modal-acts">
+      <button class="m-btn m-cancel" onclick="closeModal()">Cancel</button>
+      <button class="m-btn m-${action==='approve'?'ok':'no'}" onclick="confirmAction()">
+        ${action==='approve'?'✓ Approve':'✗ Reject'}
+      </button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function confirmAction(){if(_confirm)doAction(_confirm.id,_confirm.type,_confirm.action);}
+function closeModal(){const el=document.getElementById('modal-ov');if(el)el.remove();_confirm=null;}
+
+// ── Render helpers ─────────────────────────────────────────────────────────
+function badge(st){
+  if(!st||st==='N/A')return `<span class="badge bna"><span class="bd"></span>N/A</span>`;
+  return `<span class="badge ${badgeCls(st)}"><span class="bd"></span>${dispSt(st)}</span>`;
+}
+function scoreBar(n){
+  const w=Math.round(((n||0)/11)*100);
+  return `<div class="sr"><div class="sbg"><div class="sf" style="width:${w}%;background:${scoreClr(n||0)}"></div></div><div class="sn">${n||0}</div></div>`;
+}
+function kpiCard(icon,lbl,val,sub,kc){
+  return `<div class="kpi" style="--kc:${kc}">
+    <span class="kpi-icon">${icon}</span>
+    <div class="kpi-val">${val}</div>
+    <div class="kpi-lbl">${lbl}</div>
+    ${sub?`<div class="kpi-sub">${sub}</div>`:''}
+  </div>`;
+}
+
+// ── Main Render ────────────────────────────────────────────────────────────
+function render(){
+  const s=_stats||{};const sm=_summary||{};const c=sm.counts||{};
+  const total=s.total_leads||0,sent=s.sent_leads||0,replied=s.replied_leads||0,booked=s.booked_leads||0;
+  const obTotal=sm.total||0,complete=c.complete||0;
+  const actionCount=_ob.filter(r=>r.pending_action).length;
+  const kycCount=_ob.filter(r=>(r.kyc_status||'').includes('review')).length;
+
+  // KPIs
+  const kpis=_loading
+    ?[1,2,3,4,5,6].map(()=>`<div class="kpi sk sk-kpi"></div>`).join('')
+    :[
+      kpiCard('👥','Leads',fmt(total),null,'#1a56db'),
+      kpiCard('📤','Sent',fmt(sent),total?Math.round(sent/total*100)+'%':null,'#0891b2'),
+      kpiCard('💬','Replied',fmt(replied),sent?Math.round(replied/sent*100)+'%':null,'#d97706'),
+      kpiCard('📅','Booked',fmt(booked),replied?Math.round(booked/replied*100)+'%':null,'#059669'),
+      kpiCard('🎯','Conv.',pct(s.conversion_rate),'Lead→Book','#7c3aed'),
+      kpiCard('✅','Done',fmt(complete),obTotal?Math.round(complete/obTotal*100)+'%':null,'#059669'),
+    ].join('');
+
+  // Alert
+  const stuck=(sm.stuck||[]).length;
+  const kyc=(c.kyc_pending||0)+(c.kyc_review||0);
+  const nda=(c.nda_draft||0)+(c.nda_sent||0);
+  const agr=(c.agreement_draft||0)+(c.agreement_sent||0);
+  const alertHtml=(!stuck&&!kyc&&!nda&&!agr)?'':`
+    <div class="alert${stuck>3?' crit':''}">
+      <div class="al-icon">${stuck>3?'🚨':'⚠️'}</div>
+      <div class="al-body">
+        <div class="al-title">${stuck>3?`${stuck} Deals Stuck — Urgent`:'Action Required'}</div>
+        <div class="chips">
+          ${stuck?`<span class="chip cw">⏰ ${stuck} Stuck</span>`:''}
+          ${kyc?`<span class="chip ci">📄 ${kyc} KYC</span>`:''}
+          ${nda?`<span class="chip ci">✍ ${nda} NDA</span>`:''}
+          ${agr?`<span class="chip ci">📝 ${agr} Agr</span>`:''}
+          ${complete?`<span class="chip cg">🎉 ${complete} Done</span>`:''}
+          ${(c.overseas||0)?`<span class="chip cp">🌐 ${c.overseas} Overseas</span>`:''}
+        </div>
+      </div>
+    </div>`;
+
+  // Table
+  const q=_search.toLowerCase();
+  const filtered=_ob.filter(r=>{
+    const m=!q||(r.lead_business_name||'').toLowerCase().includes(q)||(r.lead_email||'').toLowerCase().includes(q)||(r.lead_contact_name||'').toLowerCase().includes(q);
+    if(!m)return false;
+    if(_tab==='action')return !!r.pending_action;
+    if(_tab==='kyc')return (r.kyc_status||'').includes('review');
+    if(_tab==='nda')return (r.nda_status||'').includes('review')||(r.nda_status||'').includes('signed');
+    if(_tab==='complete')return (r.agreement_status||'').toLowerCase().includes('complet');
+    return true;
   });
 
-  html.push('</tbody></table>');
-  document.getElementById("table-wrap").innerHTML = html.join("");
+  const tableContent=_loading
+    ?`<div style="padding:12px">${[1,2,3].map(()=>`<div class="sk sk-row"></div>`).join('')}</div>`
+    :!filtered.length
+      ?`<div class="empty"><div class="empty-icon">📭</div><p>No records</p></div>`
+      :`<div class="tbl-wrap"><table>
+        <thead><tr>
+          <th>Company</th><th>Type</th><th>KYC</th><th>NDA</th><th>Agreement</th>
+          <th>Score</th><th>Age</th><th>Actions</th>
+        </tr></thead>
+        <tbody>${filtered.map(r=>{
+          const kyc=r.kyc_status||'N/A',nda=r.nda_status||'N/A',agr=r.agreement_status||'N/A';
+          const nK=kyc.includes('review'),nN=nda.includes('review')||nda.includes('signed'),nA=agr.includes('review')||agr.includes('signed');
+          const age=daysSince(r.created_at);
+          const ageClr=age>14?'#dc2626':age>7?'#d97706':'#059669';
+          const co=r.lead_business_name||'—';
+          const acts=[
+            nK?`<button class="act a-ok" onclick="promptAction('${r.id}','kyc','approve','${co.replace(/'/g,'\\'')}')">✓ KYC</button><button class="act a-no" onclick="promptAction('${r.id}','kyc','reject','${co.replace(/'/g,'\\'')}')">✗</button>`:'',
+            nN?`<button class="act a-ok" onclick="promptAction('${r.id}','nda','approve','${co.replace(/'/g,'\\'')}')">✓ NDA</button>`:'',
+            nA?`<button class="act a-ok" onclick="promptAction('${r.id}','agr','approve','${co.replace(/'/g,'\\'')}')">✓ Agr</button>`:'',
+          ].filter(Boolean).join('');
+          return `<tr>
+            <td><div class="co">${co}</div><div class="co-sub">${r.lead_contact_name||''}</div><div class="co-em">${r.lead_email||''}</div></td>
+            <td><span style="font-size:8px;font-weight:700;text-transform:capitalize;padding:2px 5px;background:var(--surface2);color:var(--text3);border-radius:3px;border:1px solid var(--border)">${r.company_type||'?'}</span></td>
+            <td>${badge(kyc)}</td><td>${badge(nda)}</td><td>${badge(agr)}</td>
+            <td style="min-width:75px">${scoreBar(r.stage_score)}</td>
+            <td><span style="font-size:9px;font-weight:800;color:${ageClr}">${age!=null?age+'d':'—'}</span></td>
+            <td><div style="display:flex;gap:3px;flex-wrap:wrap">${acts||`<span style="font-size:8px;color:var(--text4);font-style:italic">${agr.toLowerCase().includes('complet')?'✅ Done':'Waiting'}</span>`}</div></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`;
+
+  const tabs=[
+    {id:'all',lbl:`All (${_ob.length})`},
+    {id:'action',lbl:`Action${actionCount?` (${actionCount})`:''}`},
+    {id:'kyc',lbl:`KYC${kycCount?` (${kycCount})`:''}`},
+    {id:'nda',lbl:'NDA'},{id:'complete',lbl:'Done'},
+  ];
+  const segBtns=tabs.map(t=>`<button class="sb${_tab===t.id?' on':''}${(t.id==='action'&&actionCount>0&&_tab!==t.id)||(t.id==='kyc'&&kycCount>0&&_tab!==t.id)?' hot':''}" onclick="setTab('${t.id}')">${t.lbl}</button>`).join('');
+
+  document.getElementById('app').innerHTML=`
+    <div class="hdr">
+      <div class="hdr-mark">✈</div>
+      <div class="hdr-info">
+        <div class="hdr-title">Pipeline Command Centre</div>
+        <div class="hdr-sub">Jane Aerospace · Onboarding MIS</div>
+      </div>
+      <div class="live"><div class="pulse"></div>${_loading?'Refreshing':'Live'}</div>
+      <button class="ref-btn${_loading?' spin':''}" onclick="loadData()">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M1 4v6h6"/><path d="M23 20v-6h-6"/>
+          <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+        </svg>
+        Refresh
+      </button>
+    </div>
+
+    <div class="kpis">${kpis}</div>
+
+    ${alertHtml}
+
+    <div class="charts-row">
+      <div class="panel">
+        <div class="ph"><div class="ph-t">🍩 Pipeline Distribution</div></div>
+        <div class="pb">
+          ${_loading?`<div class="sk sk-chart"></div>`:`<div style="height:140px;position:relative"><canvas id="doughnut-canvas"></canvas></div>`}
+        </div>
+      </div>
+      <div class="panel">
+        <div class="ph"><div class="ph-t">🧪 A/B Performance</div></div>
+        <div class="pb">
+          ${_loading?`<div class="sk sk-chart"></div>`:`<div style="height:140px;position:relative"><canvas id="ab-canvas"></canvas></div>`}
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="ph">
+        <div class="ph-t">🏢 Onboarding Pipeline</div>
+        <span class="ph-b">${fmt(_ob.length)}</span>
+      </div>
+      <div class="toolbar">
+        <div class="seg">${segBtns}</div>
+        <div class="search">
+          <span style="font-size:10px;color:var(--text4)">🔍</span>
+          <input placeholder="Search…" value="${_search.replace(/"/g,'&quot;')}" oninput="setSearch(this.value)">
+        </div>
+        <span style="font-size:9px;color:var(--text4);margin-left:auto">${filtered.length} rec.</span>
+      </div>
+      ${tableContent}
+    </div>
+  `;
+
+  if(!_loading)setTimeout(initCharts,10);
 }
 
-function statusPill(status) {
-  var map = {
-    NEW: ["grey","NEW"],
-    SENT: ["blue","SENT"],
-    REPLIED: ["yellow","REPLIED"],
-    BOOKED: ["green","BOOKED"]
-  };
-  var p = map[status] || ["grey", status || "—"];
-  return '<span class="pill pill-' + p[0] + '">' + p[1] + '</span>';
-}
+function setTab(t){_tab=t;render();}
+function setSearch(v){_search=v;render();}
 
-function stagePill(status, kind) {
-  if (!status || status === "PENDING") return '<span style="color:#ccc;font-size:11px">—</span>';
-  var good = ["APPROVED","PROCEED_NEXT"];
-  var bad  = ["REJECTED","DRAFT_REJECTED","SIGN_REJECTED"];
-  var wait = ["SENT_TO_LEAD"];
-  var cls = good.includes(status) ? "green" : bad.includes(status) ? "red" : wait.includes(status) ? "orange" : "blue";
-  var label = {
-    FORM_SENT:"Sent", SUBMITTED:"Submitted", UNDER_REVIEW:"Review",
-    REJECTED:"Rejected", APPROVED:"Approved", DRAFT_GENERATED:"Draft",
-    TEAM_REVIEW:"Team Rev", DRAFT_REJECTED:"Rejected", SENT_TO_LEAD:"Sent",
-    SIGNED_RECEIVED:"Signed", SIGN_UNDER_REVIEW:"Sign Rev",
-    SIGN_REJECTED:"Rejected", PROCEED_NEXT:"Done"
-  }[status] || status;
-  return '<span class="pill pill-' + cls + '">' + label + '</span>';
-}
-
-function startOnboarding(leadId, btn) {
-  btn.disabled = true;
-  btn.textContent = "Starting…";
-  fetch(API + "/onboarding/start/" + leadId, {
-    method: "POST",
-    headers: {"ngrok-skip-browser-warning": "1"}
-  })
-  .then(function(r){ return r.json(); })
-  .then(function(d){
-    showToast(d.message || "Onboarding started! KYC form sent to lead.", "ok");
-    setTimeout(loadAll, 2500);
-  })
-  .catch(function(e){
-    showToast("Error: " + e, "err");
-    btn.disabled = false;
-    btn.textContent = "▶ Start";
-  });
-}
-
-function cancelOnboarding(leadId, btn) {
-  if (!confirm("Cancel and remove onboarding for this lead?")) return;
-  btn.disabled = true;
-  btn.textContent = "Cancelling…";
-  fetch(API + "/onboarding/cancel/" + leadId, {
-    method: "DELETE",
-    headers: {"ngrok-skip-browser-warning": "1"}
-  })
-  .then(function(r){ return r.json(); })
-  .then(function(d){
-    showToast(d.message || "Onboarding cancelled.", "ok");
-    setTimeout(loadAll, 1500);
-  })
-  .catch(function(e){
-    showToast("Error: " + e, "err");
-    btn.disabled = false;
-    btn.textContent = "✕ Cancel";
-  });
-}
-
-function showToast(msg, type) {
-  var el = document.getElementById("toast");
-  el.textContent = msg;
-  el.className = "toast show " + type;
-  setTimeout(function(){ el.className = "toast"; }, 4000);
-}
-
-function esc(s) {
-  return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-}
+ZOHO.embeddedApp.on('PageLoad',()=>{loadData();setInterval(loadData,30000);});
+ZOHO.embeddedApp.init();
 </script>
 </body>
 </html>

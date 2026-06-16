@@ -1,2986 +1,1037 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html lang="en" data-theme="light">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Jane Aerospace — Command Center</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet"
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <style>
-    :root {
-      --b950: #060f1e;
-      --b900: #0b1f3a;
-      --b800: #0f2847;
-      --b700: #1a3360;
-      --b600: #1a56db;
-      --b500: #2563eb;
-      --b400: #3b82f6;
-      --b100: #dbeafe;
-      --b50: #eff6ff;
-      --ink: #0f172a;
-      --ink2: #1e293b;
-      --mut: #64748b;
-      --mut2: #94a3b8;
-      --line: #e2e8f0;
-      --bd: #e2e8f0;
-      --ok: #16a34a;
-      --warn: #d97706;
-      --bad: #dc2626;
-      --bg: #eef2f8;
-      --bg2: #f8fafc;
-      --card: #ffffff;
-      --r: 12px;
-      --sh: 0 1px 3px rgba(10, 25, 60, .06), 0 4px 16px rgba(10, 25, 60, .07);
-      --sh2: 0 8px 32px rgba(10, 25, 60, .14);
-      --sidebar-w: 240px;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      font-family: 'Inter', 'Segoe UI', system-ui, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--ink);
-      font-size: 14px;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-
-    svg.ic {
-      width: 17px;
-      height: 17px;
-      stroke: currentColor;
-      stroke-width: 2;
-      fill: none;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      vertical-align: -3px;
-      flex: none;
-    }
-
-    button {
-      font-family: inherit;
-    }
-
-    a {
-      color: var(--b600);
-    }
-
-    .logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-weight: 800;
-      letter-spacing: .05em;
-    }
-
-    /* ---------------- login ---------------- */
-    #login-screen {
-      position: fixed;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-      background: var(--b950);
-      background-image:
-        radial-gradient(ellipse 900px 600px at 70% -5%, rgba(37, 99, 235, .4) 0%, transparent 65%),
-        radial-gradient(ellipse 600px 400px at 10% 90%, rgba(124, 58, 237, .25) 0%, transparent 60%);
-    }
-
-    .login-card {
-      background: #fff;
-      border-radius: 18px;
-      padding: 40px 44px;
-      width: 400px;
-      max-width: 92vw;
-      box-shadow: 0 32px 80px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 255, 255, .05);
-    }
-
-    .login-card h1 {
-      font-size: 21px;
-      font-weight: 800;
-      color: var(--ink);
-      margin: 18px 0 5px;
-      letter-spacing: -.01em;
-    }
-
-    .login-card .sub {
-      font-size: 12.5px;
-      color: var(--mut);
-      margin-bottom: 22px;
-      line-height: 1.6;
-    }
-
-    .fld {
-      margin-bottom: 14px;
-    }
-
-    .fld label {
-      display: block;
-      font-size: 12px;
-      font-weight: 600;
-      color: #334155;
-      margin-bottom: 5px;
-    }
-
-    .fld input,
-    .fld select,
-    .fld textarea {
-      width: 100%;
-      padding: 11px 13px;
-      border: 1.5px solid #cbd5e1;
-      border-radius: 9px;
-      font-size: 14px;
-      background: #fff;
-    }
-
-    .fld input:focus,
-    .fld select:focus,
-    .fld textarea:focus {
-      outline: none;
-      border-color: var(--b600);
-      box-shadow: 0 0 0 3px rgba(26, 86, 219, .12);
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      border: none;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      padding: 9px 16px;
-      font-size: 12.5px;
-      font-family: inherit;
-      transition: all .14s;
-      white-space: nowrap;
-    }
-
-    .btn:hover {
-      filter: brightness(1.07);
-    }
-
-    .btn:active {
-      transform: scale(.97);
-    }
-
-    .btn-p {
-      background: var(--b500);
-      color: #fff;
-      box-shadow: 0 2px 8px rgba(37, 99, 235, .3);
-    }
-
-    .btn-p:hover {
-      background: var(--b600);
-      box-shadow: 0 4px 14px rgba(37, 99, 235, .4);
-    }
-
-    .btn-g {
-      background: var(--ok);
-      color: #fff;
-      box-shadow: 0 2px 8px rgba(22, 163, 74, .25);
-    }
-
-    .btn-r {
-      background: #fff;
-      color: var(--bad);
-      border: 1.5px solid #fca5a5;
-    }
-
-    .btn-r:hover {
-      background: #fef2f2;
-    }
-
-    .btn-o {
-      background: #fff;
-      color: var(--ink2);
-      border: 1.5px solid var(--line);
-    }
-
-    .btn-o:hover {
-      background: var(--bg);
-      border-color: #94a3b8;
-    }
-
-    .btn-w {
-      background: #fff;
-      color: var(--warn);
-      border: 1.5px solid #fde68a;
-    }
-
-    .btn-block {
-      width: 100%;
-      justify-content: center;
-      padding: 12px;
-      font-size: 14px;
-    }
-
-    #login-err {
-      display: none;
-      background: #fef2f2;
-      color: #991b1b;
-      font-size: 12.5px;
-      padding: 10px 13px;
-      border-radius: 8px;
-      margin: 6px 0 12px;
-      border: 1px solid #fecaca;
-    }
-
-    /* ---------------- shell ---------------- */
-    #app {
-      display: none;
-    }
-
-    .sidebar {
-      position: fixed;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      width: var(--sidebar-w);
-      background: var(--b950);
-      color: #c5d4ec;
-      display: flex;
-      flex-direction: column;
-      z-index: 20;
-      border-right: 1px solid rgba(255, 255, 255, .05);
-    }
-
-    .sidebar .logo {
-      padding: 20px 18px 16px;
-      color: #fff;
-      font-size: 13px;
-      border-bottom: 1px solid rgba(255, 255, 255, .07);
-      display: flex;
-      align-items: center;
-      gap: 11px;
-      letter-spacing: .04em;
-      font-weight: 800;
-    }
-
-    .sidebar .logo .logo-sub {
-      font-size: 9.5px;
-      font-weight: 500;
-      color: #6a84b0;
-      display: block;
-      letter-spacing: .08em;
-      margin-top: 1px;
-    }
-
-    .nav {
-      flex: 1;
-      padding: 10px 10px;
-      overflow-y: auto;
-    }
-
-    .nav-section-label {
-      font-size: 9.5px;
-      font-weight: 700;
-      color: #3d5a8a;
-      text-transform: uppercase;
-      letter-spacing: .1em;
-      padding: 14px 14px 6px;
-      display: block;
-    }
-
-    .nav a {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 9px 12px;
-      color: #7d9ac8;
-      font-size: 13px;
-      font-weight: 500;
-      border-radius: 8px;
-      text-decoration: none;
-      cursor: pointer;
-      margin-bottom: 1px;
-      transition: background .12s, color .12s;
-      position: relative;
-    }
-
-    .nav a:hover {
-      background: rgba(255, 255, 255, .06);
-      color: #c5d4ec;
-    }
-
-    .nav a.active {
-      background: rgba(26, 86, 219, .2);
-      color: #fff;
-      font-weight: 600;
-    }
-
-    .nav a.active::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 5px;
-      bottom: 5px;
-      width: 3px;
-      border-radius: 0 3px 3px 0;
-      background: var(--b400);
-    }
-
-    .nav .badge {
-      margin-left: auto;
-      background: #ef4444;
-      color: #fff;
-      font-size: 9.5px;
-      font-weight: 800;
-      border-radius: 99px;
-      padding: 2px 7px;
-      line-height: 1.2;
-    }
-
-    .who {
-      padding: 12px 14px;
-      border-top: 1px solid rgba(255, 255, 255, .07);
-      font-size: 12px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      background: rgba(0, 0, 0, .12);
-    }
-
-    .who .av {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      background: linear-gradient(135deg, var(--b500), #7c3aed);
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      font-size: 13px;
-      flex: none;
-      letter-spacing: .02em;
-    }
-
-    .who b {
-      color: #e2eaf6;
-      display: block;
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    .who span {
-      color: #5a78a8;
-      font-size: 10.5px;
-    }
-
-    .who button {
-      background: none;
-      border: none;
-      color: #3d5a8a;
-      cursor: pointer;
-      margin-left: auto;
-      padding: 6px;
-      border-radius: 6px;
-      transition: color .12s, background .12s;
-    }
-
-    .who button:hover {
-      color: #fff;
-      background: rgba(255, 255, 255, .08);
-    }
-
-    /* ── topbar ── */
-    .topbar {
-      position: fixed;
-      left: var(--sidebar-w);
-      right: 0;
-      top: 0;
-      height: 58px;
-      background: #fff;
-      border-bottom: 1px solid var(--line);
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 0 24px;
-      z-index: 15;
-    }
-
-    .topbar-left {
-      display: flex;
-      flex-direction: column;
-      margin-right: auto;
-    }
-
-    .topbar h2 {
-      font-size: 15px;
-      font-weight: 700;
-      color: var(--ink);
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      line-height: 1.1;
-    }
-
-    .topbar-sub {
-      font-size: 11px;
-      color: var(--mut);
-      margin-top: 1px;
-      font-weight: 400;
-    }
-
-    .gsearch {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: var(--bg);
-      border: 1.5px solid var(--line);
-      border-radius: 9px;
-      padding: 7px 12px;
-      width: 260px;
-      color: var(--mut);
-      transition: border-color .15s, box-shadow .15s;
-    }
-
-    .gsearch:focus-within {
-      border-color: var(--b400);
-      background: #fff;
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, .1);
-    }
-
-    .gsearch input {
-      border: none;
-      background: none;
-      outline: none;
-      font-size: 12.5px;
-      width: 100%;
-      font-family: inherit;
-    }
-
-    .main {
-      margin-left: var(--sidebar-w);
-      padding: 78px 24px 40px;
-    }
-
-    /* ── KPI + cards ── */
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-      gap: 14px;
-      margin-bottom: 20px;
-    }
-
-    .card {
-      background: var(--card);
-      border-radius: var(--r);
-      padding: 16px 18px;
-      box-shadow: var(--sh);
-      display: flex;
-      gap: 13px;
-      align-items: center;
-      border: 1px solid rgba(226, 232, 240, .6);
-    }
-
-    .card .ico {
-      width: 40px;
-      height: 40px;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex: none;
-    }
-
-    .card .num {
-      font-size: 22px;
-      font-weight: 800;
-      color: var(--ink);
-      line-height: 1.1;
-    }
-
-    .card .lbl {
-      font-size: 10.5px;
-      color: var(--mut);
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      font-weight: 600;
-      margin-top: 1px;
-    }
-
-    /* gradient KPI tiles */
-    .card.kpi {
-      position: relative;
-      display: block;
-      color: #fff;
-      border: none;
-      padding: 18px 18px 16px;
-      border-radius: 14px;
-      overflow: hidden;
-      box-shadow: 0 4px 20px rgba(15, 23, 42, .18);
-      min-height: 118px;
-      transition: transform .15s, box-shadow .15s;
-    }
-
-    .card.kpi:hover {
-      transform: translateY(-3px);
-      box-shadow: 0 12px 32px rgba(15, 23, 42, .24);
-    }
-
-    .card.kpi .kpi-ico {
-      position: absolute;
-      top: 16px;
-      right: 16px;
-      width: 40px;
-      height: 40px;
-      border-radius: 10px;
-      background: rgba(255, 255, 255, .18);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .card.kpi .kpi-ico svg {
-      width: 20px;
-      height: 20px;
-      color: rgba(255, 255, 255, .9);
-    }
-
-    .card.kpi .kpi-lbl {
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      opacity: .85;
-      padding-right: 50px;
-    }
-
-    .card.kpi .kpi-num {
-      font-size: 32px;
-      font-weight: 900;
-      line-height: 1;
-      margin-top: 10px;
-      letter-spacing: -.02em;
-    }
-
-    .card.kpi .kpi-sub {
-      font-size: 11px;
-      opacity: .8;
-      margin-top: 6px;
-      font-weight: 500;
-    }
-
-    /* ── panels ── */
-    .panel {
-      background: var(--card);
-      border-radius: var(--r);
-      padding: 20px 22px;
-      box-shadow: var(--sh);
-      margin-bottom: 18px;
-      border: 1px solid rgba(226, 232, 240, .5);
-    }
-
-    .panel h3 {
-      font-size: 11.5px;
-      color: var(--ink2);
-      text-transform: uppercase;
-      letter-spacing: .07em;
-      font-weight: 700;
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 7px;
-    }
-
-    .section-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 16px;
-    }
-
-    .section-header h3 {
-      margin-bottom: 0;
-    }
-
-    .grid2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 18px;
-    }
-
-    .grid3 {
-      display: grid;
-      grid-template-columns: 2fr 1fr;
-      gap: 18px;
-    }
-
-    @media(max-width:1100px) {
-
-      .grid2,
-      .grid3 {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    /* ── tables ── */
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-
-    th {
-      text-align: left;
-      font-size: 10px;
-      color: var(--mut);
-      text-transform: uppercase;
-      letter-spacing: .06em;
-      font-weight: 700;
-      padding: 10px 12px;
-      border-bottom: 2px solid var(--line);
-      white-space: nowrap;
-      background: #f8fafc;
-    }
-
-    td {
-      padding: 10px 12px;
-      border-bottom: 1px solid #f0f4fa;
-      vertical-align: middle;
-    }
-
-    tbody tr {
-      transition: background .1s;
-    }
-
-    tbody tr:hover {
-      background: #f5f8ff;
-    }
-
-    tbody tr:last-child td {
-      border-bottom: none;
-    }
-
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 3px 9px;
-      border-radius: 99px;
-      font-size: 10.5px;
-      font-weight: 700;
-      white-space: nowrap;
-      letter-spacing: .02em;
-    }
-
-    .c-gray {
-      background: #f1f5f9;
-      color: #64748b;
-    }
-
-    .c-gray-dark {
-      background: #e2e8f0;
-      color: #374151;
-    }
-
-    .c-blue {
-      background: var(--b100);
-      color: #1e40af;
-    }
-
-    .c-green {
-      background: #dcfce7;
-      color: #15803d;
-    }
-
-    .c-amber {
-      background: #fef3c7;
-      color: #b45309;
-    }
-
-    .c-purple {
-      background: #ede9fe;
-      color: #6d28d9;
-    }
-
-    .c-red {
-      background: #fee2e2;
-      color: #b91c1c;
-    }
-
-    .ibtn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 30px;
-      height: 30px;
-      border-radius: 7px;
-      border: 1.5px solid var(--line);
-      background: #fff;
-      color: var(--mut);
-      cursor: pointer;
-      margin: 0 2px;
-      transition: all .12s;
-    }
-
-    .ibtn:hover {
-      border-color: var(--b400);
-      color: var(--b500);
-      background: var(--b50);
-    }
-
-    .badge {
-      position: absolute;
-      top: -5px;
-      right: -5px;
-      background: #ef4444;
-      color: #fff;
-      font-size: 9px;
-      font-weight: 800;
-      border-radius: 99px;
-      padding: 2px 5px;
-      line-height: 1.2;
-      border: 2px solid #fff;
-      min-width: 18px;
-      text-align: center;
-    }
-
-    .steps {
-      display: flex;
-      gap: 3px;
-      margin-top: 5px;
-    }
-
-    .step {
-      width: 13px;
-      height: 5px;
-      border-radius: 3px;
-      background: #e2e8f0;
-    }
-
-    .step.done {
-      background: var(--b600);
-    }
-
-    /* document pipeline circles */
-    .doc-card {
-      background: #fff;
-      border: 1px solid var(--bd);
-      border-radius: 12px;
-      padding: 14px 16px;
-      margin-bottom: 10px;
-      transition: box-shadow .15s;
-    }
-
-    .doc-card:hover {
-      box-shadow: 0 4px 18px rgba(15, 23, 42, .08);
-    }
-
-    .doc-card-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .doc-pipeline {
-      display: flex;
-      align-items: center;
-      gap: 0;
-    }
-
-    .dp-dot {
-      width: 11px;
-      height: 11px;
-      border-radius: 50%;
-      border: 2px solid #cbd5e1;
-      background: #fff;
-      flex: none;
-      transition: background .2s, border-color .2s;
-    }
-
-    .dp-dot.done {
-      background: #16a34a;
-      border-color: #16a34a;
-    }
-
-    .dp-dot.active {
-      border-color: #1a56db;
-      background: #eff6ff;
-    }
-
-    .dp-line {
-      width: 16px;
-      height: 2px;
-      background: #e2e8f0;
-      flex: none;
-      transition: background .2s;
-    }
-
-    .dp-line.done {
-      background: #16a34a;
-    }
-
-    .doc-cols {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 10px;
-    }
-
-    .doc-col-lbl {
-      font-size: 10px;
-      font-weight: 800;
-      color: var(--mut);
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      margin-bottom: 5px;
-    }
-
-    @media(max-width:680px) {
-      .doc-cols {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .bar-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 7px;
-    }
-
-    .bar-row .bl {
-      width: 128px;
-      font-size: 12px;
-      color: #334155;
-      text-align: right;
-      flex: none;
-    }
-
-    .bar-row .bar {
-      flex: 1;
-      background: #edf2fa;
-      border-radius: 6px;
-      height: 22px;
-      overflow: hidden;
-    }
-
-    .bar-row .fill {
-      height: 100%;
-      background: linear-gradient(90deg, var(--b600), #4f86f7);
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      padding-right: 8px;
-      color: #fff;
-      font-size: 11px;
-      font-weight: 700;
-      min-width: 22px;
-      transition: width .5s;
-    }
-
-    .intg {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 10px;
-    }
-
-    .intg .it {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      background: var(--b50);
-      border-radius: 10px;
-      padding: 11px 14px;
-      font-size: 12.5px;
-      font-weight: 600;
-      color: #1e3a8a;
-    }
-
-    .dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      margin-left: auto;
-      flex: none;
-    }
-
-    .dot.on {
-      background: var(--ok);
-      box-shadow: 0 0 7px rgba(22, 163, 74, .7);
-    }
-
-    .dot.off {
-      background: var(--bad);
-    }
-
-    /* kanban */
-    .kanban {
-      display: flex;
-      gap: 12px;
-      overflow-x: auto;
-      align-items: stretch;
-      height: calc(100vh - 108px);
-      padding-bottom: 4px;
-    }
-
-    .kcol {
-      flex: 1 0 218px;
-      min-width: 218px;
-      background: #f0f4fa;
-      border-radius: 12px;
-      padding: 9px;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .khead {
-      border-radius: 9px;
-      padding: 11px 13px;
-      font-size: 12.5px;
-      font-weight: 700;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 9px;
-      flex: none;
-      border-top: 3px solid rgba(0, 0, 0, .18);
-    }
-
-    .khead .cnt {
-      background: rgba(255, 255, 255, .75);
-      border-radius: 99px;
-      padding: 1px 9px;
-      font-size: 11px;
-      font-weight: 800;
-    }
-
-    .kbody {
-      flex: 1;
-      overflow-y: auto;
-      min-height: 0;
-    }
-
-    .kcard {
-      background: #fff;
-      border-radius: 9px;
-      padding: 11px 13px;
-      margin-bottom: 8px;
-      box-shadow: 0 1px 3px rgba(12, 35, 68, .1);
-      cursor: pointer;
-      transition: transform .1s;
-      position: relative;
-    }
-
-    .kcard:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 5px 14px rgba(12, 35, 68, .16);
-    }
-
-    .kcard b {
-      font-size: 12.5px;
-      display: block;
-      color: var(--ink);
-      margin-bottom: 1px;
-    }
-
-    .kcard span {
-      font-size: 11px;
-      color: var(--mut);
-      display: block;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .kact {
-      display: none;
-      gap: 4px;
-      margin-top: 8px;
-      border-top: 1px solid #f1f5f9;
-      padding-top: 7px;
-    }
-
-    .kcard:hover .kact {
-      display: flex;
-    }
-
-    .kact button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 27px;
-      height: 27px;
-      border-radius: 7px;
-      border: 1.5px solid var(--line);
-      background: #fff;
-      cursor: pointer;
-      color: var(--b700);
-    }
-
-    .kact button:hover {
-      border-color: currentColor;
-    }
-
-    .kmeta {
-      display: flex;
-      gap: 6px;
-      margin-top: 6px;
-      flex-wrap: wrap;
-    }
-
-    /* calendar */
-    .calhead {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      margin-bottom: 14px;
-    }
-
-    .calhead h4 {
-      font-size: 16px;
-      color: var(--b700);
-      min-width: 170px;
-      text-align: center;
-    }
-
-    .cal {
-      display: grid;
-      grid-template-columns: repeat(7, 1fr);
-      gap: 7px;
-    }
-
-    .cal .dow {
-      text-align: center;
-      font-size: 10.5px;
-      font-weight: 700;
-      color: var(--mut);
-      text-transform: uppercase;
-      padding: 5px 0;
-    }
-
-    .day {
-      background: #fff;
-      border: 1.5px solid var(--line);
-      border-radius: 10px;
-      min-height: 86px;
-      padding: 7px 8px;
-      font-size: 11px;
-      position: relative;
-    }
-
-    .day .dn {
-      font-weight: 700;
-      color: #334155;
-      font-size: 12px;
-    }
-
-    .day.out {
-      opacity: .35;
-    }
-
-    .day.today {
-      border-color: var(--b600);
-      box-shadow: 0 0 0 2px rgba(26, 86, 219, .15);
-    }
-
-    .day.wkd {
-      background: #f8fafc;
-    }
-
-    .day.hol {
-      background: #fff7ed;
-      border-color: #fdba74;
-    }
-
-    .day.blk {
-      background: #fef2f2;
-      border-color: #fca5a5;
-    }
-
-    .day .tag {
-      display: block;
-      font-size: 9.5px;
-      color: #b45309;
-      font-weight: 700;
-      margin-top: 1px;
-    }
-
-    .day .bk {
-      display: block;
-      background: var(--b600);
-      color: #fff;
-      border-radius: 5px;
-      padding: 2px 5px;
-      margin-top: 3px;
-      font-size: 10px;
-      cursor: pointer;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .day .sl {
-      display: inline-block;
-      background: #dcfce7;
-      color: #15803d;
-      border-radius: 5px;
-      padding: 1px 5px;
-      margin-top: 3px;
-      font-size: 9.5px;
-      font-weight: 700;
-    }
-
-    .day .blkbtn {
-      position: absolute;
-      top: 5px;
-      right: 6px;
-      border: none;
-      background: none;
-      color: #cbd5e1;
-      cursor: pointer;
-      padding: 1px;
-    }
-
-    .day .blkbtn:hover {
-      color: var(--bad);
-    }
-
-    /* ── drawer ── */
-    #drawer-wrap {
-      position: fixed;
-      inset: 0;
-      background: rgba(7, 16, 32, .5);
-      z-index: 50;
-      display: none;
-      backdrop-filter: blur(2px);
-    }
-
-    #drawer {
-      position: absolute;
-      right: 0;
-      top: 0;
-      bottom: 0;
-      width: 580px;
-      max-width: 96vw;
-      background: #fff;
-      box-shadow: -16px 0 48px rgba(0, 0, 0, .22);
-      overflow-y: auto;
-      animation: slidein .2s cubic-bezier(.3, 0, .2, 1);
-    }
-
-    .drawer-head {
-      position: sticky;
-      top: 0;
-      background: var(--b900);
-      color: #fff;
-      padding: 18px 24px;
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      z-index: 2;
-    }
-
-    .drawer-head h2 {
-      font-size: 16px;
-      font-weight: 700;
-      color: #fff;
-      flex: 1;
-    }
-
-    .drawer-head .chip {
-      border: 1px solid rgba(255, 255, 255, .2);
-    }
-
-    .drawer-body {
-      padding: 20px 24px 32px;
-    }
-
-    @keyframes slidein {
-      from {
-        transform: translateX(48px);
-        opacity: 0;
-      }
-
-      to {
-        transform: none;
-        opacity: 1;
-      }
-    }
-
-    #drawer h2 {
-      font-size: 17px;
-      color: var(--b700);
-    }
-
-    .dsec {
-      font-size: 11px;
-      font-weight: 800;
-      color: var(--b700);
-      text-transform: uppercase;
-      letter-spacing: .07em;
-      border-bottom: 2px solid var(--b100);
-      padding-bottom: 6px;
-      margin: 22px 0 10px;
-      display: flex;
-      align-items: center;
-      gap: 7px;
-    }
-
-    .kv {
-      display: grid;
-      grid-template-columns: 170px 1fr;
-      gap: 0;
-      font-size: 12.5px;
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      overflow: hidden;
-    }
-
-    .kv div {
-      padding: 7px 11px;
-      border-bottom: 1px solid #f1f5f9;
-    }
-
-    .kv div:nth-child(4n+1),
-    .kv div:nth-child(4n+2) {
-      background: #f8fafc;
-    }
-
-    .kv .k {
-      color: var(--mut);
-      font-weight: 600;
-    }
-
-    .tl {
-      position: relative;
-      padding-left: 22px;
-    }
-
-    .tl::before {
-      content: '';
-      position: absolute;
-      left: 6px;
-      top: 6px;
-      bottom: 6px;
-      width: 2px;
-      background: var(--b100);
-    }
-
-    .tl .ev {
-      position: relative;
-      padding: 5px 0 11px;
-    }
-
-    .tl .ev::before {
-      content: '';
-      position: absolute;
-      left: -20px;
-      top: 9px;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--b600);
-      border: 2px solid #fff;
-      box-shadow: 0 0 0 2px var(--b100);
-    }
-
-    .tl .ev b {
-      font-size: 12.5px;
-      display: block;
-    }
-
-    .tl .ev span {
-      font-size: 11px;
-      color: var(--mut);
-    }
-
-    /* modal */
-    .modal-wrap {
-      position: fixed;
-      inset: 0;
-      background: rgba(12, 35, 68, .5);
-      z-index: 60;
-      display: none;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .modal {
-      background: #fff;
-      border-radius: 16px;
-      padding: 28px 30px;
-      width: 460px;
-      max-width: 94vw;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, .35);
-    }
-
-    .modal h3 {
-      font-size: 16px;
-      color: var(--b700);
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 9px;
-    }
-
-    .msg {
-      display: none;
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-size: 12.5px;
-      margin: 12px 0;
-      font-weight: 600;
-    }
-
-    .msg.ok {
-      background: #dcfce7;
-      color: #15803d;
-      display: block;
-    }
-
-    .msg.err {
-      background: #fee2e2;
-      color: #b91c1c;
-      display: block;
-    }
-
-    .seg {
-      display: inline-flex;
-      background: #edf2fa;
-      border-radius: 9px;
-      padding: 3px;
-    }
-
-    .seg button {
-      border: none;
-      background: none;
-      padding: 7px 16px;
-      border-radius: 7px;
-      font-size: 12.5px;
-      font-weight: 700;
-      color: var(--mut);
-      cursor: pointer;
-    }
-
-    .seg button.on {
-      background: #fff;
-      color: var(--b700);
-      box-shadow: 0 1px 4px rgba(12, 35, 68, .15);
-    }
-
-    .toast {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      background: var(--ink);
-      color: #fff;
-      padding: 13px 20px;
-      border-radius: 10px;
-      font-size: 13px;
-      font-weight: 500;
-      box-shadow: 0 12px 36px rgba(0, 0, 0, .32);
-      z-index: 90;
-      display: none;
-      max-width: 380px;
-      border-left: 4px solid var(--b400);
-      animation: toast-in .18s ease;
-    }
-
-    @keyframes toast-in {
-      from {
-        transform: translateY(16px);
-        opacity: 0;
-      }
-
-      to {
-        transform: none;
-        opacity: 1;
-      }
-    }
-
-    /* kebab action menu */
-    .menu-wrap {
-      position: relative;
-      display: inline-block;
-    }
-
-    .kebab {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 30px;
-      height: 30px;
-      border-radius: 8px;
-      border: 1.5px solid var(--line);
-      background: #fff;
-      color: #475569;
-      cursor: pointer;
-      font-weight: 800;
-      font-size: 15px;
-      letter-spacing: 1px;
-      line-height: 1;
-    }
-
-    .kebab:hover {
-      border-color: var(--b600);
-      color: var(--b600);
-      background: var(--b50);
-    }
-
-    .menu {
-      position: fixed;
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 11px;
-      box-shadow: 0 12px 36px rgba(12, 35, 68, .22);
-      min-width: 200px;
-      z-index: 80;
-      padding: 6px;
-      display: none;
-    }
-
-    .menu a {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      padding: 9px 12px;
-      border-radius: 8px;
-      font-size: 12.5px;
-      color: #1e293b;
-      cursor: pointer;
-      text-decoration: none;
-    }
-
-    .menu a:hover {
-      background: var(--b50);
-    }
-
-    .menu a.ok {
-      color: var(--ok);
-    }
-
-    .menu a.warn {
-      color: var(--warn);
-    }
-
-    .menu a.danger {
-      color: var(--bad);
-    }
-
-    .menu .div {
-      height: 1px;
-      background: #eef2f7;
-      margin: 5px 4px;
-    }
-
-    /* google-sheet style grid */
-    .gs-wrap {
-      overflow: auto;
-      border: 1px solid #dadce0;
-      border-radius: 10px;
-      background: #fff;
-      max-height: calc(100vh - 220px);
-    }
-
-    .gs {
-      border-collapse: collapse;
-      font-size: 12.5px;
-      min-width: 100%;
-    }
-
-    .gs th {
-      position: sticky;
-      top: 0;
-      background: #f8f9fa;
-      border: 1px solid #dadce0;
-      padding: 7px 10px;
-      font-size: 11px;
-      color: #3c4043;
-      font-weight: 700;
-      text-transform: none;
-      letter-spacing: 0;
-      white-space: nowrap;
-      z-index: 2;
-    }
-
-    .gs td {
-      border: 1px solid #e0e3e7;
-      padding: 0;
-      min-width: 120px;
-    }
-
-    .gs td.rn {
-      background: #f8f9fa;
-      color: #5f6368;
-      text-align: center;
-      font-size: 11px;
-      min-width: 36px;
-      width: 36px;
-      position: sticky;
-      left: 0;
-      z-index: 1;
-      border-right: 2px solid #dadce0;
-    }
-
-    .gs td input {
-      width: 100%;
-      border: none;
-      outline: none;
-      padding: 7px 10px;
-      font-size: 12.5px;
-      background: transparent;
-      font-family: inherit;
-    }
-
-    .gs td input:focus {
-      box-shadow: inset 0 0 0 2px var(--b600);
-      border-radius: 2px;
-    }
-
-    .gs tr.dirty td {
-      background: #fffbeb;
-    }
-
-    .gs td.act {
-      min-width: 84px;
-      width: 84px;
-      text-align: center;
-      background: #fafbfc;
-    }
-
-    /* ── extra utilities ── */
-    .view-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 18px;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .view-title {
-      font-size: 17px;
-      font-weight: 800;
-      color: var(--ink);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .view-subtitle {
-      font-size: 12px;
-      color: var(--mut);
-      margin-top: 2px;
-    }
-
-    .filter-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 14px;
-    }
-
-    .filter-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 5px 12px;
-      border-radius: 99px;
-      font-size: 11.5px;
-      font-weight: 600;
-      cursor: pointer;
-      background: var(--bg);
-      color: var(--mut);
-      border: 1.5px solid var(--line);
-      transition: all .12s;
-    }
-
-    .filter-chip:hover,
-    .filter-chip.on {
-      background: var(--b50);
-      color: var(--b600);
-      border-color: var(--b400);
-    }
-
-    .divider {
-      border: none;
-      border-top: 1px solid var(--line);
-      margin: 14px 0;
-    }
-
-    .empty-state {
-      text-align: center;
-      padding: 60px 20px;
-      color: var(--mut);
-    }
-
-    .empty-state svg {
-      width: 44px;
-      height: 44px;
-      opacity: .3;
-      margin-bottom: 12px;
-    }
-
-    .empty-state p {
-      font-size: 13px;
-    }
-
-    .stat-delta {
-      display: inline-flex;
-      align-items: center;
-      gap: 2px;
-      font-size: 10.5px;
-      font-weight: 700;
-      padding: 2px 6px;
-      border-radius: 5px;
-    }
-
-    .stat-delta.up {
-      background: #dcfce7;
-      color: #15803d;
-    }
-
-    .stat-delta.down {
-      background: #fee2e2;
-      color: #b91c1c;
-    }
-
-    .stat-delta.flat {
-      background: #f1f5f9;
-      color: #64748b;
-    }
-
-    @media(max-width:900px) {
-      :root {
-        --sidebar-w: 62px;
-      }
-
-      .sidebar .logo span,
-      .sidebar .logo .logo-sub,
-      .nav a span,
-      .nav-section-label,
-      .who div,
-      .nav .badge {
-        display: none;
-      }
-
-      .main {
-        padding: 76px 12px 30px;
-      }
-
-      .gsearch {
-        width: 150px;
-      }
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Jane Aerospace — Command Centre</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --navy:#050F1F;--navy2:#0A1F3D;
+  --blue:#1a56db;--blue2:#2563EB;--blue-lt:#3b82f6;--blue-pale:#EFF6FF;
+  --teal:#0891b2;--teal-pale:#ECFEFF;
+  --green:#059669;--green2:#10B981;--green-pale:#ECFDF5;
+  --amber:#d97706;--amber-pale:#FFFBEB;
+  --red:#dc2626;--red-pale:#FEF2F2;
+  --violet:#7c3aed;--violet-pale:#F5F3FF;
+  --bg:#EEF2F7;--surface:#FFFFFF;--surface2:#F8FAFC;
+  --border:#E2E8F0;--border2:#CBD5E1;
+  --text:#0F172A;--text2:#334155;--text3:#64748B;--text4:#94A3B8;
+  --sidebar-w:66px;--header-h:62px;
+  --sh-xs:0 1px 2px rgba(0,0,0,.05);
+  --sh-sm:0 2px 6px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.05);
+  --sh-md:0 6px 18px rgba(0,0,0,.09),0 2px 4px rgba(0,0,0,.06);
+  --sh-lg:0 12px 32px rgba(0,0,0,.12),0 4px 8px rgba(0,0,0,.08);
+  --r4:4px;--r8:8px;--r12:12px;--r16:16px;
+  --font:'Inter',system-ui,sans-serif;
+  --transition:.18s cubic-bezier(.4,0,.2,1);
+}
+[data-theme="dark"]{
+  --bg:#080F1D;--surface:#101827;--surface2:#162032;
+  --border:#1E2D45;--border2:#263550;
+  --text:#E8F1FF;--text2:#A8BDD8;--text3:#6B85A8;--text4:#3D5270;
+  --blue-pale:rgba(26,86,219,.15);--green-pale:rgba(5,150,105,.12);
+  --red-pale:rgba(220,38,38,.12);--amber-pale:rgba(217,119,6,.12);--violet-pale:rgba(124,58,237,.12);
+}
+html,body{height:100%;background:var(--bg);font-family:var(--font);color:var(--text);-webkit-font-smoothing:antialiased;transition:background var(--transition),color var(--transition)}
+#root{height:100%;display:flex}
+.shell{display:flex;width:100%;height:100%;overflow:hidden}
+
+/* Sidebar */
+.sidebar{width:var(--sidebar-w);flex-shrink:0;background:var(--navy);display:flex;flex-direction:column;position:relative;z-index:200;border-right:1px solid rgba(255,255,255,.04);transition:width .28s cubic-bezier(.4,0,.2,1);overflow:hidden}
+.sidebar:hover{width:220px}
+.sb-logo{height:var(--header-h);display:flex;align-items:center;gap:12px;padding:0 15px;border-bottom:1px solid rgba(255,255,255,.06);flex-shrink:0;overflow:hidden}
+.sb-logomark{width:36px;height:36px;flex-shrink:0;border-radius:10px;background:linear-gradient(135deg,#1a56db,#0891b2);display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 2px 8px rgba(26,86,219,.4)}
+.sb-brand{overflow:hidden;white-space:nowrap}
+.sb-brand-name{color:#fff;font-size:13px;font-weight:800;letter-spacing:-.2px}
+.sb-brand-tag{color:rgba(255,255,255,.32);font-size:9px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;margin-top:1px}
+.sb-nav{flex:1;padding:10px 8px;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.sb-item{display:flex;align-items:center;gap:11px;padding:10px 8px;border-radius:8px;cursor:pointer;color:rgba(255,255,255,.4);font-size:13px;font-weight:500;transition:var(--transition);white-space:nowrap;overflow:hidden}
+.sb-item:hover{background:rgba(255,255,255,.07);color:rgba(255,255,255,.85)}
+.sb-item.on{background:rgba(26,86,219,.22);color:#60a5fa;border-left:2px solid #60a5fa;padding-left:6px}
+.sb-icon{font-size:17px;flex-shrink:0;width:20px;text-align:center}
+.sb-item-badge{margin-left:auto;background:#dc2626;color:#fff;font-size:9px;font-weight:800;min-width:17px;height:17px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;padding:0 4px;flex-shrink:0}
+.sb-footer{padding:8px;border-top:1px solid rgba(255,255,255,.05);margin-top:auto;overflow:hidden}
+
+/* Body */
+.body{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+
+/* Header */
+.header{height:var(--header-h);background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:12px;flex-shrink:0;box-shadow:var(--sh-xs);transition:background var(--transition)}
+.hdr-title{flex:1}
+.hdr-title h1{font-size:16px;font-weight:800;color:var(--text);letter-spacing:-.3px;line-height:1}
+.hdr-title p{font-size:11px;color:var(--text4);font-weight:500;margin-top:1px}
+.hdr-sep{width:1px;height:22px;background:var(--border);flex-shrink:0}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--green2);animation:pulse 2s infinite;flex-shrink:0}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
+.live-text{font-size:11px;font-weight:600;color:var(--green);white-space:nowrap}
+.hdr-time{font-size:11px;color:var(--text3);font-weight:500;white-space:nowrap;font-variant-numeric:tabular-nums}
+.hdr-countdown{font-size:10px;color:var(--text4);font-weight:500;white-space:nowrap}
+.hdr-btn{display:flex;align-items:center;gap:5px;padding:6px 11px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text2);font-family:var(--font);transition:var(--transition);flex-shrink:0}
+.hdr-btn:hover{background:var(--border);color:var(--text)}
+.hdr-btn.spin svg{animation:spin .65s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.alert-bell{position:relative}
+.alert-bell-badge{position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;font-size:8px;font-weight:800;min-width:15px;height:15px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0 3px;border:1.5px solid var(--surface)}
+.dm-btn{width:32px;height:32px;border-radius:7px;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;transition:var(--transition);flex-shrink:0}
+.dm-btn:hover{background:var(--border)}
+
+/* Quick Bar */
+.quick-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:9px 20px;display:flex;align-items:center;gap:10px;flex-shrink:0;transition:background var(--transition)}
+.qb-search{display:flex;align-items:center;gap:7px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 11px;flex:1;max-width:340px;transition:var(--transition)}
+.qb-search:focus-within{border-color:var(--blue-lt);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+.qb-search input{border:none;background:none;outline:none;font-size:12px;color:var(--text);width:100%;font-family:var(--font)}
+.qb-search input::placeholder{color:var(--text4)}
+.qb-btn{display:flex;align-items:center;gap:5px;padding:7px 13px;border:1px solid var(--border);border-radius:7px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text2);background:var(--surface);font-family:var(--font);transition:var(--transition);flex-shrink:0}
+.qb-btn:hover{background:var(--surface2);color:var(--text)}
+.qb-btn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+.qb-btn.primary:hover{background:var(--blue2)}
+.qb-spacer{flex:1}
+
+/* Content */
+.content{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
+
+/* KPI Grid */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+.kpi-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:var(--sh-sm);position:relative;overflow:hidden;cursor:default;transition:box-shadow .2s,transform .2s,background var(--transition)}
+.kpi-card:hover{box-shadow:var(--sh-md);transform:translateY(-2px)}
+.kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--kc,var(--blue));border-radius:14px 14px 0 0}
+.kpi-card-inner{display:flex;align-items:flex-start;gap:10px}
+.kpi-icon-wrap{width:40px;height:40px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:19px;background:var(--ki-bg,var(--blue-pale))}
+.kpi-body{flex:1;min-width:0}
+.kpi-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.55px;color:var(--text4);margin-bottom:4px}
+.kpi-val{font-size:28px;font-weight:900;color:var(--text);line-height:1;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.kpi-foot{display:flex;align-items:center;gap:5px;margin-top:6px;font-size:11px;color:var(--text3)}
+.trend-up{background:var(--green-pale);color:var(--green);padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700}
+.trend-dn{background:var(--red-pale);color:var(--red);padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700}
+.trend-eq{background:var(--surface2);color:var(--text4);padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600}
+.kpi-ring-wrap{margin-top:10px;display:flex;justify-content:center}
+.kpi-prog{margin-top:8px;height:3px;background:var(--border);border-radius:2px;overflow:hidden}
+.kpi-prog-fill{height:100%;border-radius:2px;transition:width .8s cubic-bezier(.4,0,.2,1)}
+.kpi-card::after{content:attr(data-icon);position:absolute;bottom:-6px;right:-2px;font-size:52px;opacity:.05;pointer-events:none;line-height:1}
+
+/* Alert */
+.alert{border-radius:12px;padding:13px 15px;display:flex;align-items:flex-start;gap:11px;background:linear-gradient(135deg,var(--amber-pale),#FEF3C7);border:1px solid #FDE68A}
+.alert.crit{background:linear-gradient(135deg,var(--red-pale),#FFE4E6);border-color:#FECDD3}
+.alert-left{display:flex;flex-direction:column;align-items:center;gap:4px;flex-shrink:0}
+.alert-icon{font-size:22px;line-height:1}
+.alert-dismiss{background:none;border:none;cursor:pointer;color:var(--text4);font-size:16px;padding:0;line-height:1;transition:var(--transition)}
+.alert-dismiss:hover{color:var(--text)}
+.alert-body{flex:1}
+.alert-title{font-size:13px;font-weight:700;color:#92400E;margin-bottom:6px}
+.alert.crit .alert-title{color:#9F1239}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;border:1px solid transparent;cursor:default}
+.cw{background:#FEF3C7;color:#92400E;border-color:#FDE68A}
+.ci{background:#DBEAFE;color:#1D4ED8;border-color:#BFDBFE}
+.cg{background:#D1FAE5;color:#065F46;border-color:#A7F3D0}
+.cp{background:#EDE9FE;color:#5B21B6;border-color:#DDD6FE}
+.stuck-expand-btn{background:none;border:none;cursor:pointer;font-size:11px;font-weight:600;color:#92400E;margin-top:6px;padding:0;text-decoration:underline;text-underline-offset:2px;font-family:var(--font)}
+.alert.crit .stuck-expand-btn{color:#9F1239}
+.stuck-list{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.stuck-item{display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.5);border-radius:6px;padding:6px 10px;font-size:11px;border:1px solid rgba(0,0,0,.06)}
+.stuck-co{font-weight:700;color:var(--text)}
+.stuck-age{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px}
+
+/* Grid */
+.three-col{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:14px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:1000px){.three-col{grid-template-columns:1fr 1fr}.two-col{grid-template-columns:1fr}}
+@media(max-width:680px){.three-col,.two-col{grid-template-columns:1fr}}
+
+/* Panel */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--sh-sm);overflow:hidden;transition:background var(--transition)}
+.ph{padding:13px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.ph-title{font-size:13px;font-weight:700;color:var(--text);flex:1;display:flex;align-items:center;gap:7px}
+.ph-badge{background:var(--blue-pale);color:var(--blue);font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px}
+.ph-badge.green{background:var(--green-pale);color:var(--green)}
+.ph-badge.amber{background:var(--amber-pale);color:var(--amber)}
+.ph-badge.red{background:var(--red-pale);color:var(--red)}
+.pb{padding:15px 16px}
+
+/* Funnel */
+.f-row{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.f-lbl{font-size:10px;font-weight:700;color:var(--text4);text-transform:uppercase;letter-spacing:.4px;width:60px;flex-shrink:0}
+.f-track{flex:1;background:var(--surface2);border-radius:5px;height:26px;overflow:hidden}
+.f-fill{height:100%;border-radius:5px;display:flex;align-items:center;justify-content:flex-end;padding-right:9px;transition:width .9s cubic-bezier(.4,0,.2,1)}
+.f-fill span{font-size:11px;font-weight:800;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.3)}
+.f-n{font-size:12px;font-weight:800;color:var(--text);width:44px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
+.f-drop{font-size:10px;width:36px;text-align:right;flex-shrink:0;font-weight:700}
+
+/* Activity */
+.activity-feed{display:flex;flex-direction:column;gap:0}
+.activity-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.activity-item:last-child{border-bottom:none}
+.activity-dot{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;margin-top:1px}
+.activity-dot.complete{background:var(--green-pale);border:1px solid #A7F3D0}
+.activity-body{flex:1}
+.activity-co{font-size:12px;font-weight:700;color:var(--text)}
+.activity-sub{font-size:11px;color:var(--text3);margin-top:1px}
+.activity-time{font-size:10px;color:var(--text4);flex-shrink:0;margin-top:3px}
+
+/* Table */
+.tbl-wrap{overflow-x:auto;max-height:560px;overflow-y:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{padding:9px 12px;text-align:left;background:var(--surface2);font-size:9px;font-weight:700;color:var(--text4);text-transform:uppercase;letter-spacing:.55px;border-bottom:1px solid var(--border);white-space:nowrap;position:sticky;top:0;z-index:2;cursor:pointer;user-select:none;transition:var(--transition)}
+th:hover{color:var(--text2)}
+th.sorted .sort-icon{opacity:1;color:var(--blue)}
+th .sort-icon{margin-left:3px;opacity:.5}
+td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:middle;transition:background var(--transition)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--surface2)}
+.co{font-weight:700;color:var(--text)}
+.co-sub{font-size:10px;color:var(--text4);margin-top:1px}
+.co-em{font-size:10px;color:var(--blue);margin-top:1px}
+
+/* Badges */
+.badge{display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:20px;font-size:10px;font-weight:700;border:1px solid transparent;white-space:nowrap}
+.bd{width:4px;height:4px;border-radius:50%;flex-shrink:0}
+.bpend{background:#FEF9C3;color:#A16207;border-color:#FDE68A}.bpend .bd{background:#A16207}
+.brev{background:#DBEAFE;color:#1D4ED8;border-color:#BFDBFE}.brev .bd{background:#1D4ED8}
+.bappr{background:#D1FAE5;color:#065F46;border-color:#A7F3D0}.bappr .bd{background:#059669}
+.brej{background:#FEE2E2;color:#991B1B;border-color:#FECACA}.brej .bd{background:#dc2626}
+.bsent{background:#E0F2FE;color:#0369A1;border-color:#BAE6FD}.bsent .bd{background:#0284C7}
+.bsign{background:#F0FDF4;color:#166534;border-color:#86EFAC}.bsign .bd{background:#16A34A}
+.bdraft{background:var(--surface2);color:var(--text3);border-color:var(--border)}.bdraft .bd{background:var(--text4)}
+.bcomp{background:#D1FAE5;color:#065F46;border-color:#6EE7B7;font-weight:800}.bcomp .bd{background:var(--green)}
+.bna{background:var(--surface2);color:var(--text4);font-style:italic}.bna .bd{background:var(--border2)}
+
+/* Score */
+.srow{display:flex;align-items:center;gap:5px}
+.sbg{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;min-width:50px}
+.sfill{height:100%;border-radius:3px;transition:width .6s ease}
+.sn{font-size:10px;font-weight:800;color:var(--text3);width:24px;text-align:right;flex-shrink:0}
+
+/* Actions */
+.act{display:inline-flex;align-items:center;gap:3px;padding:4px 9px;border:1px solid transparent;border-radius:6px;cursor:pointer;font-size:10px;font-weight:700;font-family:var(--font);transition:var(--transition);white-space:nowrap}
+.act:disabled{opacity:.5;cursor:not-allowed}
+.a-ok{background:#D1FAE5;color:#065F46;border-color:#A7F3D0}.a-ok:not(:disabled):hover{background:#A7F3D0}
+.a-no{background:#FEE2E2;color:#991B1B;border-color:#FECACA}.a-no:not(:disabled):hover{background:#FECACA}
+
+/* Toolbar */
+.toolbar{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--surface);transition:background var(--transition)}
+.seg{display:flex;background:var(--surface2);border-radius:7px;padding:3px;border:1px solid var(--border)}
+.seg-btn{padding:5px 12px;border-radius:5px;border:none;cursor:pointer;font-size:11px;font-weight:500;color:var(--text3);background:none;font-family:var(--font);transition:var(--transition);white-space:nowrap}
+.seg-btn.on{background:var(--surface);color:var(--text);font-weight:700;box-shadow:var(--sh-xs)}
+.seg-btn.hot{color:var(--red)}
+.tbl-search{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:6px 10px;flex:1;max-width:260px}
+.tbl-search input{border:none;background:none;outline:none;font-size:12px;color:var(--text);width:100%;font-family:var(--font)}
+.tbl-search input::placeholder{color:var(--text4)}
+.tbl-count{font-size:11px;color:var(--text4);margin-left:auto;white-space:nowrap}
+
+/* Pagination */
+.pagination{display:flex;align-items:center;gap:6px;padding:10px 14px;border-top:1px solid var(--border)}
+.pg-btn{padding:4px 10px;border:1px solid var(--border);border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text3);background:var(--surface);font-family:var(--font);transition:var(--transition)}
+.pg-btn:hover:not(:disabled){background:var(--surface2)}
+.pg-btn:disabled{opacity:.4;cursor:not-allowed}
+.pg-btn.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.pg-info{font-size:11px;color:var(--text4);margin-left:auto}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+.modal{background:var(--surface);border-radius:16px;padding:24px;max-width:380px;width:90%;box-shadow:var(--sh-lg);border:1px solid var(--border)}
+.modal h3{font-size:16px;font-weight:800;color:var(--text);margin-bottom:6px}
+.modal p{font-size:13px;color:var(--text2);margin-bottom:16px;line-height:1.5}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end}
+.modal-btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:700;font-family:var(--font);transition:var(--transition)}
+.modal-btn.cancel{background:var(--surface2);color:var(--text3);border:1px solid var(--border)}
+.modal-btn.cancel:hover{background:var(--border)}
+.modal-btn.confirm-ok{background:var(--green);color:#fff}
+.modal-btn.confirm-ok:hover{background:#047857}
+.modal-btn.confirm-no{background:var(--red);color:#fff}
+.modal-btn.confirm-no:hover{background:#b91c1c}
+
+/* Conversion bars */
+.cv-row{margin-bottom:12px}
+.cv-hdr{display:flex;justify-content:space-between;margin-bottom:4px}
+.cv-lbl{font-size:12px;color:var(--text2);font-weight:500}
+.cv-pct{font-size:12px;font-weight:800}
+.cv-bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden}
+.cv-fill{height:100%;border-radius:4px;transition:width .8s ease}
+
+/* OB breakdown */
+.ob-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px}
+.ob-cell{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 8px;text-align:center}
+.ob-cell-v{font-size:22px;font-weight:900;line-height:1;font-variant-numeric:tabular-nums}
+.ob-cell-l{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text4);margin-top:3px}
+
+/* Skeleton / empty */
+.sk{background:linear-gradient(90deg,var(--surface2) 25%,var(--border) 50%,var(--surface2) 75%);background-size:400%;animation:shim 1.4s ease infinite;border-radius:10px}
+@keyframes shim{0%{background-position:100%}100%{background-position:0}}
+.sk-kpi{height:115px}
+.sk-row{height:44px;margin-bottom:8px;border-radius:6px}
+.sk-panel{height:200px}
+.empty{text-align:center;padding:40px 20px;color:var(--text4)}
+.empty-icon{font-size:36px;margin-bottom:10px}
+
+/* Toast */
+.toast{position:fixed;bottom:20px;right:20px;background:var(--navy);color:#fff;padding:10px 16px;border-radius:9px;font-size:13px;font-weight:500;box-shadow:var(--sh-lg);z-index:2000;opacity:0;transform:translateY(8px);transition:.25s;pointer-events:none;max-width:300px}
+.toast.on{opacity:1;transform:translateY(0)}
+.toast.success{background:var(--green)}
+.toast.error{background:var(--red)}
+
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+@media print{.sidebar,.quick-bar,.hdr-btn,.dm-btn,.toolbar,.pagination,.act{display:none!important}.content{padding:0}.panel{box-shadow:none;border:1px solid #ccc}}
+</style>
 </head>
-
 <body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback,useRef,useMemo}=React;
+const BASE='/api/v1';
 
-  <!-- ============ LOGIN ============ -->
-  <div id="login-screen">
-    <div class="login-card">
-      <div class="logo" style="color:var(--b700);font-size:15px;">
-        <svg width="44" height="44" viewBox="0 0 48 48">
-          <circle cx="24" cy="24" r="22" fill="#1a56db" />
-          <path d="M10 30 L38 14 L30 26 L36 30 L26 30 L20 36 L22 28 Z" fill="#fff" />
-        </svg>
-        <span>JANE AEROSPACE</span>
-      </div>
-      <h1>Command Center</h1>
-      <p class="sub">Outreach · Bookings · KYC · NDA · Agreements — live tracking, approvals and analytics in one place.
-      </p>
-      <div class="fld"><label>Email</label>
-        <input type="email" id="li-email" placeholder="admin@janeaerospace.co.in" autocomplete="username">
-      </div>
-      <div class="fld"><label>Password</label>
-        <input type="password" id="li-pass" placeholder="••••••••" autocomplete="current-password"
-          onkeydown="if(event.key==='Enter')doLogin()">
-      </div>
-      <div id="login-err"></div>
-      <button class="btn btn-p btn-block" onclick="doLogin()">Sign In</button>
-    </div>
-  </div>
+const KPI_COLORS={blue:'#1a56db',teal:'#0891b2',green:'#059669',amber:'#d97706',red:'#dc2626',violet:'#7c3aed'};
+const KPI_BG={blue:'#EFF6FF',teal:'#ECFEFF',green:'#ECFDF5',amber:'#FFFBEB',red:'#FEF2F2',violet:'#F5F3FF'};
+const VARIANT_COLORS={A:'#1a56db',B:'#059669',C:'#d97706',S1:'#7c3aed',S2:'#0891b2',S3:'#dc2626'};
 
-  <!-- ============ APP ============ -->
-  <div id="app">
-    <div class="sidebar">
-      <div class="logo">
-        <svg width="32" height="32" viewBox="0 0 48 48">
-          <circle cx="24" cy="24" r="22" fill="#1a56db" />
-          <path d="M10 30 L38 14 L30 26 L36 30 L26 30 L20 36 L22 28 Z" fill="#fff" />
-        </svg>
-        <div>
-          <span>JANE AEROSPACE</span>
-          <span class="logo-sub">COMMAND CENTER</span>
-        </div>
-      </div>
-      <div class="nav" id="nav"></div>
-      <div class="who">
-        <div class="av" id="who-av">A</div>
-        <div><b id="who-name">—</b><span id="who-role">—</span></div>
-        <button onclick="logout()" title="Sign out"><svg class="ic" viewBox="0 0 24 24">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-            <polyline points="16 17 21 12 16 7" />
-            <line x1="21" y1="12" x2="9" y2="12" />
-          </svg></button>
-      </div>
-    </div>
+const fmtN=n=>n==null?'—':Number(n).toLocaleString('en-IN');
+const fmtP=n=>n==null?'—':(+n).toFixed(1)+'%';
+const daysAgo=iso=>{if(!iso)return null;return Math.floor((Date.now()-new Date(iso))/864e5)};
+const scoreClr=n=>n>=8?'#059669':n>=5?'#d97706':'#dc2626';
+function badgeCls(v){
+  if(!v||v==='N/A'||v==='not_started')return 'bna';
+  const s=v.toLowerCase();
+  if(s.includes('pend'))return 'bpend';if(s.includes('review'))return 'brev';
+  if(s.includes('approv'))return 'bappr';if(s.includes('reject'))return 'brej';
+  if(s.includes('draft'))return 'bdraft';if(s.includes('sent'))return 'bsent';
+  if(s.includes('sign'))return 'bsign';if(s.includes('complet')||s==='done')return 'bcomp';
+  return 'bdraft';
+}
+const dispSt=v=>{if(!v||v==='N/A')return 'N/A';return v.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())};
+const hexToRgba=(hex,a)=>{const r=parseInt(hex.slice(1,3),16);const g=parseInt(hex.slice(3,5),16);const b=parseInt(hex.slice(5,7),16);return `rgba(${r},${g},${b},${a})`};
 
-    <div class="topbar">
-      <div class="topbar-left">
-        <h2 id="page-title">Overview</h2>
-        <span class="topbar-sub" id="topbar-sub"></span>
-      </div>
-      <div class="gsearch"><svg class="ic" viewBox="0 0 24 24">
-          <circle cx="11" cy="11" r="8" />
-          <path d="m21 21-4.3-4.3" />
-        </svg>
-        <input id="g-q" placeholder="Search leads, companies…" oninput="globalSearch()">
-      </div>
-
-      <div style="position:relative; display:inline-flex; align-items:center; margin-left: 6px;">
-        <svg class="ic" viewBox="0 0 24 24" style="position:absolute;left:10px;pointer-events:none;color:var(--mut);">
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
-        <select id="ov-time-filter" onchange="handleTimeFilter()"
-          style="appearance:none; border:1.5px solid var(--line); border-radius:10px; padding:8.5px 32px; background:#fff; font-size:13px; font-weight:600; color:#475569; cursor:pointer; outline:none; font-family:inherit; transition:all 0.2s;">
-          <option value="0">All Time</option>
-          <option value="7">Last 7 Days</option>
-          <option value="30">Last 30 Days</option>
-          <option value="90">Last 90 Days</option>
-          <option value="365">Last 1 Year</option>
-        </select>
-        <svg class="ic" viewBox="0 0 24 24"
-          style="position:absolute;right:10px;width:14px;height:14px;pointer-events:none;color:var(--mut);">
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </div>
-
-      <button class="btn btn-p" id="btn-add" onclick="openModal('add')"><svg class="ic" viewBox="0 0 24 24">
-          <line x1="12" y1="5" x2="12" y2="19" />
-          <line x1="5" y1="12" x2="19" y2="12" />
-        </svg> Add Lead</button>
-      <div style="position:relative;">
-        <button class="btn btn-o" id="notif-btn" onclick="toggleNotifications(event)" title="Notifications"
-          style="position:relative;padding:9px 11px;"><svg class="ic" viewBox="0 0 24 24">
-            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-          </svg><span id="notif-badge" class="badge" style="display:none;"></span></button>
-        <div id="notif-pop"
-          style="display:none;position:absolute;top:48px;right:0;width:370px;max-height:72vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 20px 52px rgba(10,25,60,.22);z-index:90;">
-        </div>
-      </div>
-      <button class="btn btn-o" onclick="openComments()" title="Lead comments"
-        style="position:relative;padding:9px 11px;"><svg class="ic" viewBox="0 0 24 24">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg><span id="cmt-badge" class="badge" style="display:none;"></span></button>
-      <button class="btn btn-o" onclick="refreshAll()" title="Refresh data" style="padding:9px 11px;"><svg class="ic"
-          viewBox="0 0 24 24">
-          <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-          <polyline points="21 3 21 9 15 9" />
-        </svg></button>
-    </div>
-
-    <div class="main">
-      <div id="view-overview"></div>
-      <div id="view-kanban" style="display:none;"></div>
-      <div id="view-leads" style="display:none;"></div>
-      <div id="view-sheet" style="display:none;"></div>
-      <div id="view-bookings" style="display:none;"></div>
-      <div id="view-docs" style="display:none;"></div>
-      <div id="view-approvals" style="display:none;"></div>
-      <div id="view-bulk" style="display:none;"></div>
-      <div id="view-logs" style="display:none;"></div>
-      <div id="view-users" style="display:none;"></div>
-    </div>
-  </div>
-
-  <!-- drawer -->
-  <div id="drawer-wrap" onclick="if(event.target===this)closeDrawer()">
-    <div id="drawer"></div>
-  </div>
-  <!-- modal -->
-  <div class="modal-wrap" id="modal-wrap" onclick="if(event.target===this)closeModal()">
-    <div class="modal" id="modal"></div>
-  </div>
-  <div class="toast" id="toast"></div>
-
-  <script>
-    /* ============================ core ============================ */
-    const API = '/api/v1/dashboard/api';
-    let TOKEN = localStorage.getItem('ja_token') || '', ROLE = localStorage.getItem('ja_role') || '',
-      NAME = localStorage.getItem('ja_name') || '';
-    let LEADS = [], OV = null, CAL = { y: 0, m: 0 }, CHARTS = {};
-
-    const I = {
-      home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
-      kanban: '<rect x="3" y="3" width="7" height="14" rx="1.5"/><rect x="14" y="3" width="7" height="9" rx="1.5"/>',
-      users2: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
-      cal: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
-      doc: '<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
-      check2: '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
-      send: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
-      clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
-      shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
-      eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
-      edit: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
-      link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
-      play: '<polygon points="6 3 20 12 6 21 6 3"/>',
-      x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
-      drop: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
-      mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
-      phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>',
-      chart: '<line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>',
-      plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
-      chevL: '<polyline points="15 18 9 12 15 6"/>', chevR: '<polyline points="9 18 15 12 9 6"/>',
-      ban: '<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
-      copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
-      inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
-      zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
-      user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
-      building: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M16 6h.01M8 10h.01M16 10h.01M8 14h.01M16 14h.01"/>',
-      table: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M12 3v18"/>',
-      save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>',
-      ext: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+function useAnimCounter(value,duration=750){
+  const [disp,setDisp]=useState(0);
+  const raf=useRef(null);
+  useEffect(()=>{
+    const end=typeof value==='number'?value:parseFloat(value)||0;
+    const start=performance.now();
+    const step=now=>{
+      const p=Math.min((now-start)/duration,1);
+      const e=1-Math.pow(1-p,3);
+      setDisp(Math.round(end*e));
+      if(p<1)raf.current=requestAnimationFrame(step);
     };
-    function ic(n, s) { return `<svg class="ic" ${s ? `style="${s}"` : ''} viewBox="0 0 24 24">${I[n] || ''}</svg>`; }
-    function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
-    function toast(t, ok = true) {
-      const e = document.getElementById('toast'); e.textContent = t;
-      e.style.background = ok ? '#0c2344' : '#b91c1c'; e.style.display = 'block'; setTimeout(() => e.style.display = 'none', 3500);
-    }
+    raf.current=requestAnimationFrame(step);
+    return()=>cancelAnimationFrame(raf.current);
+  },[value,duration]);
+  return disp;
+}
 
-    async function api(path, opts = {}) {
-      opts.headers = Object.assign({
-        'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1',
-        'Authorization': 'Bearer ' + TOKEN
-      }, opts.headers || {});
-      const r = await fetch(API + path, opts);
-      if (r.status === 401) { logout(); throw new Error('Session expired'); }
-      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || ('HTTP ' + r.status)); }
-      return r.json();
-    }
+function Ring({pct,color,size=44}){
+  const r=size/2-4;const circ=2*Math.PI*r;
+  const [offset,setOffset]=useState(circ);
+  useEffect(()=>{const t=setTimeout(()=>setOffset(circ*(1-Math.min(pct||0,100)/100)),50);return()=>clearTimeout(t)},[pct,circ]);
+  return <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{flexShrink:0}}>
+    <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--border)" strokeWidth="3.5"/>
+    <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth="3.5"
+      strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
+      style={{transition:'stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)',transformOrigin:'center',transform:'rotate(-90deg)'}}/>
+    <text x={size/2} y={size/2+3.5} textAnchor="middle" fontSize="10" fontWeight="800" fill={color}
+      style={{fontFamily:'Inter,sans-serif'}}>{Math.round(pct||0)}%</text>
+  </svg>;
+}
 
-    /* ============================ auth ============================ */
-    async function doLogin() {
-      const err = document.getElementById('login-err'); err.style.display = 'none';
-      try {
-        const r = await fetch(API + '/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1' },
-          body: JSON.stringify({
-            email: document.getElementById('li-email').value.trim(),
-            password: document.getElementById('li-pass').value
-          })
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error(d.detail || 'Login failed');
-        TOKEN = d.access_token; ROLE = d.role; NAME = d.full_name;
-        localStorage.setItem('ja_token', TOKEN); localStorage.setItem('ja_role', ROLE); localStorage.setItem('ja_name', NAME);
-        enterApp();
-      } catch (e) { err.textContent = e.message; err.style.display = 'block'; }
-    }
-    function logout() { localStorage.clear(); TOKEN = ''; location.reload(); }
-    const canAct = () => ROLE === 'admin' || ROLE === 'approver';
+function useToast(){
+  const [state,setState]=useState({msg:'',type:'',on:false});const t=useRef(null);
+  const fire=useCallback((msg,type='default')=>{setState({msg,type,on:true});clearTimeout(t.current);t.current=setTimeout(()=>setState(s=>({...s,on:false})),2800)},[]);
+  return {...state,fire};
+}
 
-    function enterApp() {
-      document.getElementById('login-screen').style.display = 'none';
-      document.getElementById('app').style.display = 'block';
-      document.getElementById('who-name').textContent = NAME;
-      document.getElementById('who-av').textContent = (NAME || 'U')[0].toUpperCase();
-      document.getElementById('who-role').textContent = { admin: 'Administrator', approver: 'Approver', viewer: 'Viewer' }[ROLE] || ROLE;
-      if (!canAct()) document.getElementById('btn-add').style.display = 'none';
-      buildNav(); nav('overview'); loadLeads(); loadCommentCount(); loadNotifCount();
-    }
+function useCountdown(from=30){
+  const [sec,setSec]=useState(from);
+  useEffect(()=>{setSec(from);const i=setInterval(()=>setSec(s=>s<=1?from:s-1),1000);return()=>clearInterval(i)},[from]);
+  return sec;
+}
 
-    const NAVS = [
-      ['overview', 'Overview', 'home', 'MAIN'],
-      ['kanban', 'Pipeline Board', 'kanban', null],
-      ['leads', 'Leads', 'users2', null],
-      ['sheet', 'Sheet View', 'table', null],
-      ['bookings', 'Bookings', 'cal', 'PIPELINE'],
-      ['docs', 'Documents', 'doc', null],
-      ['approvals', 'Notifications', 'check2', 'OPERATIONS'],
-      ['logs', 'Activity Log', 'clock', null],
-      ['users', 'Users', 'shield', 'SYSTEM'],
-    ];
-    const NAV_SUBS = {
-      overview: () => `${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}`,
-      kanban: () => `${LEADS.length} leads tracked`,
-      leads: () => `${LEADS.filter(l => !l.dropped).length} active leads`,
-      sheet: () => 'Live sync with Google Sheets',
-      bookings: () => 'Meeting calendar',
-      docs: () => `${LEADS.filter(l => l.onboarding).length} onboarding records`,
-      approvals: () => 'Pending reviews & alerts',
-      logs: () => 'Full audit trail',
-      users: () => 'Team access control',
-    };
-    function buildNav() {
-      let html = '';
-      NAVS.filter(([v]) => !(v === 'users' && ROLE !== 'admin') && !(v === 'bulk' && !canAct()))
-        .forEach(([v, l, i, section]) => {
-          if (section) html += `<span class="nav-section-label">${section}</span>`;
-          html += `<a data-view="${v}" onclick="nav('${v}')">${ic(i)}<span>${l}</span>${v === 'approvals' ? '<span class="badge" id="apr-badge" style="display:none;"></span>' : ''}</a>`;
-        });
-      document.getElementById('nav').innerHTML = html;
-    }
-    function nav(v) {
-      document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('active', a.dataset.view === v));
-      NAVS.forEach(([x]) => { const el = document.getElementById('view-' + x); if (el) el.style.display = x === v ? 'block' : 'none'; });
-      const entry = NAVS.find(([x]) => x === v);
-      document.getElementById('page-title').innerHTML = ic(entry[2]) + ' ' + entry[1];
-      const sub = NAV_SUBS[v]; if (sub) document.getElementById('topbar-sub').textContent = sub();
-      ({
-        overview: loadOverview, kanban: renderKanban, leads: renderLeadsView, sheet: loadSheet, bookings: loadBookings,
-        docs: renderDocs, approvals: loadApprovals, bulk: renderBulk, logs: loadLogs, users: loadUsers
-      }[v] || (() => { }))();
-    }
-    function refreshAll() { loadLeads().then(() => { const v = document.querySelector('.nav a.active'); if (v) nav(v.dataset.view); }); loadCommentCount(); loadNotifCount(); }
-    function globalSearch() {
-      const a = document.querySelector('.nav a.active');
-      if (a && a.dataset.view !== 'leads') nav('leads'); renderLeadsView();
-    }
-    function handleTimeFilter() {
-      const a = document.querySelector('.nav a.active');
-      if (a && a.dataset.view !== 'overview') nav('overview'); else loadOverview();
-    }
+function useData(){
+  const [stats,setStats]=useState(null);
+  const [summary,setSummary]=useState(null);
+  const [onboarding,setOB]=useState([]);
+  const [abStats,setAB]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [lastRefresh,setLR]=useState(null);
+  const load=useCallback(async()=>{
+    setLoading(true);
+    const safe=p=>p.then(r=>r.ok?r.json():null).catch(()=>null);
+    const [s,sm,ob,ab]=await Promise.all([
+      safe(fetch(`${BASE}/v2/dashboard/stats`)),
+      safe(fetch(`${BASE}/onboarding/pipeline-summary.json`)),
+      safe(fetch(`${BASE}/onboarding/list`)),
+      safe(fetch(`${BASE}/v2/ab-stats`)),
+    ]);
+    if(s)setStats(s);if(sm)setSummary(sm);
+    if(ob)setOB(Array.isArray(ob)?ob:ob?.items||ob?.data||[]);
+    if(ab)setAB(ab);
+    setLoading(false);setLR(new Date());
+  },[]);
+  useEffect(()=>{load();const iv=setInterval(load,30000);return()=>clearInterval(iv)},[load]);
+  return {stats,summary,onboarding,abStats,loading,refresh:load,lastRefresh};
+}
 
-    /* ============================ overview ============================ */
-    async function loadOverview() {
-      const days = document.getElementById('ov-time-filter') ? document.getElementById('ov-time-filter').value : '0';
-      try { OV = await api('/overview?days=' + days); } catch (e) { return; }
-      const t = OV.totals;
-      const pct = (a, b) => b > 0 ? Math.round(a / b * 100) : 0;
-      // Gradient KPI tiles — each with gradient, icon, number, label, sub-label
-      const kpiDefs = [
-        { lbl: 'Total Leads', val: t.leads, sub: 'in the pipeline', icon: 'users2', grad: 'linear-gradient(135deg,#1a56db,#2563eb)' },
-        { lbl: 'Engaged', val: t.replied, sub: pct(t.replied, t.leads) + '% reply rate', icon: 'inbox', grad: 'linear-gradient(135deg,#059669,#16a34a)' },
-        { lbl: 'Active Deals', val: t.onboarding, sub: pct(t.onboarding, t.leads) + '% conversion', icon: 'zap', grad: 'linear-gradient(135deg,#7c3aed,#a855f7)' },
-        { lbl: 'NDAs Signed', val: t.nda_signed, sub: 'documents executed', icon: 'doc', grad: 'linear-gradient(135deg,#0891b2,#06b6d4)' },
-        { lbl: 'Deals Won', val: t.agreement_signed, sub: pct(t.agreement_signed, t.leads) + '% win rate', icon: 'check2', grad: 'linear-gradient(135deg,#15803d,#22c55e)' },
-        { lbl: 'Action Needed', val: t.pending_approvals, sub: 'pending approvals', icon: 'clock', grad: 'linear-gradient(135deg,#b45309,#d97706)' },
-      ];
-      document.getElementById('view-overview').innerHTML = `
-    <div class="cards">${kpiDefs.map(k => `<div class="card kpi" style="background:${k.grad};">
-      <div class="kpi-ico">${ic(k.icon)}</div>
-      <div class="kpi-lbl">${k.lbl}</div>
-      <div class="kpi-num">${k.val}</div>
-      <div class="kpi-sub">${k.sub}</div>
-    </div>`).join('')}</div>
-    <div class="grid3">
-      <div class="panel"><h3>${ic('chart')} 14-Day Activity</h3><canvas id="ch-bar" height="110"></canvas></div>
-      <div class="panel"><h3>${ic('chart')} Lead Status Split</h3><canvas id="ch-pie" height="110"></canvas></div>
-    </div>
-    <div class="grid2">
-      <div class="panel"><h3>${ic('zap')} Conversion Funnel</h3><div id="ov-funnel"></div></div>
-      <div class="panel"><h3>${ic('link')} Integrations</h3><div class="intg" id="ov-intg"></div>
-        <p style="font-size:11px;color:var(--mut);margin-top:12px;">Sheet: <b>${esc(OV.sheet_name)}</b> · Updated ${esc(OV.generated_at)}</p></div>
-    </div>`;
-      // Business conversion funnel: each stage as a % of total leads.
-      const cf = [['Leads', t.leads], ['Engaged', t.replied], ['Active Deals', t.onboarding], ['NDAs Signed', t.nda_signed], ['Deals Won', t.agreement_signed]];
-      const cmax = Math.max(t.leads, 1);
-      document.getElementById('ov-funnel').innerHTML = cf.map(s => {
-        const v = s[1] || 0, of = Math.round(v / cmax * 100);
-        return `<div class="bar-row"><div class="bl">${esc(s[0])}</div><div class="bar">
-     <div class="fill" style="width:${Math.max(of, v ? 8 : 0)}%">${v} · ${of}%</div></div></div>`;
-      }).join('');
-      document.getElementById('ov-intg').innerHTML = Object.entries(OV.integrations).map(([k, v]) =>
-        `<div class="it">${ic('link', 'width:14px;height:14px;')}<span>${esc(k)}</span><span class="dot ${v ? 'on' : 'off'}"></span></div>`).join('');
-      const badge = document.getElementById('apr-badge');
-      if (badge) { badge.style.display = t.pending_approvals ? 'inline-block' : 'none'; badge.textContent = t.pending_approvals; }
-      drawCharts();
-    }
-    function drawCharts() {
-      if (typeof Chart === 'undefined' || !OV) return;
-      Object.values(CHARTS).forEach(c => c.destroy()); CHARTS = {};
-      const days = Object.keys(OV.daily), lbl = days.map(d => d.slice(5));
-      CHARTS.bar = new Chart(document.getElementById('ch-bar'), {
-        type: 'bar',
-        data: {
-          labels: lbl, datasets: [
-            { label: 'Emails', data: days.map(d => OV.daily[d].sent), backgroundColor: '#1a56db', borderRadius: 4 },
-            { label: 'Replies', data: days.map(d => OV.daily[d].replied), backgroundColor: '#16a34a', borderRadius: 4 },
-            { label: 'Bookings', data: days.map(d => OV.daily[d].booked), backgroundColor: '#d97706', borderRadius: 4 }]
-        },
-        options: {
-          responsive: true, plugins: { legend: { position: 'bottom', labels: { boxWidth: 11, font: { size: 11 } } } },
-          scales: { x: { grid: { display: false }, ticks: { font: { size: 10 } } }, y: { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } } }
+function Clock(){
+  const [t,setT]=useState(new Date());
+  useEffect(()=>{const i=setInterval(()=>setT(new Date()),1000);return()=>clearInterval(i)},[]);
+  return <span className="hdr-time">
+    {t.toLocaleDateString('en-IN',{weekday:'short',day:'2-digit',month:'short'})} ·{' '}
+    {t.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true})} IST
+  </span>;
+}
+
+function DoughnutChart({stats}){
+  const ref=useRef(null);const inst=useRef(null);
+  useEffect(()=>{
+    if(!stats||!ref.current)return;
+    if(inst.current)inst.current.destroy();
+    const t=stats.total_leads||0;const s=stats.sent_leads||0;
+    const rp=stats.replied_leads||0;const bk=stats.booked_leads||0;
+    inst.current=new window.Chart(ref.current.getContext('2d'),{
+      type:'doughnut',
+      data:{
+        labels:['Not Yet Sent','Sent · No Reply','Replied · Not Booked','Booked ✓'],
+        datasets:[{
+          data:[Math.max(0,t-s),Math.max(0,s-rp),Math.max(0,rp-bk),bk],
+          backgroundColor:['#E2E8F0','#BAE6FD','#FDE68A','#6EE7B7'],
+          borderColor:['#CBD5E1','#7DD3FC','#FCD34D','#34D399'],
+          borderWidth:1.5,hoverOffset:6
+        }]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:false,cutout:'70%',
+        plugins:{
+          legend:{position:'bottom',labels:{font:{family:'Inter',size:10,weight:'600'},padding:10,boxWidth:9,usePointStyle:true,color:document.documentElement.dataset.theme==='dark'?'#A8BDD8':'#64748B'}},
+          tooltip:{callbacks:{label:c=>` ${c.label}: ${c.raw?.toLocaleString('en-IN')}`},bodyFont:{family:'Inter'},titleFont:{family:'Inter'}}
         }
-      });
-      const st = OV.by_status, keys = Object.keys(st);
-      const colors = {
-        NEW: '#94a3b8', SENT: '#1a56db', REPLIED: '#16a34a', BOOKED: '#d97706', FAILED: '#dc2626',
-        INVALID_EMAIL: '#7c3aed', JOB_CHANGED: '#0891b2'
-      };
-      CHARTS.pie = new Chart(document.getElementById('ch-pie'), {
-        type: 'doughnut',
-        data: { labels: keys, datasets: [{ data: keys.map(k => st[k]), backgroundColor: keys.map(k => colors[k] || '#64748b'), borderWidth: 2 }] },
-        options: { responsive: true, cutout: '62%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 11, font: { size: 11 } } } } }
-      });
-    }
-
-    /* ============================ leads ============================ */
-    async function loadLeads() { try { LEADS = await api('/leads'); } catch (e) { LEADS = []; } return LEADS; }
-    // One status -> colour system used everywhere (green=done, amber=in-progress,
-    // blue=sent/active, red=problem, grey=none). No stray colours.
-    function chip(s) {
-      const m = {
-        NEW: 'c-gray', SENT: 'c-blue', REPLIED: 'c-green', BOOKED: 'c-green', FAILED: 'c-red',
-        PENDING: 'c-gray', FORM_SENT: 'c-amber', SUBMITTED: 'c-amber', UNDER_REVIEW: 'c-amber', APPROVED: 'c-green',
-        REJECTED: 'c-red', TEAM_REVIEW: 'c-amber', DRAFT_GENERATED: 'c-amber', SENT_TO_LEAD: 'c-blue',
-        SIGNED_RECEIVED: 'c-amber', SIGN_UNDER_REVIEW: 'c-amber', PROCEED_NEXT: 'c-green', SIGN_REJECTED: 'c-red',
-        DRAFT_REJECTED: 'c-red', COMPLETED: 'c-green', DROPPED: 'c-red', INVALID_EMAIL: 'c-red', JOB_CHANGED: 'c-amber'
-      };
-      return `<span class="chip ${m[s] || 'c-gray'}">${esc(s || '—')}</span>`;
-    }
-    function steps(i) { let h = '<div class="steps">'; for (let k = 0; k < 10; k++)h += `<div class="step ${k <= i && i > 0 ? 'done' : ''}"></div>`; return h + '</div>'; }
-
-    function renderLeadsView() {
-      const q = (document.getElementById('g-q').value || '').toLowerCase();
-      const rows = LEADS.filter(l => !q || l.email.toLowerCase().includes(q) || (l.company || '').toLowerCase().includes(q));
-      const active = rows.filter(l => !l.dropped).length;
-      document.getElementById('view-leads').innerHTML = `
-    <div class="view-header">
-      <div>
-        <div class="view-title">${ic('users2')} All Leads</div>
-        <div class="view-subtitle">${active} active · ${rows.length - active} dropped${q ? ` · filtered: "${esc(q)}"` : ''}</div>
-      </div>
-      ${canAct() ? `<button class="btn btn-p" onclick="openModal('add')">${ic('plus')} Add Lead</button>` : ''}
-    </div>
-    <div class="panel" style="overflow-x:auto;padding:0;">
-    <table><thead><tr>
-      <th style="width:40px;"></th>
-      <th>Company / Lead</th>
-      <th>Pipeline Stage</th>
-      <th>Outreach</th>
-      <th>Reply</th>
-      <th>Booking</th>
-      <th style="width:48px;"></th>
-    </tr></thead>
-    <tbody>${rows.map(l => `<tr ${l.dropped ? 'style="opacity:.45;"' : ''}>
-      <td style="padding:8px 10px;"><button class="ibtn" title="View details" onclick="openDrawer('${l.lead_id}')">${ic('eye')}</button></td>
-      <td style="min-width:200px;">
-        <div style="font-weight:700;font-size:13px;color:var(--ink);">${esc(l.company)}</div>
-        <div style="color:var(--mut);font-size:11.5px;margin-top:2px;">${esc(l.email)}</div>
-        ${l.phone ? `<div style="color:var(--mut2);font-size:11px;">${esc(l.phone)}</div>` : ''}
-        ${l.dropped ? '<span class="chip c-red" style="margin-top:3px;">DROPPED</span>' : ''}
-      </td>
-      <td>
-        <span class="chip c-blue" style="margin-bottom:4px;">${esc(l.stage)}</span>
-        ${steps(l.stage_index)}
-      </td>
-      <td style="font-size:12px;color:var(--ink2);">${esc(l.sent_at) || '<span style="color:var(--mut2);">—</span>'}
-        ${l.followups ? `<br><span class="chip c-gray" style="font-size:9.5px;margin-top:3px;">+${l.followups} follow-ups</span>` : ''}</td>
-      <td style="font-size:12px;color:var(--ink2);">${esc(l.replied_at) || '<span style="color:var(--mut2);">—</span>'}</td>
-      <td style="font-size:12px;color:var(--ink2);">${esc(l.booked_at) || '<span style="color:var(--mut2);">—</span>'}
-        ${l.selected_slot ? `<br><span style="font-size:10.5px;color:var(--mut);">${esc(l.selected_slot)}</span>` : ''}
-        ${l.meeting_link ? `<br><a href="${esc(l.meeting_link)}" target="_blank" style="font-size:11px;font-weight:700;color:var(--b500);">🔗 Join ↗</a>` : ''}</td>
-      <td style="padding:8px 10px;">${leadActionBtns(l)}</td>
-    </tr>`).join('') ||
-        '<tr><td colspan="7" style="text-align:center;color:var(--mut);padding:40px 20px;">No leads found</td></tr>'}
-    </tbody></table></div>`;
-    }
-    function leadActionBtns(l) {
-      return `<button class="kebab" onclick="openLeadMenu(event,'${l.lead_id}')" title="Actions">⋮</button>`;
-    }
-    function openLeadMenu(ev, id) {
-      ev.stopPropagation();
-      closeMenus();
-      const l = LEADS.find(x => x.lead_id === id); if (!l) return;
-      let items = `<a onclick="closeMenus();openDrawer('${id}')">${ic('eye')} View Full Details</a>`;
-      if (canAct()) {
-        items += `<div class="div"></div>`;
-        if (!l.onboarding) items += `<a class="ok" onclick="closeMenus();leadAction('${id}','start_onboarding')">${ic('play')} Start Onboarding</a>`;
-        else {
-          items += `<a class="warn" onclick="closeMenus();leadAction('${id}','cancel_onboarding')">${ic('x')} Cancel Onboarding</a>`;
-          items += `<a href="${l.onboarding.nda_edit_url}" target="_blank" onclick="closeMenus()">${ic('edit')} Open NDA Editor</a>`;
-          items += `<a href="${l.onboarding.agreement_edit_url}" target="_blank" onclick="closeMenus()">${ic('edit')} Open Agreement Editor</a>`;
-        }
-        items += `<div class="div"></div>`;
-        if (!l.dropped) items += `<a class="danger" onclick="closeMenus();leadAction('${id}','drop')">${ic('drop')} Drop Lead</a>`;
-        else items += `<a onclick="closeMenus();leadAction('${id}','restore')">${ic('play')} Restore Lead</a>`;
-      }
-      const m = document.createElement('div');
-      m.className = 'menu'; m.id = 'lead-menu'; m.innerHTML = items; m.style.display = 'block';
-      document.body.appendChild(m);
-      const r = ev.currentTarget.getBoundingClientRect();
-      const mw = 210, mh = m.offsetHeight || 220;
-      m.style.left = Math.max(8, Math.min(r.left - mw + r.width, window.innerWidth - mw - 8)) + 'px';
-      m.style.top = (r.bottom + mh > window.innerHeight - 8 ? r.top - mh - 4 : r.bottom + 4) + 'px';
-    }
-    function closeMenus() { document.querySelectorAll('.menu').forEach(m => m.remove()); }
-    document.addEventListener('click', closeMenus);
-    async function leadAction(id, action) {
-      const labels = {
-        start_onboarding: 'Start onboarding (sends KYC form)?', cancel_onboarding: 'Cancel onboarding for this lead?',
-        drop: 'Drop this lead? No further emails will be sent.', restore: 'Restore this lead?'
-      };
-      if (!confirm(labels[action])) return;
-      try {
-        const d = await api(`/lead/${id}/action`, { method: 'POST', body: JSON.stringify({ action }) });
-        toast(d.message); await loadLeads(); refreshAll();
-      } catch (e) { toast(e.message, false); }
-    }
-
-    /* ============================ drawer (lead detail) ============================ */
-    async function openDrawer(id) {
-      document.getElementById('drawer-wrap').style.display = 'block';
-      document.getElementById('drawer').innerHTML = '<p style="color:var(--mut);">Loading…</p>';
-      let d; try { d = await api('/lead/' + id); } catch (e) { document.getElementById('drawer').innerHTML = esc(e.message); return; }
-      const o = d.onboarding;
-      let h = `<div style="display:flex;gap:14px;align-items:flex-start;">
-    <div style="width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,var(--b600),var(--b800));
-      color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;flex:none;">
-      ${esc((d.company || '?')[0].toUpperCase())}</div>
-    <div style="flex:1;min-width:0;"><h2>${esc(d.company)}</h2>
-      <p style="font-size:12.5px;color:var(--mut);margin-top:4px;">${ic('mail', 'width:13px;height:13px;')} ${esc(d.email)}
-      ${d.phone ? ` · ${ic('phone', 'width:13px;height:13px;')} ${esc(d.phone)}` : ''}
-      ${d.contact ? ` · ${ic('user', 'width:13px;height:13px;')} ${esc(d.contact)}` : ''}</p>
-      <p style="margin-top:8px;"><span class="chip c-blue">${esc(d.stage)}</span> ${chip(d.status)}
-      ${d.dropped ? '<span class="chip c-red">DROPPED</span>' : ''}</p>
-      <div style="margin-top:6px;">${steps(d.stage_index)}</div></div>
-    <button class="ibtn" onclick="closeDrawer()">${ic('x')}</button></div>`;
-      if (canAct()) {
-        h += `<div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:9px;">`;
-        if (!o) h += `<button class="btn btn-g" style="justify-content:center;" onclick="leadAction('${d.lead_id}','start_onboarding');closeDrawer()">${ic('play')} Start Onboarding</button>`;
-        else h += `<button class="btn btn-w" style="justify-content:center;" onclick="leadAction('${d.lead_id}','cancel_onboarding');closeDrawer()">${ic('x')} Cancel Onboarding</button>`;
-        if (!d.dropped) h += `<button class="btn btn-r" style="justify-content:center;" onclick="leadAction('${d.lead_id}','drop');closeDrawer()">${ic('drop')} Drop Lead</button>`;
-        else h += `<button class="btn btn-o" style="justify-content:center;" onclick="leadAction('${d.lead_id}','restore');closeDrawer()">${ic('play')} Restore</button>`;
-        h += `</div>`;
-      }
-      h += `<div class="dsec">${ic('clock')} Journey Timeline</div><div class="tl">${(d.timeline || []).map(t => `<div class="ev"><b>${esc(t.label)}</b><span>${esc(t.at)}</span></div>`).join('') ||
-        '<p style="font-size:12px;color:var(--mut);">No events yet</p>'}</div>`;
-      if (d.booked_at) {
-        h += `<div class="dsec">${ic('cal')} Booking</div><div class="kv">
-    <div class="k">Booked At</div><div>${esc(d.booked_at)}</div>
-    <div class="k">Slot</div><div>${esc(d.selected_slot) || '—'}</div>
-    ${d.meeting_link ? `<div class="k">Meeting Link</div><div><a href="${esc(d.meeting_link)}" target="_blank">Join ↗</a></div>` : ''}
-    ${d.booking_id ? `<div class="k">Booking ID</div><div style="font-family:monospace;font-size:11px;">${esc(d.booking_id)}</div>` : ''}</div>`;
-      }
-      if (d.kyc_data) {
-        h += `<div class="dsec">${ic('shield')} KYC Data (as submitted)</div><div class="kv">${Object.entries(d.kyc_data).map(([k, v]) => `<div class="k">${esc(k)}</div><div>${esc(v)}</div>`).join('')}</div>
-    <p style="font-size:11.5px;color:var(--mut);margin-top:6px;">Files: GST ${d.kyc_files && d.kyc_files.gst ? '✓ uploaded' : '—'} ·
-    Incorporation ${d.kyc_files && d.kyc_files.incorporation ? '✓ uploaded' : '—'}</p>`;
-      }
-      if (o) {
-        h += `<div class="dsec">${ic('doc')} Documents</div>
-    <div class="kv">
-      <div class="k">KYC</div><div>${chip(o.kyc_status)} <a href="${o.kyc_view_url}" target="_blank" style="font-size:11.5px;">view data ↗</a></div>
-      <div class="k">NDA</div><div>${chip(o.nda_status)}${o.nda_signed ? ' <span class="chip c-green">✓ SIGNED</span>' : ''}<br>
-        <a href="${o.nda_edit_url}" target="_blank" style="font-size:11.5px;">${canAct() ? 'edit & preview' : 'preview'} ↗</a> ·
-        <a onclick="navigator.clipboard.writeText('${o.nda_sign_url}');toast('NDA signing link copied')" style="font-size:11.5px;cursor:pointer;">copy sign link</a></div>
-      <div class="k">Agreement</div><div>${chip(o.agreement_status)}${o.agreement_signed ? ' <span class="chip c-green">✓ SIGNED</span>' : ''}<br>
-        <a href="${o.agreement_edit_url}" target="_blank" style="font-size:11.5px;">${canAct() ? 'edit & preview' : 'preview'} ↗</a> ·
-        <a onclick="navigator.clipboard.writeText('${o.agreement_sign_url}');toast('Agreement signing link copied')" style="font-size:11.5px;cursor:pointer;">copy sign link</a></div>
-    </div>`;
-        if (d.nda_signature) h += `<p style="font-size:11.5px;color:var(--mut);margin-top:8px;">NDA signed by <b>${esc(d.nda_signature.signed_name)}</b> (${esc(d.nda_signature.designation || '—')}) at ${esc(d.nda_signature.signed_at)}</p>`;
-        if (d.agreement_signature) h += `<p style="font-size:11.5px;color:var(--mut);">Agreement signed by <b>${esc(d.agreement_signature.signed_name)}</b> at ${esc(d.agreement_signature.signed_at)}</p>`;
-      }
-      if (d.summary) h += `<div class="dsec">${ic('doc')} Summary</div><p style="font-size:12.5px;color:#334155;line-height:1.6;">${esc(d.summary)}</p>`;
-      document.getElementById('drawer').innerHTML = h;
-    }
-    function closeDrawer() { document.getElementById('drawer-wrap').style.display = 'none'; }
-
-    /* ===== lead document-change comments sidebar ===== */
-    async function openComments() {
-      document.getElementById('drawer-wrap').style.display = 'block';
-      document.getElementById('drawer').innerHTML = '<p style="color:var(--mut);">Loading comments…</p>';
-      let d; try { d = await api('/comments'); } catch (e) { document.getElementById('drawer').innerHTML = esc(e.message); return; }
-      const list = d.comments || [];
-      let h = `<div style="display:flex;align-items:center;gap:10px;">
-    <h2 style="margin-right:auto;">${ic('mail')} Lead Comments</h2>
-    <span class="chip c-amber">${d.open || 0} open</span>
-    <button class="ibtn" onclick="closeDrawer()">${ic('x')}</button></div>
-    <p style="font-size:12px;color:var(--mut);margin:4px 0 12px;">Document-change requests from leads — which lead, which document, and when.</p>`;
-      if (!list.length) {
-        h += '<p style="font-size:12.5px;color:var(--mut);">No comments yet.</p>';
-      } else {
-        h += list.map(c => `<div style="background:#fff7ed;border-left:3px solid #f59e0b;border-radius:8px;padding:10px 12px;margin-bottom:9px;${c.done ? 'opacity:.55;' : ''}">
-      <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;">
-        <b style="font-size:12.5px;color:var(--b700);">${esc(c.company)}</b>
-        <span style="font-size:10.5px;color:var(--mut);white-space:nowrap;">${esc(c.at)}</span></div>
-      <div style="font-size:10.5px;color:var(--mut);margin:2px 0 5px;">${esc((c.doc_type || '').toUpperCase())} · ${esc(c.by)}${c.done ? ' · ✓ handled' : ''}</div>
-      <div style="font-size:12.5px;color:#334155;line-height:1.5;white-space:pre-wrap;">${esc(c.text)}</div></div>`).join('');
-      }
-      document.getElementById('drawer').innerHTML = h;
-    }
-
-    /* ===== activity log sidebar ===== */
-    function actColor(ev) {
-      ev = (ev || '').toUpperCase();
-      if (ev.includes('SIGN') || ev.includes('APPROV') || ev.includes('COMPLETE') || ev.includes('BOOK')) return '#16a34a';
-      if (ev.includes('REJECT') || ev.includes('FAIL') || ev.includes('DROP') || ev.includes('INVALID')) return '#dc2626';
-      if (ev.includes('SENT') || ev.includes('ADD') || ev.includes('UPDATE') || ev.includes('CREATE')) return '#2563eb';
-      if (ev.includes('REPL') || ev.includes('REVIEW') || ev.includes('FOLLOW')) return '#d97706';
-      return '#64748b';
-    }
-    async function openActivity() {
-      document.getElementById('drawer-wrap').style.display = 'block';
-      document.getElementById('drawer').innerHTML = '<p style="color:var(--mut);">Loading activity…</p>';
-      let list; try { list = await api('/logs'); } catch (e) { document.getElementById('drawer').innerHTML = esc(e.message); return; }
-      list = Array.isArray(list) ? list : [];
-      let h = `<div style="display:flex;align-items:center;gap:10px;">
-    <h2 style="margin-right:auto;">${ic('clock')} Activity</h2>
-    <span class="chip c-gray">${list.length}</span>
-    <button class="ibtn" onclick="closeDrawer()">${ic('x')}</button></div>
-    <p style="font-size:12px;color:var(--mut);margin:4px 0 12px;">Recent pipeline events — newest first.</p>`;
-      if (!list.length) {
-        h += '<p style="font-size:12.5px;color:var(--mut);">No activity yet.</p>';
-      } else {
-        h += list.map(a => {
-          const col = actColor(a.event);
-          return `<div style="display:flex;gap:10px;padding:9px 2px;border-bottom:1px solid var(--bd);">
-        <span style="width:8px;height:8px;border-radius:50%;background:${col};margin-top:5px;flex:none;"></span>
-        <div style="min-width:0;flex:1;">
-          <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline;">
-            <b style="font-size:11px;color:${col};letter-spacing:.02em;">${esc((a.event || '').replace(/_/g, ' '))}</b>
-            <span style="font-size:10px;color:var(--mut);white-space:nowrap;">${esc(a.ts)}</span></div>
-          ${a.company ? `<div style="font-size:12px;color:var(--b700);font-weight:600;">${esc(a.company)}</div>` : ''}
-          <div style="font-size:11.5px;color:#475569;line-height:1.45;">${esc(a.detail)}</div></div></div>`;
-        }).join('');
-      }
-      document.getElementById('drawer').innerHTML = h;
-    }
-    async function loadCommentCount() {
-      try {
-        const d = await api('/comments');
-        const b = document.getElementById('cmt-badge');
-        if (!b) return;
-        if (d.open > 0) { b.textContent = d.open; b.style.display = ''; } else { b.style.display = 'none'; }
-      } catch (e) { }
-    }
-
-    /* ===================== notifications panel (top bar) ===================== */
-    let NOTIF_OPEN = false;
-    function toggleNotifications(ev) {
-      if (ev) ev.stopPropagation();
-      const pop = document.getElementById('notif-pop');
-      NOTIF_OPEN = !NOTIF_OPEN;
-      pop.style.display = NOTIF_OPEN ? 'block' : 'none';
-      if (NOTIF_OPEN) {
-        renderNotifPanel();
-        // Optimistically clear badge — viewed = read
-        const b = document.getElementById('notif-badge');
-        if (b) b.style.display = 'none';
-      }
-    }
-    async function renderNotifPanel() {
-      const pop = document.getElementById('notif-pop');
-      pop.innerHTML = '<p style="color:var(--mut);font-size:12.5px;padding:16px;">Loading…</p>';
-      let appr = { action: [], waiting: [] }, cmt = { open: 0 };
-      try { const r = await api('/approvals'); appr = Array.isArray(r) ? { action: r, waiting: [] } : r; } catch (e) { }
-      try { cmt = await api('/comments'); } catch (e) { }
-      const act = appr.action || [];
-      let h = `<div style="display:flex;align-items:center;gap:8px;padding:13px 15px;border-bottom:1px solid var(--bd);position:sticky;top:0;background:#fff;border-radius:12px 12px 0 0;">
-    <b style="font-size:13.5px;margin-right:auto;">${ic('check2', 'width:15px;height:15px;')} Notifications</b>
-    <span class="chip ${act.length ? 'c-red' : 'c-gray'}">${act.length} to action</span>
-    <button class="ibtn" onclick="toggleNotifications()">${ic('x')}</button></div>`;
-      if (cmt.open > 0) {
-        h += `<a onclick="toggleNotifications();openComments();" style="display:flex;gap:9px;align-items:center;padding:11px 15px;border-bottom:1px solid var(--bd);cursor:pointer;background:#fff7ed;">
-      ${ic('mail', 'width:15px;height:15px;color:#b45309;')}
-      <span style="font-size:12.5px;color:#7c4a03;"><b>${cmt.open}</b> lead comment${cmt.open !== 1 ? 's' : ''} awaiting reply</span></a>`;
-      }
-      if (!act.length) {
-        h += '<p style="font-size:12.5px;color:var(--mut);padding:18px 15px;text-align:center;">All caught up — nothing needs action ✓</p>';
-      } else {
-        h += act.map(a => `<div onclick="toggleNotifications();nav('approvals');" style="display:flex;flex-direction:column;gap:3px;padding:11px 15px;border-bottom:1px solid var(--bd);cursor:pointer;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
-      <div style="display:flex;align-items:center;gap:7px;">
-        <span class="chip ${aprChip(a.kind)}" style="font-size:9.5px;">${esc(a.label)}</span>
-        <span style="font-size:10.5px;color:var(--mut);margin-left:auto;white-space:nowrap;">${esc(a.since) || ''}</span></div>
-      <b style="font-size:12.5px;color:var(--b700);">${esc(a.company)}</b>
-      <span style="font-size:11px;color:var(--mut);">${esc(a.email)}</span></div>`).join('');
-        h += `<a onclick="toggleNotifications();nav('approvals');" style="display:block;text-align:center;padding:11px;font-size:12px;font-weight:700;color:var(--b700);cursor:pointer;">Open Notifications view →</a>`;
-      }
-      pop.innerHTML = h;
-    }
-    async function loadNotifCount() {
-      let n = 0;
-      try { const r = await api('/approvals'); const a = Array.isArray(r) ? r : (r.action || []); n += a.length; } catch (e) { }
-      try { const c = await api('/comments'); n += (c.open || 0); } catch (e) { }
-      const b = document.getElementById('notif-badge');
-      if (!b) return;
-      if (n > 0) { b.textContent = n; b.style.display = ''; } else { b.style.display = 'none'; }
-    }
-    document.addEventListener('click', e => {
-      if (!NOTIF_OPEN) return;
-      if (!e.target.closest('#notif-pop') && !e.target.closest('#notif-btn')) {
-        NOTIF_OPEN = false; document.getElementById('notif-pop').style.display = 'none';
       }
     });
+    return()=>{if(inst.current)inst.current.destroy()};
+  },[stats]);
+  if(!stats)return <div className="empty"><div className="empty-icon">📊</div><p>No data</p></div>;
+  return <div style={{height:215,position:'relative'}}><canvas ref={ref}/></div>;
+}
 
-    /* ============================ kanban ============================ */
-    const KPAL = [['#dbe3ee', '#334155'], ['#a8cdf7', '#0b3a8c'], ['#a9e8c4', '#14532d'], ['#8fe3ab', '#14532d'],
-    ['#fbdf8f', '#7c4a03'], ['#f9d06b', '#713f12'], ['#d4c7fb', '#4c1d95'], ['#bfa8f9', '#3b0b8c'],
-    ['#a5dcf6', '#0c4a6e'], ['#9ef0c0', '#065f46']];
-    function renderKanban() {
-      // Compressed lifecycle board: each column groups one or more backend stage
-      // indices, so the booking pre-stages (email sent / replied) collapse into one
-      // and the KYC / NDA sent+signed pairs merge. Booking + KYC/NDA status now live
-      // on the card itself rather than as separate columns.
-      const COLS = [
-        { label: 'New / Outreach', idx: [0, 1, 2], c: KPAL[0] },
-        { label: 'Meeting Booked', idx: [3], c: KPAL[3] },
-        { label: 'KYC', idx: [4, 5], c: KPAL[4] },
-        { label: 'NDA', idx: [6, 7], c: KPAL[6] },
-        { label: 'Agreement', idx: [8], c: KPAL[8] },
-        { label: 'Completed', idx: [9], c: KPAL[9] },
-      ];
-      document.getElementById('view-kanban').innerHTML = `<div class="kanban">${COLS.map(col => {
-        const cards = LEADS.filter(l => col.idx.includes(l.stage_index) && !l.dropped);
-        const [bg, fg] = col.c;
-        return `<div class="kcol">
-      <div class="khead" style="background:${bg};color:${fg};">${esc(col.label)}<span class="cnt">${cards.length}</span></div>
-      <div class="kbody">${cards.map(l => kcard(l, col)).join('') ||
-          '<p style="font-size:11px;color:#94a3b8;text-align:center;padding:10px;">No leads</p>'}</div></div>`;
-      }).join('')}</div>`;
-    }
-    function kcard(l, col) {
-      // Column-based display: each card shows ONLY the status relevant to its column,
-      // so booking no longer lingers on KYC / NDA / Agreement cards.
-      const ob = l.onboarding || {};
-      const when = l.selected_slot || l.booked_at;
-      const cs = 'style="font-size:9.5px;"';
-      let chip = '';
-      switch (col.label) {
-        case 'New / Outreach':
-        case 'Meeting Booked':
-          chip = when
-            ? `<span class="chip c-green" ${cs} title="${esc(l.booked_at ? ('Booked ' + l.booked_at) : '')}">${ic('cal', 'width:11px;height:11px;')} ${esc(when)}</span>`
-            : `<span class="chip c-gray" ${cs}>not booked</span>`;
-          break;
-        case 'KYC':
-          chip = ob.kyc_status ? `<span class="chip c-blue" ${cs}>KYC ${esc(ob.kyc_status)}</span>` : `<span class="chip c-gray" ${cs}>KYC pending</span>`;
-          break;
-        case 'NDA':
-          chip = ob.nda_signed ? `<span class="chip c-green" ${cs}>NDA ✓</span>`
-            : (ob.nda_status ? `<span class="chip c-amber" ${cs}>NDA ${esc(ob.nda_status)}</span>` : `<span class="chip c-gray" ${cs}>NDA pending</span>`);
-          break;
-        case 'Agreement':
-          chip = ob.agreement_signed ? `<span class="chip c-green" ${cs}>Agreement ✓</span>`
-            : (ob.agreement_status ? `<span class="chip c-amber" ${cs}>${esc(ob.agreement_status)}</span>` : `<span class="chip c-gray" ${cs}>Agreement pending</span>`);
-          break;
-        default: // Completed
-          chip = `<span class="chip c-green" ${cs}>${ic('check2', 'width:11px;height:11px;')} Completed</span>`;
-      }
-      return `<div class="kcard" onclick="openDrawer('${l.lead_id}')">
-    <b>${esc(l.company)}</b><span>${esc(l.contact || '')}</span><span>${esc(l.email)}</span>
-    <div class="kmeta">${chip}
-      ${l.followups ? `<span class="chip c-gray" ${cs}>+${l.followups} fup</span>` : ''}</div>
-    ${kcardActions(l)}</div>`;
-    }
-    function kcardActions(l) {
-      return `<div class="kact" onclick="event.stopPropagation()">
-    <button class="kebab" style="width:26px;height:26px;font-size:13px;" title="Actions"
-      onclick="openLeadMenu(event,'${l.lead_id}')">⋮</button></div>`;
-    }
-
-    /* ============================ sheet (google-sheet style) ============================ */
-    let SHEET = null;
-    async function loadSheet() {
-      document.getElementById('view-sheet').innerHTML = '<div class="panel"><p style="color:var(--mut);">Loading sheet…</p></div>';
-      try { SHEET = await api('/sheet'); } catch (e) {
-        document.getElementById('view-sheet').innerHTML = `<div class="panel"><p style="color:var(--bad);">${esc(e.message)}</p></div>`; return;
-      }
-      renderSheet();
-    }
-    function renderSheet() {
-      const ed = canAct();
-      const cell = (v, ri) => `<td><input value="${esc(v)}" ${ed ? '' : 'readonly'} oninput="sheetDirty(${ri})"></td>`;
-      let rows = SHEET.rows.map((r, ri) => {
-        const full = [...r]; while (full.length < SHEET.keys.length) full.push('');
-        return `<tr id="gsr-${ri}"><td class="rn">${ri + 2}</td>${full.map(v => cell(v, ri)).join('')}
-      <td class="act"><button class="btn btn-g" id="gss-${ri}" style="padding:4px 10px;font-size:10.5px;display:none;"
-        onclick="saveSheetRow(${ri})">${ic('save', 'width:12px;height:12px;')} Save</button></td></tr>`;
-      }).join('');
-      document.getElementById('view-sheet').innerHTML = `
-  <div class="panel" style="padding:14px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-    <h3 style="margin:0;">${ic('table')} ${esc(SHEET.worksheet)} — live Google Sheet</h3>
-    <span style="font-size:11.5px;color:var(--mut);">Edit a cell and press Save — it writes to the Google Sheet, the Leads database and Zoho CRM together. No duplicates (matched by email).</span>
-    <span style="margin-left:auto;display:flex;gap:8px;">
-      ${ed ? `<button class="btn btn-p" onclick="sheetAddRow()">${ic('plus')} Add Row</button>` : ''}
-      <a class="btn btn-o" href="${SHEET.sheet_url}" target="_blank">${ic('ext')} Open in Google Sheets</a>
-      <button class="btn btn-o" onclick="loadSheet()">↻</button></span></div>
-  <div class="gs-wrap"><table class="gs"><thead><tr><th style="min-width:36px;width:36px;"></th>${SHEET.headers.map(h => `<th>${esc(h)}</th>`).join('')}<th style="min-width:84px;"></th></tr></thead>
-    <tbody id="gs-body">${rows}</tbody></table></div>`;
-    }
-    function sheetDirty(ri) {
-      const tr = document.getElementById('gsr-' + ri); if (!tr) return;
-      tr.classList.add('dirty');
-      const b = document.getElementById('gss-' + ri); if (b) b.style.display = 'inline-flex';
-    }
-    function sheetAddRow() {
-      const body = document.getElementById('gs-body');
-      const ri = body.querySelectorAll('tr').length;
-      const tr = document.createElement('tr'); tr.id = 'gsr-' + ri; tr.className = 'dirty';
-      tr.innerHTML = `<td class="rn">＋</td>${SHEET.keys.map(() => `<td><input oninput="sheetDirty(${ri})"></td>`).join('')}
-    <td class="act"><button class="btn btn-g" id="gss-${ri}" style="padding:4px 10px;font-size:10.5px;"
-      onclick="saveSheetRow(${ri})">${ic('save', 'width:12px;height:12px;')} Save</button></td>`;
-      body.appendChild(tr);
-      tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      tr.querySelector('input').focus();
-    }
-    async function saveSheetRow(ri) {
-      const tr = document.getElementById('gsr-' + ri); if (!tr) return;
-      const inputs = tr.querySelectorAll('input');
-      const values = {}; SHEET.keys.forEach((k, i) => { if (k) values[k] = inputs[i] ? inputs[i].value : ''; });
-      const btn = document.getElementById('gss-' + ri); btn.disabled = true; btn.textContent = 'Saving…';
-      try {
-        const d = await api('/sheet', { method: 'POST', body: JSON.stringify({ values }) });
-        toast(d.message); tr.classList.remove('dirty'); btn.style.display = 'none'; btn.disabled = false;
-        btn.innerHTML = 'Save'; loadLeads();
-      }
-      catch (e) { toast(e.message, false); btn.disabled = false; btn.innerHTML = 'Save'; }
-    }
-
-    /* ============================ bookings ============================ */
-    let BOOK = null, BVIEW = 'calendar';
-    async function loadBookings() {
-      const now = new Date(); if (!CAL.y) { CAL.y = now.getFullYear(); CAL.m = now.getMonth() + 1; }
-      try { BOOK = await api(`/bookings?year=${CAL.y}&month=${CAL.m}`); } catch (e) { return; }
-      renderBookings();
-    }
-    function calMove(d) { CAL.m += d; if (CAL.m > 12) { CAL.m = 1; CAL.y++; } if (CAL.m < 1) { CAL.m = 12; CAL.y--; } renderBookings(); }
-    function renderBookings() {
-      if (!BOOK) return;
-      const mn = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-      let h = `<div class="panel"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-    <div class="calhead" style="margin:0;">
-      <button class="ibtn" onclick="calMove(-1)">${ic('chevL')}</button>
-      <h4>${mn[CAL.m - 1]} ${CAL.y}</h4>
-      <button class="ibtn" onclick="calMove(1)">${ic('chevR')}</button></div>
-    <div class="seg"><button class="${BVIEW === 'calendar' ? 'on' : ''}" onclick="BVIEW='calendar';renderBookings()">Calendar</button>
-      <button class="${BVIEW === 'grid' ? 'on' : ''}" onclick="BVIEW='grid';renderBookings()">Grid</button></div></div>
-    <p style="font-size:11.5px;color:var(--mut);margin-top:8px;">Organizer: <b>${esc(BOOK.organizer)}</b> ·
-      <span class="chip c-blue">booking</span> <span class="chip c-green">open slots</span>
-      <span class="chip c-amber">holiday</span> <span class="chip c-red">blocked</span>
-      ${canAct() ? ' · click the ⊘ on a day to block/unblock it' : ''}</p></div>`;
-      if (BVIEW === 'calendar') {
-        const first = new Date(CAL.y, CAL.m - 1, 1), start = (first.getDay() + 6) % 7, dim = new Date(CAL.y, CAL.m, 0).getDate();
-        const today = new Date().toISOString().slice(0, 10);
-        h += `<div class="panel"><div class="cal">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow">${d}</div>`).join('')}`;
-        for (let i = 0; i < start; i++)h += `<div class="day out"></div>`;
-        for (let d = 1; d <= dim; d++) {
-          const ds = `${CAL.y}-${String(CAL.m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-          const dow = new Date(CAL.y, CAL.m - 1, d).getDay(), wkd = dow === 0 || dow === 6;
-          const hol = BOOK.holidays[ds], blk = BOOK.blocked_days.includes(ds);
-          const bks = BOOK.bookings.filter(b => b.date === ds), open = BOOK.open_slots[ds] || 0;
-          h += `<div class="day ${wkd ? 'wkd' : ''} ${hol ? 'hol' : ''} ${blk ? 'blk' : ''} ${ds === today ? 'today' : ''}">
-        <span class="dn">${d}</span>
-        ${canAct() ? `<button class="blkbtn" title="${blk ? 'Unblock day' : 'Block day (holiday)'}" onclick="dayBlock('${ds}',${!blk})">${ic('ban', 'width:12px;height:12px;')}</button>` : ''}
-        ${hol ? `<span class="tag">${esc(hol)}</span>` : ''}${blk && !hol ? '<span class="tag" style="color:#b91c1c;">Blocked</span>' : ''}
-        ${bks.map(b => `<span class="bk" title="${esc(b.company)} — ${esc(b.slot || b.time)}" onclick="openDrawer('${b.lead_id}')">${b.time} ${esc(b.company)}</span>`).join('')}
-        ${open ? `<span class="sl">${open} open</span>` : ''}</div>`;
+function ABBarChart({abStats}){
+  const ref=useRef(null);const inst=useRef(null);
+  useEffect(()=>{
+    if(!abStats||!ref.current)return;
+    const variants=abStats.variants||abStats||{};
+    const keys=Object.keys(variants).filter(k=>variants[k]);
+    if(!keys.length)return;
+    if(inst.current)inst.current.destroy();
+    const isDark=document.documentElement.dataset.theme==='dark';
+    inst.current=new window.Chart(ref.current.getContext('2d'),{
+      type:'bar',
+      data:{
+        labels:keys,
+        datasets:[
+          {label:'Sent',data:keys.map(k=>variants[k]?.sent||0),backgroundColor:keys.map(k=>hexToRgba(VARIANT_COLORS[k]||'#94A3B8',.25)),borderColor:keys.map(k=>VARIANT_COLORS[k]||'#94A3B8'),borderWidth:2,borderRadius:5,borderSkipped:false},
+          {label:'Replied',data:keys.map(k=>variants[k]?.replied||0),backgroundColor:keys.map(k=>VARIANT_COLORS[k]||'#94A3B8'),borderColor:keys.map(k=>VARIANT_COLORS[k]||'#94A3B8'),borderWidth:2,borderRadius:5,borderSkipped:false},
+        ]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:false,
+        plugins:{
+          legend:{position:'top',labels:{font:{family:'Inter',size:10,weight:'600'},boxWidth:9,usePointStyle:true,padding:10,color:isDark?'#A8BDD8':'#64748B'}},
+          tooltip:{bodyFont:{family:'Inter'},titleFont:{family:'Inter'}}
+        },
+        scales:{
+          y:{beginAtZero:true,grid:{color:isDark?'#1E2D45':'#F1F5F9'},ticks:{font:{family:'Inter',size:10},color:isDark?'#6B85A8':'#64748B'}},
+          x:{grid:{display:false},ticks:{font:{family:'Inter',size:11,weight:'700'},color:isDark?'#A8BDD8':'#334155'}}
         }
-        h += `</div></div>`;
-      } else {
-        h += `<div class="panel" style="overflow-x:auto;"><table><thead><tr><th></th><th>Company</th><th>Date</th><th>Time</th><th>Slot</th><th>Meeting</th></tr></thead><tbody>${BOOK.bookings.map(b => `<tr><td><button class="ibtn" onclick="openDrawer('${b.lead_id}')">${ic('eye')}</button></td>
-        <td><b>${esc(b.company)}</b><br><span style="font-size:11.5px;color:var(--mut);">${esc(b.email)}</span></td>
-        <td>${esc(b.date)}</td><td>${esc(b.time)}</td><td style="font-size:12px;">${esc(b.slot) || '—'}</td>
-        <td>${b.meeting_link ? `<a href="${esc(b.meeting_link)}" target="_blank">Join ↗</a>` : '—'}</td></tr>`).join('') ||
-          '<tr><td colspan="6" style="text-align:center;color:var(--mut);padding:24px;">No bookings yet</td></tr>'}</tbody></table></div>`;
       }
-      document.getElementById('view-bookings').innerHTML = h;
-    }
-    async function dayBlock(date, block) {
-      try { const d = await api('/day-block', { method: 'POST', body: JSON.stringify({ date, block }) }); toast(d.message); loadBookings(); }
-      catch (e) { toast(e.message, false); }
-    }
+    });
+    return()=>{if(inst.current)inst.current.destroy()};
+  },[abStats]);
+  if(!abStats)return <div className="empty"><div className="empty-icon">🧪</div><p>No A/B data</p></div>;
+  return <div style={{height:195,position:'relative'}}><canvas ref={ref}/></div>;
+}
 
-    /* ============================ documents ============================ */
-    function docStageChip(stage) {
-      const map = {
-        nda_sent: ['c-blue', 'Sent for Review'],
-        agr_sent: ['c-blue', 'Sent for Review'],
-        nda_modify: ['c-amber', 'Changes Requested'],
-        agr_modify: ['c-amber', 'Changes Requested'],
-        lead_accept: ['c-blue', 'Terms Accepted'],
-        sign_sent: ['c-purple', 'Awaiting Signature'],
-        signed: ['c-green', '&#10003; Signed'],
-      };
-      if (!stage) return '';
-      const [cls, label] = map[stage] || ['c-gray', stage];
-      return `<span class="chip ${cls}">${label}</span>`;
-    }
-    function docCell(o, k) {
-      const stage = o[k + '_stage'];
-      let h = stage ? docStageChip(stage) : chip(o[k + '_status']);
-      h += `<br><a class="btn ${canAct() ? 'btn-p' : 'btn-o'}" style="padding:5px 11px;font-size:11px;margin-top:5px;" target="_blank" href="${o[k + '_edit_url']}">${ic(canAct() ? 'edit' : 'eye')} ${canAct() ? 'Edit & Preview' : 'Preview'}</a>
-    <button class="btn btn-o" style="padding:5px 11px;font-size:11px;margin-top:5px;" onclick="navigator.clipboard.writeText('${o[k + '_sign_url']}');toast('Signing link copied')">${ic('copy')} Sign Link</button>`;
-      return h;
-    }
-    function docPipeline(o) {
-      const kycDone = ['APPROVED', 'PROCEED_NEXT'].includes(o.kyc_status);
-      const ndaSent = !!o.nda_stage;
-      const ndaSign = o.nda_stage === 'signed';
-      const agrSent = !!o.agreement_stage;
-      const agrSign = o.agreement_stage === 'signed';
-      const dot = (done, tip) => `<div class="dp-dot${done ? ' done' : ''}" title="${tip}"></div>`;
-      const line = done => `<div class="dp-line${done ? ' done' : ''}"></div>`;
-      return `<div class="doc-pipeline" title="KYC → NDA → NDA Signed → Agreement → Agreement Signed">
-        ${dot(kycDone, 'KYC')}${line(ndaSent)}${dot(ndaSent, 'NDA Sent')}${line(ndaSign)}${dot(ndaSign, 'NDA Signed')}${line(agrSent)}${dot(agrSent, 'Agreement Sent')}${line(agrSign)}${dot(agrSign, 'Agreement Signed')}
-      </div>`;
-    }
-    function renderDocs() {
-      const rows = LEADS.filter(l => l.onboarding);
-      if (!rows.length) {
-        document.getElementById('view-docs').innerHTML = '<div class="panel" style="text-align:center;color:var(--mut);padding:48px;">No onboarding records yet</div>';
-        return;
-      }
-      const cards = rows.map(l => {
-        const o = l.onboarding;
-        return `<div class="doc-card">
-          <div class="doc-card-head">
-            <div>
-              <b style="font-size:13px;">${esc(l.company)}</b>
-              <span class="chip ${o.company_type === 'overseas' ? 'c-amber' : 'c-blue'}" style="margin-left:7px;font-size:10px;">${o.company_type === 'overseas' ? 'Overseas' : 'Indian'}</span>
-              <br><span style="font-size:11px;color:var(--mut);">${esc(l.email)}</span>
-            </div>
-            ${docPipeline(o)}
-          </div>
-          <div class="doc-cols">
-            <div>
-              <div class="doc-col-lbl">KYC</div>
-              ${chip(o.kyc_status)}
-              <br><a class="btn btn-o" style="padding:4px 9px;font-size:11px;margin-top:5px;" target="_blank" href="${o.kyc_view_url}">${ic('eye')} View</a>
-            </div>
-            <div>
-              <div class="doc-col-lbl">NDA</div>
-              ${docCell(o, 'nda')}
-            </div>
-            <div>
-              <div class="doc-col-lbl">Agreement</div>
-              ${docCell(o, 'agreement')}
+function Header({loading,lastRefresh,onRefresh,alertCount,darkMode,toggleDark}){
+  const cd=useCountdown(30);
+  return <header className="header">
+    <div className="hdr-title">
+      <h1>Pipeline Command Centre</h1>
+      <p>Jane Aerospace · MIS Dashboard</p>
+    </div>
+    <div style={{display:'flex',alignItems:'center',gap:4}}>
+      <div className="live-dot"/>
+      <span className="live-text">{loading?'Refreshing…':'Live'}</span>
+    </div>
+    <Clock/>
+    {lastRefresh&&!loading&&<span className="hdr-countdown">↻ Next in {cd}s</span>}
+    <div className="hdr-sep"/>
+    {alertCount>0&&<span className="alert-bell">
+      <button className="hdr-btn" title="Alerts">🔔
+        <span className="alert-bell-badge">{alertCount}</span>
+      </button>
+    </span>}
+    <div className="dm-btn" onClick={toggleDark} title={darkMode?'Light mode':'Dark mode'}>{darkMode?'☀️':'🌙'}</div>
+    <button className={`hdr-btn${loading?' spin':''}`} onClick={onRefresh} title="Refresh (R)">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <path d="M1 4v6h6"/><path d="M23 20v-6h-6"/>
+        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+      </svg>
+      Refresh
+    </button>
+  </header>;
+}
+
+function Sidebar({active,setActive,onboarding}){
+  const actionCount=onboarding.filter(r=>r.pending_action).length;
+  const nav=[
+    {id:'pipeline',icon:'📊',label:'Pipeline'},
+    {id:'onboarding',icon:'🏢',label:'Onboarding',badge:actionCount||null},
+    {id:'analytics',icon:'📈',label:'Analytics'},
+  ];
+  return <aside className="sidebar">
+    <div className="sb-logo">
+      <div className="sb-logomark">✈</div>
+      <div className="sb-brand">
+        <div className="sb-brand-name">Jane Aerospace</div>
+        <div className="sb-brand-tag">Command Centre</div>
+      </div>
+    </div>
+    <nav className="sb-nav">
+      {nav.map(n=>(
+        <div key={n.id} className={`sb-item${active===n.id?' on':''}`} onClick={()=>setActive(n.id)}>
+          <span className="sb-icon">{n.icon}</span>
+          <span>{n.label}</span>
+          {n.badge?<span className="sb-item-badge">{n.badge}</span>:null}
+        </div>
+      ))}
+    </nav>
+    <div className="sb-footer">
+      <div className="sb-item" onClick={()=>window.open(`${BASE}/onboarding/pipeline-summary.json`,'_blank')}>
+        <span className="sb-icon">⚙</span><span>API Status</span>
+      </div>
+    </div>
+  </aside>;
+}
+
+function QuickBar({globalSearch,setGlobalSearch,onSync,onExport,loading}){
+  return <div className="quick-bar">
+    <div className="qb-search">
+      <span style={{fontSize:13,color:'var(--text4)'}}>🔍</span>
+      <input placeholder="Global search — company, email, contact…"
+        value={globalSearch} onChange={e=>setGlobalSearch(e.target.value)}/>
+      {globalSearch&&<span style={{cursor:'pointer',color:'var(--text4)',fontSize:14}} onClick={()=>setGlobalSearch('')}>✕</span>}
+    </div>
+    <div className="qb-spacer"/>
+    <button className="qb-btn" onClick={onSync} disabled={loading}>📊 Sync Sheets</button>
+    <button className="qb-btn" onClick={onExport}>⬇ Export CSV</button>
+    <button className="qb-btn primary" onClick={()=>window.print()}>🖨 Print</button>
+  </div>;
+}
+
+function KPICard({icon,label,value,rawValue,foot,pctVal,color,loading,showRing}){
+  const animated=useAnimCounter(typeof rawValue==='number'?rawValue:0);
+  if(loading)return <div className="kpi-card sk sk-kpi"/>;
+  const clr=KPI_COLORS[color]||KPI_COLORS.blue;
+  const bg=KPI_BG[color]||KPI_BG.blue;
+  const displayVal=typeof rawValue==='number'?animated.toLocaleString('en-IN'):value;
+  const trendDir=pctVal>60?'up':pctVal<20?'dn':'eq';
+  return <div className="kpi-card" data-icon={icon} style={{'--kc':clr}}>
+    <div className="kpi-card-inner">
+      <div className="kpi-icon-wrap" style={{background:bg}}>{icon}</div>
+      <div className="kpi-body">
+        <div className="kpi-lbl">{label}</div>
+        <div className="kpi-val">{displayVal}</div>
+      </div>
+    </div>
+    <div className="kpi-foot">
+      <span>{foot}</span>
+      {pctVal!=null&&<span className={`trend-${trendDir}`}>{trendDir==='up'?'▲':trendDir==='dn'?'▼':'●'} {Math.round(pctVal)}%</span>}
+    </div>
+    {showRing&&pctVal!=null&&<div className="kpi-ring-wrap"><Ring pct={pctVal} color={clr}/></div>}
+    {pctVal!=null&&!showRing&&<div className="kpi-prog"><div className="kpi-prog-fill" style={{width:Math.min(pctVal,100)+'%',background:clr}}/></div>}
+  </div>;
+}
+
+function KPIGrid({stats,summary,loading}){
+  const s=stats||{};const c=(summary||{}).counts||{};
+  const total=s.total_leads||0;const sent=s.sent_leads||0;
+  const replied=s.replied_leads||0;const booked=s.booked_leads||0;
+  const obTotal=summary?.total||0;const complete=c.complete||0;
+  const sentPct=total?Math.round(sent/total*100):0;
+  const replyPct=sent?Math.round(replied/sent*100):0;
+  const bookPct=replied?Math.round(booked/replied*100):0;
+  const obPct=booked?Math.round(obTotal/booked*100):0;
+  const compPct=obTotal?Math.round(complete/obTotal*100):0;
+  const cards=[
+    {icon:'👥',label:'Total Leads',value:fmtN(total),rawValue:total,foot:'In pipeline',color:'blue'},
+    {icon:'📤',label:'Emails Sent',value:fmtN(sent),rawValue:sent,foot:'of total leads',pctVal:sentPct,color:'teal'},
+    {icon:'💬',label:'Replied',value:fmtN(replied),rawValue:replied,foot:'reply rate',pctVal:replyPct,color:'amber'},
+    {icon:'📅',label:'Booked',value:fmtN(booked),rawValue:booked,foot:'of replied',pctVal:bookPct,color:'green'},
+    {icon:'🎯',label:'Conversion',value:fmtP(s.conversion_rate),rawValue:null,foot:'Leads → Booked',pctVal:+(s.conversion_rate||0),color:'violet',showRing:true},
+    {icon:'🏢',label:'Onboarding',value:fmtN(obTotal),rawValue:obTotal,foot:'started',pctVal:obPct,color:'blue'},
+    {icon:'✅',label:'Complete',value:fmtN(complete),rawValue:complete,foot:'Fully onboarded',pctVal:compPct,color:'green',showRing:true},
+  ];
+  return <div className="kpi-grid">{cards.map((c,i)=><KPICard key={i} {...c} loading={loading}/>)}</div>;
+}
+
+function AlertBanner({summary}){
+  const [expanded,setExpanded]=useState(false);const [dismissed,setDismissed]=useState(false);
+  if(dismissed||!summary)return null;
+  const c=summary.counts||{};const stuck=summary.stuck||[];
+  const kyc=(c.kyc_pending||0)+(c.kyc_review||0);
+  const nda=(c.nda_draft||0)+(c.nda_sent||0);
+  const agr=(c.agreement_draft||0)+(c.agreement_sent||0);
+  if(!stuck.length&&!kyc&&!nda&&!agr)return null;
+  const isCrit=stuck.length>3;
+  return <div className={`alert${isCrit?' crit':''}`}>
+    <div className="alert-left">
+      <div className="alert-icon">{isCrit?'🚨':'⚠️'}</div>
+      <button className="alert-dismiss" onClick={()=>setDismissed(true)}>✕</button>
+    </div>
+    <div className="alert-body">
+      <div className="alert-title">{isCrit?`${stuck.length} Deals Stuck — Immediate Action Required`:'Action Required Across Pipeline'}</div>
+      <div className="chips">
+        {stuck.length>0&&<span className="chip cw">⏰ {stuck.length} Stuck</span>}
+        {kyc>0&&<span className="chip ci">📄 {kyc} KYC Pending</span>}
+        {nda>0&&<span className="chip ci">✍ {nda} NDA Action</span>}
+        {agr>0&&<span className="chip ci">📝 {agr} Agreement Action</span>}
+        {(c.complete||0)>0&&<span className="chip cg">🎉 {c.complete} Complete</span>}
+        {(c.overseas||0)>0&&<span className="chip cp">🌐 {c.overseas} Overseas</span>}
+      </div>
+      {stuck.length>0&&<>
+        <button className="stuck-expand-btn" onClick={()=>setExpanded(!expanded)}>
+          {expanded?'▲ Hide':'▼ Show'} stuck companies
+        </button>
+        {expanded&&<div className="stuck-list">
+          {stuck.map((item,i)=>{
+            const co=item?.company||item?.lead_business_name||item?.email||`Lead #${i+1}`;
+            const age=item?.stuck_days||item?.days||'?';
+            const stage=item?.stage||'unknown';
+            const ageClr=parseInt(age)>14?'var(--red)':parseInt(age)>7?'var(--amber)':'var(--green)';
+            return <div key={i} className="stuck-item">
+              <span className="stuck-co">{co}</span>
+              <div style={{display:'flex',alignItems:'center',gap:6}}>
+                <span style={{fontSize:10,color:'var(--text4)',textTransform:'capitalize'}}>{dispSt(stage)}</span>
+                <span className="stuck-age" style={{background:ageClr+'22',color:ageClr}}>{age}d</span>
+              </div>
+            </div>;
+          })}
+        </div>}
+      </>}
+    </div>
+  </div>;
+}
+
+function Funnel({stats}){
+  const s=stats||{};const total=s.total_leads||1;
+  const stages=[
+    {lbl:'Total',n:s.total_leads||0,clr:'#1a56db'},
+    {lbl:'Sent',n:s.sent_leads||0,clr:'#0891b2'},
+    {lbl:'Replied',n:s.replied_leads||0,clr:'#d97706'},
+    {lbl:'Booked',n:s.booked_leads||0,clr:'#059669'},
+  ];
+  return <div className="panel">
+    <div className="ph"><div className="ph-title">📉 Pipeline Funnel</div></div>
+    <div className="pb">
+      {stages.map((st,i)=>{
+        const w=Math.max(12,Math.round(st.n/total*100));
+        const drop=i>0?Math.round(st.n/(stages[i-1].n||1)*100):null;
+        const dropClr=drop<40?'var(--red)':drop<70?'var(--amber)':'var(--green)';
+        return <div key={i} className="f-row">
+          <div className="f-lbl">{st.lbl}</div>
+          <div className="f-track">
+            <div className="f-fill" style={{width:w+'%',background:`linear-gradient(90deg,${st.clr},${hexToRgba(st.clr,.7)})`}}>
+              <span>{fmtN(st.n)}</span>
             </div>
           </div>
-        </div>`;
-      });
-      document.getElementById('view-docs').innerHTML = `<div style="max-width:900px;">${cards.join('')}</div>`;
-    }
+          <div className="f-n">{fmtN(st.n)}</div>
+          <div className="f-drop" style={{color:drop!=null?dropClr:'transparent'}}>{drop!=null?drop+'%':''}</div>
+        </div>;
+      })}
+      <div style={{marginTop:10,padding:'8px 10px',background:'var(--surface2)',borderRadius:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <span style={{fontSize:11,color:'var(--text3)'}}>End-to-end Conversion</span>
+        <span style={{fontSize:14,fontWeight:900,color:parseFloat(s.conversion_rate||0)>10?'var(--green)':'var(--amber)'}}>{fmtP(s.conversion_rate)}</span>
+      </div>
+    </div>
+  </div>;
+}
 
-    /* ============================ approvals ============================ */
-    const APPROVABLE = { kyc: 1, nda_draft: 1, agreement_draft: 1 };
-    function aprChip(k) {
-      const m = {
-        kyc: 'c-amber', nda_draft: 'c-purple', agreement_draft: 'c-blue', nda_sign: 'c-purple',
-        agreement_sign: 'c-blue', kyc_wait: 'c-gray', nda_wait: 'c-gray', agreement_wait: 'c-gray'
-      };
-      return m[k] || 'c-gray';
-    }
-    async function loadApprovals() {
-      let d = { action: [], waiting: [] };
-      try { const r = await api('/approvals'); d = Array.isArray(r) ? { action: r, waiting: [] } : r; } catch (e) { }
-      const row = (a, withDecision) => `<tr>
-    <td><span class="chip ${aprChip(a.kind)}">${esc(a.label)}</span></td>
-    <td><b>${esc(a.company)}</b><br><span style="font-size:11.5px;color:var(--mut);">${esc(a.email)}</span></td>
-    <td style="font-size:12px;">${esc(a.since) || '—'}</td>
-    <td>${a.view_url ? `<a class="btn btn-o" style="padding:5px 12px;font-size:11px;" target="_blank" href="${a.view_url}">${ic('eye')} Open</a>` : '—'}
-      ${(!withDecision && a.view_url && a.kind.endsWith('_wait') && a.kind !== 'kyc_wait') ? `<button class="btn btn-o" style="padding:5px 12px;font-size:11px;" onclick="navigator.clipboard.writeText('${a.view_url}');toast('Signing link copied')">${ic('copy')} Link</button>` : ''}</td>
-    <td>${withDecision ? (canAct() && APPROVABLE[a.kind] ? `
-      <button class="btn btn-g" style="padding:5px 12px;font-size:11px;" onclick="approve('${a.onboarding_id}','${a.kind}','approve')">${ic('check2')} Approve${a.kind !== 'kyc' ? ' & Send' : ''}</button>
-      <button class="btn btn-r" style="padding:5px 12px;font-size:11px;" onclick="approveReject('${a.onboarding_id}','${a.kind}')">${ic('x')} Reject</button>`
-          : '<span style="font-size:11px;color:var(--mut);">' + (canAct() ? 'review via Open' : 'approver only') + '</span>')
-          : `<span class="chip c-gray">WAITING</span>
-        <div style="font-size:10.5px;color:var(--mut);margin-top:3px;max-width:220px;">${esc(a.display)}</div>`}</td></tr>`;
-      document.getElementById('view-approvals').innerHTML = `
-  <div class="panel" style="overflow-x:auto;">
-    <h3>${ic('check2')} Needs Your Approval — ${d.action.length}</h3>
-    <table><thead><tr><th>Type</th><th>Company</th><th>Since</th><th>Review</th><th>Decision</th></tr></thead><tbody>${d.action.map(a => row(a, true)).join('') ||
-        '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:24px;">Nothing pending — all caught up ✓</td></tr>'}</tbody></table>
-  </div>
-  <div class="panel" style="overflow-x:auto;">
-    <h3>${ic('send')} Waiting on Lead — ${d.waiting.length}</h3>
-    <table><thead><tr><th>Type</th><th>Company</th><th>Since</th><th>Links</th><th>Status</th></tr></thead><tbody>${d.waiting.map(a => row(a, false)).join('') ||
-        '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:24px;">Nothing in flight</td></tr>'}</tbody></table>
-  </div>`;
-    }
-    async function approve(id, kind, action, notes = '') {
-      if (action === 'approve' && !confirm(kind === 'kyc' ? 'Approve this KYC? NDA will be generated.' : 'Approve and send to the lead for e-signature?')) return;
-      try {
-        const d = await api('/approvals/act', { method: 'POST', body: JSON.stringify({ onboarding_id: id, kind, action, notes }) });
-        toast(d.message); loadApprovals(); loadLeads();
-      } catch (e) { toast(e.message, false); }
-    }
-    function approveReject(id, kind) {
-      const notes = prompt('Reason for rejection (sent to the lead for KYC):', '');
-      if (notes === null) return; approve(id, kind, 'reject', notes);
-    }
+function RecentActivity({summary}){
+  const items=summary?.recent_complete||[];
+  return <div className="panel">
+    <div className="ph">
+      <div className="ph-title">🎉 Recent Completions</div>
+      <span className="ph-badge green">{items.length}</span>
+    </div>
+    <div className="pb">
+      {!items.length
+        ?<div className="empty"><div className="empty-icon">📭</div><p>No completions yet</p></div>
+        :<div className="activity-feed">
+          {items.map((item,i)=>{
+            const co=item?.company||item?.lead_business_name||item?.email||`Record ${i+1}`;
+            const age=daysAgo(item?.completed_at||item?.updated_at);
+            return <div key={i} className="activity-item">
+              <div className="activity-dot complete">🎉</div>
+              <div className="activity-body">
+                <div className="activity-co">{co}</div>
+                <div className="activity-sub">Fully onboarded · Agreement signed</div>
+              </div>
+              <div className="activity-time">{age!=null?age===0?'Today':`${age}d ago`:'—'}</div>
+            </div>;
+          })}
+        </div>}
+    </div>
+  </div>;
+}
 
-    /* ============================ bulk ============================ */
-    function renderBulk() {
-      document.getElementById('view-bulk').innerHTML = `<div class="panel" style="max-width:640px;">
-    <h3>${ic('send')} Bulk Send — Start Onboarding</h3>
-    <p style="font-size:12.5px;color:var(--mut);margin-bottom:10px;">Paste any number of email addresses (one per line or comma separated).
-      Each lead gets the KYC form email. Existing pipeline leads are skipped — no duplicates.</p>
-    <div class="fld"><textarea id="bulk-emails" rows="7" placeholder="ceo@acme.com&#10;ops@skyparts.io"></textarea></div>
-    <button class="btn btn-p" onclick="bulkSend()">${ic('send')} Start Onboarding for All</button>
-    <div class="msg" id="bulk-msg"></div><div id="bulk-results" style="margin-top:14px;"></div></div>`;
-    }
-    async function bulkSend() {
-      const m = document.getElementById('bulk-msg'); m.className = 'msg';
-      try {
-        const d = await api('/bulk-start', { method: 'POST', body: JSON.stringify({ emails: document.getElementById('bulk-emails').value }) });
-        m.className = 'msg ok'; m.textContent = `Started: ${d.started} · Skipped (duplicates): ${d.skipped} · Errors: ${d.errors}`;
-        document.getElementById('bulk-results').innerHTML = '<table><thead><tr><th>Email</th><th>Status</th><th>Detail</th></tr></thead><tbody>' +
-          d.results.map(r => `<tr><td>${esc(r.email)}</td><td><span class="chip ${r.status === 'started' ? 'c-green' : r.status === 'skipped' ? 'c-amber' : 'c-red'}">${r.status}</span></td>
-      <td style="font-size:12px;color:var(--mut);">${esc(r.detail)}</td></tr>`).join('') + '</tbody></table>';
-        loadLeads();
-      } catch (e) { m.className = 'msg err'; m.textContent = e.message; }
-    }
+function Badge({status}){return <span className={`badge ${badgeCls(status)}`}><span className="bd"/>{dispSt(status)||'N/A'}</span>}
+function ScoreBar({n}){
+  const w=Math.round(((n||0)/11)*100);
+  return <div className="srow"><div className="sbg"><div className="sfill" style={{width:w+'%',background:scoreClr(n||0)}}/></div><div className="sn">{n||0}</div></div>;
+}
 
-    /* ============================ logs ============================ */
-    async function loadLogs() {
-      let d = []; try { d = await api('/logs?limit=150'); } catch (e) { }
-      document.getElementById('view-logs').innerHTML = `<div class="panel" style="overflow-x:auto;">
-    <table><thead><tr><th>Time</th><th>Event</th><th>Company</th><th>Email</th><th>Detail</th></tr></thead><tbody>${d.map(r => `<tr><td style="white-space:nowrap;font-size:11.5px;color:var(--mut);">${esc(r.ts)}</td>
-      <td><span class="chip" style="font-size:9.5px;background:${actColor(r.event)}22;color:${actColor(r.event)};">${esc((r.event || '').replace(/_/g, ' '))}</span></td>
-      <td style="font-size:12px;">${esc(r.company)}</td><td style="font-size:12px;color:var(--mut);">${esc(r.email)}</td>
-      <td style="font-size:12px;">${esc(r.detail)}</td></tr>`).join('') ||
-        '<tr><td colspan="5" style="text-align:center;color:var(--mut);padding:24px;">No events yet</td></tr>'}</tbody></table></div>`;
-    }
+function ConfirmModal({msg,onConfirm,onCancel,type='ok'}){
+  return <div className="modal-overlay" onClick={onCancel}>
+    <div className="modal" onClick={e=>e.stopPropagation()}>
+      <h3>{type==='ok'?'Confirm Approval':'Confirm Rejection'}</h3>
+      <p>{msg}</p>
+      <div className="modal-actions">
+        <button className="modal-btn cancel" onClick={onCancel}>Cancel</button>
+        <button className={`modal-btn confirm-${type}`} onClick={onConfirm}>{type==='ok'?'✓ Approve':'✗ Reject'}</button>
+      </div>
+    </div>
+  </div>;
+}
 
-    /* ============================ users ============================ */
-    async function loadUsers() {
-      if (ROLE !== 'admin') return;
-      let d = []; try { d = await api('/users'); } catch (e) { }
-      document.getElementById('view-users').innerHTML = `
-  <div style="display:grid;grid-template-columns:340px 1fr;gap:20px;align-items:start;">
-    <div class="panel"><h3>${ic('plus')} Add User</h3>
-      <div class="fld"><label>Full Name</label><input id="u-name"></div>
-      <div class="fld"><label>Email</label><input id="u-email" type="email"></div>
-      <div class="fld"><label>Password</label><input id="u-pass" type="text"></div>
-      <div class="fld"><label>Role</label><select id="u-role">
-        <option value="viewer">Viewer — read-only tracking</option>
-        <option value="approver">Approver — can approve KYC/NDA/Agreement + lead actions</option>
-        <option value="admin">Admin — full access incl. user management</option></select></div>
-      <div class="msg" id="u-msg"></div>
-      <button class="btn btn-p" onclick="createUser()">${ic('plus')} Create User</button></div>
-    <div class="panel"><h3>${ic('users2')} All Users</h3>
-      <table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Created</th><th></th></tr></thead><tbody>${d.map(u => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.email)}</td>
-        <td><span class="chip ${u.role === 'admin' ? 'c-purple' : u.role === 'approver' ? 'c-blue' : 'c-gray'}">${esc(u.role)}</span></td>
-        <td style="font-size:12px;color:var(--mut);">${esc(u.created_at)}</td>
-        <td><button class="ibtn" style="color:var(--bad);border-color:#fecaca;" title="Remove"
-          onclick="deleteUser('${u.id}','${esc(u.email)}')">${ic('drop')}</button></td></tr>`).join('')}</tbody></table></div></div>`;
-    }
-    async function createUser() {
-      const m = document.getElementById('u-msg'); m.className = 'msg';
-      try {
-        const d = await api('/users', {
-          method: 'POST', body: JSON.stringify({
-            full_name: document.getElementById('u-name').value, email: document.getElementById('u-email').value,
-            password: document.getElementById('u-pass').value, role: document.getElementById('u-role').value
-          })
-        });
-        m.className = 'msg ok'; m.textContent = d.message; loadUsers();
-      }
-      catch (e) { m.className = 'msg err'; m.textContent = e.message; }
-    }
-    async function deleteUser(id, email) {
-      if (!confirm('Remove user ' + email + '?')) return;
-      try { await api('/users/' + id, { method: 'DELETE' }); toast('User removed'); loadUsers(); } catch (e) { toast(e.message, false); }
-    }
+const PAGE_SIZE=20;
+function OBSection({onboarding,loading,toast,globalSearch}){
+  const [search,setSearch]=useState('');
+  const [tab,setTab]=useState('all');
+  const [sortCol,setSortCol]=useState('age');const [sortDir,setSortDir]=useState('desc');
+  const [page,setPage]=useState(1);
+  const [confirm,setConfirm]=useState(null);
 
-    /* ============================ add-lead modal ============================ */
-    function openModal() {
-      document.getElementById('modal-wrap').style.display = 'flex';
-      document.getElementById('modal').innerHTML = `<h3>${ic('plus')} Add Lead</h3>
-    <div class="fld"><label>Email *</label><input id="m-email" type="email" placeholder="ceo@acme.com"></div>
-    <div class="fld"><label>Company Name</label><input id="m-company" placeholder="Acme Aerospace Pvt Ltd"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-      <div class="fld"><label>Contact Person</label><input id="m-contact"></div>
-      <div class="fld"><label>Phone</label><input id="m-phone"></div></div>
-    <div class="fld"><label>Summary / Notes</label><textarea id="m-summary" rows="2"></textarea></div>
-    <label style="display:flex;gap:9px;align-items:center;font-size:13px;margin:4px 0 14px;cursor:pointer;">
-      <input type="checkbox" id="m-start" style="width:16px;height:16px;"> Start onboarding immediately (send KYC form)</label>
-    <div class="msg" id="m-msg"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;">
-      <button class="btn btn-o" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-p" onclick="addLead()">${ic('plus')} Add Lead</button></div>
-    <p style="font-size:11px;color:var(--mut);margin-top:12px;">Automatically synced to Zoho CRM and appended to the Google Sheet.</p>`;
-    }
-    function closeModal() { document.getElementById('modal-wrap').style.display = 'none'; }
-    async function addLead() {
-      const m = document.getElementById('m-msg'); m.className = 'msg';
-      try {
-        const d = await api('/add-lead', {
-          method: 'POST', body: JSON.stringify({
-            email: document.getElementById('m-email').value, company_name: document.getElementById('m-company').value,
-            contact_name: document.getElementById('m-contact').value, phone: document.getElementById('m-phone').value,
-            summary: document.getElementById('m-summary').value, start_onboarding: document.getElementById('m-start').checked
-          })
-        });
-        toast(d.message); closeModal(); await loadLeads(); refreshAll();
-      }
-      catch (e) { m.className = 'msg err'; m.textContent = e.message; }
-    }
+  useEffect(()=>{if(globalSearch)setSearch(globalSearch)},[globalSearch]);
 
-    /* ============================ boot ============================ */
-    if (TOKEN) enterApp();
-    setInterval(() => {
-      if (TOKEN) {
-        const a = document.querySelector('.nav a.active');
-        if (a && a.dataset.view === 'overview') loadOverview();
-      }
-    }, 60000);
-  </script>
+  const q=(search||globalSearch||'').toLowerCase();
+  const filtered=useMemo(()=>onboarding.filter(r=>{
+    const m=!q||(r.lead_business_name||'').toLowerCase().includes(q)||(r.lead_email||'').toLowerCase().includes(q)||(r.lead_contact_name||'').toLowerCase().includes(q);
+    if(!m)return false;
+    if(tab==='action')return !!r.pending_action;
+    if(tab==='kyc')return (r.kyc_status||'').includes('review');
+    if(tab==='nda')return (r.nda_status||'').includes('review')||(r.nda_status||'').includes('signed');
+    if(tab==='complete')return (r.agreement_status||'').toLowerCase().includes('complet');
+    return true;
+  }),[onboarding,q,tab]);
 
-  <!-- ===================== Voice co-pilot (mic button) ===================== -->
-  <style>
-    .va-btn {
-      position: fixed;
-      right: 22px;
-      bottom: 22px;
-      width: 58px;
-      height: 58px;
-      border-radius: 50%;
-      border: none;
-      background: linear-gradient(135deg, #2563eb, #1e40af);
-      color: #fff;
-      cursor: pointer;
-      z-index: 120;
-      box-shadow: 0 10px 26px rgba(37, 99, 235, .45);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: transform .15s;
-    }
+  const sorted=useMemo(()=>[...filtered].sort((a,b)=>{
+    let av,bv;
+    if(sortCol==='age'){av=new Date(a.created_at||0);bv=new Date(b.created_at||0);}
+    else if(sortCol==='score'){av=a.stage_score||0;bv=b.stage_score||0;}
+    else if(sortCol==='company'){av=(a.lead_business_name||'').toLowerCase();bv=(b.lead_business_name||'').toLowerCase();}
+    else{av=0;bv=0;}
+    if(av<bv)return sortDir==='asc'?-1:1;
+    if(av>bv)return sortDir==='asc'?1:-1;
+    return 0;
+  }),[filtered,sortCol,sortDir]);
 
-    .va-btn:hover {
-      transform: scale(1.06);
-    }
+  const pageCount=Math.ceil(sorted.length/PAGE_SIZE);
+  const paged=sorted.slice((page-1)*PAGE_SIZE,page*PAGE_SIZE);
+  const doSort=col=>{if(sortCol===col)setSortDir(d=>d==='asc'?'desc':'asc');else{setSortCol(col);setSortDir('desc');}setPage(1);};
 
-    .va-btn svg {
-      width: 26px;
-      height: 26px;
-    }
+  const doAction=async(row,type,action)=>{
+    let url;
+    if(type==='kyc')url=`${BASE}/onboarding/kyc/review/${row.id}`;
+    else if(type==='nda')url=`${BASE}/onboarding/nda/sign-review/${row.id}`;
+    else url=`${BASE}/onboarding/agreement/sign-review/${row.id}`;
+    try{
+      const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,notes:''})});
+      toast.fire(r.ok?`${type.toUpperCase()} ${action}d ✓`:'Action failed',r.ok?'success':'error');
+    }catch{toast.fire('Network error','error');}
+    setConfirm(null);
+  };
 
-    .va-btn.listening {
-      background: linear-gradient(135deg, #dc2626, #991b1b);
-      animation: vaPulse 1.1s infinite;
-    }
+  const promptAction=(row,type,action)=>{
+    const co=row.lead_business_name||row.lead_email||'this lead';
+    setConfirm({msg:`${action==='approve'?'Approve':'Reject'} ${type.toUpperCase()} for ${co}?`,onConfirm:()=>doAction(row,type,action),type:action==='approve'?'ok':'no'});
+  };
 
-    .va-btn.thinking {
-      background: linear-gradient(135deg, #7c3aed, #4c1d95);
-    }
+  const exportCSV=()=>{
+    const headers=['Company','Email','Contact','Type','KYC','NDA','Agreement','Score','Age (days)'];
+    const rows=sorted.map(r=>[r.lead_business_name||'',r.lead_email||'',r.lead_contact_name||'',r.company_type||'',r.kyc_status||'',r.nda_status||'',r.agreement_status||'',r.stage_score||0,daysAgo(r.created_at)||0].map(v=>`"${v}"`).join(','));
+    const csv=[headers.join(','),...rows].join('\n');
+    const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+    a.download=`onboarding_${new Date().toISOString().split('T')[0]}.csv`;a.click();
+    toast.fire('CSV exported','success');
+  };
 
-    .va-btn.speaking {
-      background: linear-gradient(135deg, #059669, #065f46);
-    }
+  const actionCount=onboarding.filter(r=>r.pending_action).length;
+  const kycCount=onboarding.filter(r=>(r.kyc_status||'').includes('review')).length;
+  const tabs=[
+    {id:'all',lbl:`All (${onboarding.length})`},
+    {id:'action',lbl:`Action Needed${actionCount?` (${actionCount})`:''}`,hot:actionCount>0},
+    {id:'kyc',lbl:`KYC${kycCount?` (${kycCount})`:''}`,hot:kycCount>0},
+    {id:'nda',lbl:'NDA'},
+    {id:'complete',lbl:'Complete'},
+  ];
+  const th=(label,col)=>{
+    const active=sortCol===col;
+    return <th className={active?'sorted':''} onClick={()=>doSort(col)}>
+      {label}<span className="sort-icon">{active?(sortDir==='asc'?'↑':'↓'):'↕'}</span>
+    </th>;
+  };
 
-    @keyframes vaPulse {
-      0% {
-        box-shadow: 0 0 0 0 rgba(220, 38, 38, .5);
-      }
+  return <>
+    {confirm&&<ConfirmModal {...confirm} onCancel={()=>setConfirm(null)}/>}
+    <div className="panel">
+      <div className="ph">
+        <div className="ph-title">🏢 Onboarding Pipeline</div>
+        <span className="ph-badge">{fmtN(onboarding.length)}</span>
+        <button className="qb-btn" style={{marginLeft:8,padding:'4px 10px'}} onClick={exportCSV}>⬇ CSV</button>
+      </div>
+      <div className="toolbar">
+        <div className="seg">
+          {tabs.map(t=>(
+            <button key={t.id} className={`seg-btn${tab===t.id?' on':''}${t.hot&&tab!==t.id?' hot':''}`}
+              onClick={()=>{setTab(t.id);setPage(1);}}>
+              {t.lbl}
+            </button>
+          ))}
+        </div>
+        <div className="tbl-search">
+          <span style={{color:'var(--text4)',fontSize:12}}>🔍</span>
+          <input placeholder="Company, email or contact…" value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/>
+          {search&&<span style={{cursor:'pointer',color:'var(--text4)',fontSize:13}} onClick={()=>{setSearch('');setPage(1);}}>✕</span>}
+        </div>
+        <span className="tbl-count">{sorted.length} record{sorted.length!==1?'s':''}</span>
+      </div>
+      {loading?(
+        <div style={{padding:14}}>{[1,2,3,4,5].map(i=><div key={i} className="sk sk-row"/>)}</div>
+      ):paged.length===0?(
+        <div className="empty"><div className="empty-icon">📭</div><p>No records match</p></div>
+      ):(
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr>
+              {th('Company / Contact','company')}
+              <th>Type</th><th>KYC</th><th>NDA</th><th>Agreement</th>
+              {th('Score','score')}
+              {th('Age','age')}
+              <th>Actions</th>
+            </tr></thead>
+            <tbody>
+              {paged.map((r,i)=>{
+                const kyc=r.kyc_status||'N/A';const nda=r.nda_status||'N/A';const agr=r.agreement_status||'N/A';
+                const needKyc=kyc.includes('review');const needNda=nda.includes('review')||nda.includes('signed');const needAgr=agr.includes('review')||agr.includes('signed');
+                const age=daysAgo(r.created_at);const ageClr=age>14?'var(--red)':age>7?'var(--amber)':'var(--green)';
+                return <tr key={r.id||i}>
+                  <td>
+                    <div className="co">{r.lead_business_name||'—'}</div>
+                    <div className="co-sub">{r.lead_contact_name||''}</div>
+                    <div className="co-em">{r.lead_email||''}</div>
+                  </td>
+                  <td><span style={{fontSize:10,fontWeight:600,textTransform:'capitalize',padding:'2px 7px',background:'var(--surface2)',color:'var(--text3)',borderRadius:4,border:'1px solid var(--border)'}}>{r.company_type||'unknown'}</span></td>
+                  <td><Badge status={kyc}/></td>
+                  <td><Badge status={nda}/></td>
+                  <td><Badge status={agr}/></td>
+                  <td style={{minWidth:90}}><ScoreBar n={r.stage_score}/></td>
+                  <td><span style={{fontSize:11,fontWeight:800,color:ageClr}}>{age!=null?age+'d':'—'}</span></td>
+                  <td>
+                    <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                      {needKyc&&<><button className="act a-ok" onClick={()=>promptAction(r,'kyc','approve')}>✓ KYC</button>
+                        <button className="act a-no" onClick={()=>promptAction(r,'kyc','reject')}>✗</button></>}
+                      {needNda&&<button className="act a-ok" onClick={()=>promptAction(r,'nda','approve')}>✓ NDA</button>}
+                      {needAgr&&<button className="act a-ok" onClick={()=>promptAction(r,'agr','approve')}>✓ Agr</button>}
+                      {!needKyc&&!needNda&&!needAgr&&(
+                        <span style={{fontSize:10,color:'var(--text4)',fontStyle:'italic'}}>
+                          {agr.toLowerCase().includes('complet')?'✅ Done':'Waiting…'}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {pageCount>1&&<div className="pagination">
+        <button className="pg-btn" disabled={page<=1} onClick={()=>setPage(p=>p-1)}>← Prev</button>
+        {Array.from({length:Math.min(pageCount,7)},(_,i)=>{
+          const pg=pageCount<=7?i+1:(page<=4?i+1:page-3+i);
+          if(pg<1||pg>pageCount)return null;
+          return <button key={pg} className={`pg-btn${page===pg?' on':''}`} onClick={()=>setPage(pg)}>{pg}</button>;
+        })}
+        <button className="pg-btn" disabled={page>=pageCount} onClick={()=>setPage(p=>p+1)}>Next →</button>
+        <span className="pg-info">Page {page} of {pageCount} · {sorted.length} total</span>
+      </div>}
+    </div>
+  </>;
+}
 
-      70% {
-        box-shadow: 0 0 0 16px rgba(220, 38, 38, 0);
-      }
+function PipelineView({stats,summary,onboarding,abStats,loading,toast,globalSearch}){
+  return <>
+    <KPIGrid stats={stats} summary={summary} loading={loading}/>
+    {!loading&&<AlertBanner summary={summary}/>}
+    <div className="three-col">
+      <Funnel stats={stats}/>
+      <div className="panel">
+        <div className="ph"><div className="ph-title">🍩 Pipeline Distribution</div></div>
+        <div className="pb">{loading?<div className="sk sk-panel"/>:<DoughnutChart stats={stats}/>}</div>
+      </div>
+      <div className="panel">
+        <div className="ph"><div className="ph-title">🧪 A/B Performance</div></div>
+        <div className="pb">{loading?<div className="sk sk-panel"/>:<ABBarChart abStats={abStats}/>}</div>
+      </div>
+    </div>
+    <div className="two-col">
+      <RecentActivity summary={summary}/>
+      <div className="panel">
+        <div className="ph"><div className="ph-title">📊 Pipeline at a Glance</div></div>
+        <div className="pb">
+          {[
+            {lbl:'Send Coverage',a:stats?.total_leads,b:stats?.sent_leads,clr:'#0891b2'},
+            {lbl:'Reply Rate',a:stats?.sent_leads,b:stats?.replied_leads,clr:'#d97706'},
+            {lbl:'Booking Rate',a:stats?.replied_leads,b:stats?.booked_leads,clr:'#059669'},
+            {lbl:'Onboarding Start',a:stats?.booked_leads,b:summary?.total,clr:'#1a56db'},
+            {lbl:'Completion Rate',a:summary?.total,b:(summary?.counts||{}).complete,clr:'#7c3aed'},
+          ].map((st,i)=>{
+            const p=st.a?Math.round(((st.b||0)/st.a)*100):0;
+            return <div key={i} className="cv-row">
+              <div className="cv-hdr">
+                <span className="cv-lbl">{st.lbl}</span>
+                <span className="cv-pct" style={{color:p>60?'#059669':p>30?'#d97706':'#dc2626'}}>{p}%</span>
+              </div>
+              <div className="cv-bar"><div className="cv-fill" style={{width:p+'%',background:st.clr}}/></div>
+            </div>;
+          })}
+        </div>
+      </div>
+    </div>
+    <OBSection onboarding={onboarding} loading={loading} toast={toast} globalSearch={globalSearch}/>
+  </>;
+}
 
-      100% {
-        box-shadow: 0 0 0 0 rgba(220, 38, 38, 0);
-      }
-    }
+function AnalyticsView({abStats,stats,summary}){
+  const s=stats||{};const sm=summary||{};const c=sm.counts||{};
+  const obCells=[
+    {lbl:'KYC Pending',val:c.kyc_pending,clr:'#d97706'},{lbl:'KYC Review',val:c.kyc_review,clr:'#1a56db'},
+    {lbl:'KYC Approved',val:c.kyc_approved,clr:'#059669'},{lbl:'NDA Draft',val:c.nda_draft,clr:'#64748b'},
+    {lbl:'NDA Sent',val:c.nda_sent,clr:'#0891b2'},{lbl:'NDA Signed',val:c.nda_signed,clr:'#059669'},
+    {lbl:'Agr Draft',val:c.agreement_draft,clr:'#64748b'},{lbl:'Agr Sent',val:c.agreement_sent,clr:'#0891b2'},
+    {lbl:'Agr Signed',val:c.agreement_signed,clr:'#059669'},{lbl:'Complete',val:c.complete,clr:'#059669'},
+    {lbl:'Indian',val:c.indian,clr:'#f97316'},{lbl:'Overseas',val:c.overseas,clr:'#7c3aed'},
+  ];
+  return <>
+    <div className="two-col">
+      <div className="panel">
+        <div className="ph"><div className="ph-title">🧪 A/B Test — Sent vs Replied</div></div>
+        <div className="pb"><ABBarChart abStats={abStats}/></div>
+      </div>
+      <div className="panel">
+        <div className="ph"><div className="ph-title">🍩 Pipeline Distribution</div></div>
+        <div className="pb"><DoughnutChart stats={stats}/></div>
+      </div>
+    </div>
+    <div className="panel">
+      <div className="ph"><div className="ph-title">📊 Stage-by-Stage Conversion</div></div>
+      <div className="pb">
+        {[
+          {lbl:'Leads → Email Sent',a:s.total_leads,b:s.sent_leads,clr:'#0891b2'},
+          {lbl:'Sent → Replied',a:s.sent_leads,b:s.replied_leads,clr:'#d97706'},
+          {lbl:'Replied → Booked',a:s.replied_leads,b:s.booked_leads,clr:'#059669'},
+          {lbl:'Booked → Onboarding',a:s.booked_leads,b:sm.total,clr:'#1a56db'},
+          {lbl:'Onboarding → Complete',a:sm.total,b:c.complete,clr:'#7c3aed'},
+        ].map((st,i)=>{
+          const p=st.a?Math.round(((st.b||0)/st.a)*100):0;
+          return <div key={i} className="cv-row">
+            <div className="cv-hdr">
+              <span className="cv-lbl">{st.lbl}</span>
+              <span className="cv-pct" style={{color:p>50?'#059669':p>25?'#d97706':'#dc2626'}}>{p}%</span>
+            </div>
+            <div className="cv-bar"><div className="cv-fill" style={{width:p+'%',background:st.clr}}/></div>
+          </div>;
+        })}
+      </div>
+    </div>
+    <div className="panel">
+      <div className="ph"><div className="ph-title">📋 Onboarding Stage Breakdown</div></div>
+      <div className="pb">
+        <div className="ob-grid">
+          {obCells.map((x,i)=>(
+            <div key={i} className="ob-cell">
+              <div className="ob-cell-v" style={{color:x.clr}}>{fmtN(x.val||0)}</div>
+              <div className="ob-cell-l">{x.lbl}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </>;
+}
 
-    .va-gear {
-      position: fixed;
-      right: 88px;
-      bottom: 34px;
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      border: 1px solid var(--bd);
-      background: #fff;
-      color: #64748b;
-      cursor: pointer;
-      z-index: 120;
-      font-size: 14px;
-      line-height: 1;
-    }
+function App(){
+  const [tab,setTab]=useState('pipeline');
+  const [darkMode,setDarkMode]=useState(()=>localStorage.getItem('jane-dark')==='1');
+  const [globalSearch,setGlobalSearch]=useState('');
+  const {stats,summary,onboarding,abStats,loading,refresh,lastRefresh}=useData();
+  const toast=useToast();
 
-    .va-gear:hover {
-      color: #1e40af;
-    }
+  useEffect(()=>{
+    document.documentElement.dataset.theme=darkMode?'dark':'light';
+    localStorage.setItem('jane-dark',darkMode?'1':'0');
+  },[darkMode]);
 
-    .va-cap {
-      position: fixed;
-      right: 22px;
-      bottom: 92px;
-      max-width: 330px;
-      background: #0f172a;
-      color: #fff;
-      padding: 10px 14px;
-      border-radius: 12px;
-      font-size: 12.5px;
-      line-height: 1.55;
-      z-index: 120;
-      opacity: 0;
-      transform: translateY(8px);
-      transition: opacity .2s, transform .2s;
-      pointer-events: none;
-      box-shadow: 0 12px 30px rgba(15, 23, 42, .3);
-    }
+  useEffect(()=>{
+    const fn=e=>{
+      if(e.target.tagName==='INPUT')return;
+      if(e.key==='r'||e.key==='R')refresh();
+      if(e.key==='1')setTab('pipeline');
+      if(e.key==='2')setTab('onboarding');
+      if(e.key==='3')setTab('analytics');
+    };
+    window.addEventListener('keydown',fn);return()=>window.removeEventListener('keydown',fn);
+  },[refresh]);
 
-    .va-cap.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
+  const alertCount=(summary?.stuck||[]).length+onboarding.filter(r=>r.pending_action).length;
 
-    .va-cap b {
-      color: #93c5fd;
-    }
+  const handleSync=async()=>{
+    try{
+      const r=await fetch(`${BASE}/v2/sync-sheet`,{method:'POST'});
+      toast.fire(r.ok?'Sheets sync triggered ✓':'Sync failed',r.ok?'success':'error');
+    }catch{toast.fire('Network error','error');}
+  };
 
-    .va-pop {
-      position: fixed;
-      right: 22px;
-      bottom: 92px;
-      width: 286px;
-      background: #fff;
-      border: 1px solid var(--bd);
-      border-radius: 12px;
-      box-shadow: 0 14px 36px rgba(15, 23, 42, .2);
-      z-index: 121;
-      padding: 13px 15px;
-      display: none;
-    }
-  </style>
-  <div id="va-cap" class="va-cap"></div>
-  <div id="va-pop" class="va-pop"></div>
-  <button id="va-gear" class="va-gear" title="Voice settings" onclick="vaSettings()">&#9881;</button>
-  <button id="va-btn" class="va-btn" title="Click and speak" onclick="vaToggle()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-      stroke-linejoin="round">
-      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-      <line x1="12" y1="19" x2="12" y2="23" />
-    </svg>
-  </button>
-  <script>
-    let VA_REC = null, VA_BUSY = false, VA_HIST = [],
-      VA_MUTE = (localStorage.getItem('va_mute') === '1'),
-      VA_VOICE = localStorage.getItem('va_voice') || '';
-    const VA_SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const handleExport=()=>{
+    const headers=['Company','Email','Contact','Type','KYC','NDA','Agreement','Score','Age'];
+    const rows=onboarding.map(r=>[r.lead_business_name||'',r.lead_email||'',r.lead_contact_name||'',r.company_type||'',r.kyc_status||'',r.nda_status||'',r.agreement_status||'',r.stage_score||0,daysAgo(r.created_at)||0].map(v=>`"${v}"`).join(','));
+    const csv=[headers.join(','),...rows].join('\n');
+    const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+    a.download=`pipeline_${new Date().toISOString().split('T')[0]}.csv`;a.click();
+    toast.fire('Export complete','success');
+  };
 
-    function vaState(s) {
-      const b = document.getElementById('va-btn'); if (!b) return;
-      b.classList.remove('listening', 'thinking', 'speaking'); if (s) b.classList.add(s);
-    }
-    function vaCap(html, hold) {
-      const c = document.getElementById('va-cap'); if (!c) return;
-      c.innerHTML = html; c.classList.add('show'); clearTimeout(c._t);
-      if (hold !== false) c._t = setTimeout(() => c.classList.remove('show'), 5500);
-    }
+  return <div className="shell">
+    <Sidebar active={tab} setActive={setTab} onboarding={onboarding}/>
+    <div className="body">
+      <Header loading={loading} lastRefresh={lastRefresh} onRefresh={refresh}
+        alertCount={alertCount} darkMode={darkMode} toggleDark={()=>setDarkMode(!darkMode)}/>
+      <QuickBar globalSearch={globalSearch} setGlobalSearch={setGlobalSearch}
+        onSync={handleSync} onExport={handleExport} loading={loading}/>
+      <main className="content">
+        {tab==='pipeline'&&<PipelineView stats={stats} summary={summary} onboarding={onboarding}
+          abStats={abStats} loading={loading} toast={toast} globalSearch={globalSearch}/>}
+        {tab==='onboarding'&&<OBSection onboarding={onboarding} loading={loading} toast={toast} globalSearch={globalSearch}/>}
+        {tab==='analytics'&&<AnalyticsView abStats={abStats} stats={stats} summary={summary}/>}
+      </main>
+    </div>
+    <div className={`toast${toast.on?' on':''} ${toast.type}`}>{toast.msg}</div>
+  </div>;
+}
 
-    function vaToggle() {
-      if (VA_BUSY) { return; }
-      if (!VA_SR) { const t = prompt('Ask the assistant:'); if (t) vaSend(t); return; }
-      try {
-        VA_REC = new VA_SR(); VA_REC.lang = 'en-US'; VA_REC.interimResults = false; VA_REC.maxAlternatives = 1;
-        vaState('listening'); vaCap('Listening…', false);
-        VA_REC.onresult = e => vaSend(e.results[0][0].transcript);
-        VA_REC.onerror = () => { vaState(''); vaCap('Didn’t catch that — tap and try again.'); };
-        VA_REC.onend = () => { if (!VA_BUSY) vaState(''); };
-        VA_REC.start();
-      } catch (err) { vaState(''); vaCap('Voice unavailable in this browser.'); }
-    }
-
-    async function vaSend(text) {
-      VA_BUSY = true; vaState('thinking'); vaCap('<b>You:</b> ' + esc(text), false);
-      try {
-        const view = (document.querySelector('.nav a.active') || { dataset: {} }).dataset.view || '';
-        const d = await api('/assistant', {
-          method: 'POST', body: JSON.stringify({
-            message: text, history: VA_HIST.slice(-8), context: { view: view }
-          })
-        });
-        const reply = d.reply || '';
-        VA_HIST.push({ role: 'user', content: text }); VA_HIST.push({ role: 'assistant', content: reply });
-        if (d.directive) vaExec(d.directive);
-        vaCap('<b>You:</b> ' + esc(text) + '<br><b>Jane:</b> ' + esc(vaClean(reply)));
-        vaSpeak(reply);
-      } catch (e) { vaCap('<b>Error:</b> ' + esc(e.message)); vaState(''); VA_BUSY = false; }
-    }
-
-    function vaExec(d) {
-      try {
-        switch (d.type) {
-          case 'navigate': if (d.view) nav(d.view); break;
-          case 'open_lead': if (d.lead_id) openDrawer(d.lead_id); break;
-          case 'open_comments': openComments(); break;
-          case 'open_notifications': toggleNotifications(); break;
-          case 'filter_board': nav('kanban'); break;
-        }
-      } catch (e) { }
-    }
-
-    // Strip markdown / special characters so the voice never reads "asterisk asterisk" etc.
-    function vaClean(t) {
-      return (t || '')
-        .replace(/```[\s\S]*?```/g, ' ')       // code blocks
-        .replace(/`([^`]+)`/g, '$1')           // inline code
-        .replace(/\*\*([^*]+)\*\*/g, '$1')     // **bold**
-        .replace(/\*([^*]+)\*/g, '$1')         // *italic*
-        .replace(/__([^_]+)__/g, '$1')
-        .replace(/_([^_]+)_/g, '$1')
-        .replace(/^\s*#{1,6}\s+/gm, '')        // # headings
-        .replace(/^\s*[-*•]\s+/gm, '')         // bullet markers
-        .replace(/[*_`~#>|^=]+/g, ' ')         // any stray markdown chars
-        .replace(/\s+/g, ' ').trim();
-    }
-    function vaSpeak(text) {
-      text = vaClean(text);
-      if (VA_MUTE || !text || !window.speechSynthesis) { vaState(''); VA_BUSY = false; return; }
-      try {
-        speechSynthesis.cancel();
-        const u = new SpeechSynthesisUtterance(text);
-        const v = (speechSynthesis.getVoices() || []).find(x => x.name === VA_VOICE);
-        if (v) u.voice = v;
-        u.onend = () => { vaState(''); VA_BUSY = false; };
-        u.onerror = () => { vaState(''); VA_BUSY = false; };
-        vaState('speaking'); speechSynthesis.speak(u);
-      } catch (e) { vaState(''); VA_BUSY = false; }
-    }
-
-    function vaSettings() {
-      const p = document.getElementById('va-pop'); if (!p) return;
-      if (p.style.display === 'block') { p.style.display = 'none'; return; }
-      const voices = (window.speechSynthesis && speechSynthesis.getVoices()) || [];
-      p.innerHTML = `<div style="font-weight:700;font-size:12.5px;margin-bottom:9px;">${ic('mail')} Voice settings</div>
-    <label style="font-size:11px;color:var(--mut);">Voice (${voices.length} available)</label>
-    <select id="va-voice-sel" style="width:100%;margin:4px 0 11px;padding:7px;border:1px solid var(--bd);border-radius:7px;font-size:12px;">
-      <option value="">System default</option>
-      ${voices.map(v => `<option value="${esc(v.name)}" ${v.name === VA_VOICE ? 'selected' : ''}>${esc(v.name)} · ${esc(v.lang)}</option>`).join('')}
-    </select>
-    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;">
-      <input type="checkbox" id="va-mute" ${VA_MUTE ? 'checked' : ''}> Mute spoken replies</label>
-    <button class="btn btn-o" style="margin-top:11px;width:100%;padding:7px;font-size:12px;" onclick="vaTest()">\u{1F50A} Test voice</button>`;
-      p.style.display = 'block';
-      document.getElementById('va-voice-sel').onchange = e => { VA_VOICE = e.target.value; localStorage.setItem('va_voice', VA_VOICE); };
-      document.getElementById('va-mute').onchange = e => { VA_MUTE = e.target.checked; localStorage.setItem('va_mute', VA_MUTE ? '1' : '0'); };
-    }
-    function vaTest() { const m = VA_MUTE; VA_MUTE = false; vaSpeak('Hello ' + (NAME || 'there') + ', this is your Jane Aerospace co-pilot.'); VA_MUTE = m; }
-
-    function vaWelcome() {
-      if (!TOKEN || sessionStorage.getItem('va_welcomed')) return;
-      sessionStorage.setItem('va_welcomed', '1');
-      const msg = 'Welcome back, ' + (NAME || 'there') + '.';
-      setTimeout(() => { vaCap('<b>Jane:</b> ' + esc(msg)); vaSpeak(msg); }, 1000);
-    }
-    // prime the voice list (loads async in Chrome) and greet after login
-    if (window.speechSynthesis) { try { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => { }; } catch (e) { } }
-    (function () {
-      const _enter = window.enterApp;
-      if (typeof _enter === 'function') { window.enterApp = function () { _enter.apply(this, arguments); vaWelcome(); }; }
-      if (TOKEN) vaWelcome();
-    })();
-  </script>
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
 </body>
-
 </html>

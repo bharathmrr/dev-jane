@@ -3,328 +3,495 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Onboarding Pipeline</title>
+<title>Lead Onboarding</title>
 <script src="https://live.zwidgets.com/js-sdk/1.0.3/ZohoEmbeddedAppSDK.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:Arial,sans-serif;background:#f5f7fb;color:#1a1a2e;font-size:13px}
-  .wrap{padding:16px}
-  .card{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 6px rgba(0,0,0,.08);margin-bottom:12px}
-  h2{font-size:15px;color:#1a3a6b;margin-bottom:12px;border-bottom:2px solid #e8ecf6;padding-bottom:8px}
-  h3{font-size:13px;color:#444;margin-bottom:8px;font-weight:600}
-  .row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #f0f0f0}
-  .row:last-child{border-bottom:none}
-  .label{color:#666;font-size:12px}
-  .val{font-weight:600;font-size:12px}
-  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
-  .pill-green{background:#d4edda;color:#155724}
-  .pill-yellow{background:#fff3cd;color:#856404}
-  .pill-red{background:#f8d7da;color:#721c24}
-  .pill-blue{background:#cce5ff;color:#004085}
-  .pill-grey{background:#e2e3e5;color:#383d41}
-  .stages{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}
-  .stage{flex:1;min-width:80px;text-align:center;padding:8px 4px;border-radius:8px;border:2px solid #e8ecf6}
-  .stage.done{background:#d4edda;border-color:#28a745}
-  .stage.active{background:#cce5ff;border-color:#007bff}
-  .stage.rejected{background:#f8d7da;border-color:#dc3545}
-  .stage.waiting{background:#fff3cd;border-color:#ffc107}
-  .stage.pending{background:#f8f9fa;border-color:#dee2e6}
-  .stage-icon{font-size:18px;display:block;margin-bottom:2px}
-  .stage-name{font-size:10px;font-weight:600;color:#555}
-  .stage-sub{font-size:9px;color:#888;margin-top:1px}
-  .actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-  button{border:none;padding:8px 14px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;transition:opacity .15s}
-  button:hover{opacity:.85}
-  button:disabled{opacity:.5;cursor:not-allowed}
-  .btn-primary{background:#1a56db;color:#fff}
-  .btn-success{background:#28a745;color:#fff}
-  .btn-danger{background:#dc3545;color:#fff}
-  .btn-warning{background:#ffc107;color:#1a1a2e}
-  .btn-outline{background:#fff;color:#1a56db;border:1px solid #1a56db}
-  textarea{width:100%;border:1px solid #ccc;border-radius:6px;padding:8px;font-size:12px;resize:vertical;margin-top:6px;font-family:Arial,sans-serif}
-  .msg{padding:10px 12px;border-radius:6px;margin-top:8px;font-size:12px}
-  .msg-ok{background:#d4edda;color:#155724}
-  .msg-err{background:#f8d7da;color:#721c24}
-  .loading{text-align:center;padding:32px;color:#888}
-  .kyc-details{background:#f8f9fa;border-radius:6px;padding:10px;font-size:12px;margin-top:8px}
-  .kyc-details .krow{display:flex;gap:8px;padding:2px 0}
-  .kyc-details .kl{color:#666;min-width:90px}
-  .doc-preview{background:#f0f4ff;border-radius:6px;padding:10px;font-size:11px;color:#333;
-               max-height:120px;overflow-y:auto;white-space:pre-wrap;border:1px solid #d0dbff;margin:8px 0}
-  .action-pending{background:#fff3cd;border:1px solid #ffd966;border-radius:8px;
-                  padding:10px 12px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
-  .complete-banner{background:#d4edda;border:1px solid #c3e6cb;border-radius:8px;
-                   padding:12px;text-align:center;font-weight:600;color:#155724}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --blue:#1a56db;--blue2:#2563EB;--teal:#0891b2;
+  --green:#059669;--green2:#10B981;--amber:#d97706;--red:#dc2626;--violet:#7c3aed;
+  --navy:#050F1F;--navy2:#0A1F3D;
+  --bg:#EEF2F7;--surface:#FFFFFF;--surface2:#F8FAFC;
+  --border:#E2E8F0;--border2:#CBD5E1;
+  --text:#0F172A;--text2:#334155;--text3:#64748B;--text4:#94A3B8;
+  --shadow-sm:0 1px 3px rgba(0,0,0,.08);--shadow-md:0 4px 12px rgba(0,0,0,.1);--shadow-lg:0 8px 24px rgba(0,0,0,.14);
+  --font:'Inter',Arial,sans-serif;
+}
+html,body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:13px;-webkit-font-smoothing:antialiased}
+.wrap{padding:12px;display:flex;flex-direction:column;gap:10px}
+
+/* ── Lead Hero ──────────────────── */
+.hero{
+  background:linear-gradient(135deg,var(--navy),#0D2547 60%,#15325A);
+  border-radius:14px;padding:16px;display:flex;gap:12px;align-items:flex-start;
+  box-shadow:var(--shadow-lg);position:relative;overflow:hidden
+}
+.hero::after{
+  content:'✈';position:absolute;right:-8px;bottom:-16px;
+  font-size:80px;opacity:.04;pointer-events:none;line-height:1
+}
+.hero-avatar{
+  width:46px;height:46px;border-radius:12px;flex-shrink:0;
+  background:linear-gradient(135deg,var(--blue),var(--teal));
+  display:flex;align-items:center;justify-content:center;
+  font-size:20px;font-weight:900;color:#fff;
+  box-shadow:0 2px 8px rgba(26,86,219,.4);border:1.5px solid rgba(255,255,255,.15)
+}
+.hero-info{flex:1;min-width:0}
+.hero-name{color:#fff;font-size:15px;font-weight:900;letter-spacing:-.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;margin-bottom:2px}
+.hero-email{color:rgba(255,255,255,.5);font-size:10px;font-weight:500;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hero-pills{display:flex;flex-wrap:wrap;gap:4px}
+.hpill{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:20px;font-size:9px;font-weight:600;background:rgba(255,255,255,.1);color:rgba(255,255,255,.75);border:1px solid rgba(255,255,255,.12)}
+.hero-ring{flex-shrink:0}
+
+/* ── SVG Ring ───────────────────── */
+/* Animated via JS classList add */
+.ring-svg circle.fill{
+  transition:stroke-dashoffset .9s cubic-bezier(.4,0,.2,1);
+  transform-origin:center;transform:rotate(-90deg)
+}
+
+/* ── Pending Banner ─────────────── */
+.pending{
+  border-radius:11px;padding:11px 13px;
+  display:flex;align-items:flex-start;gap:9px;
+  animation:slideDown .3s ease
+}
+@keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+.pending.warn{background:linear-gradient(135deg,#FFFBEB,#FEF3C7);border:1px solid #FDE68A}
+.pending.crit{background:linear-gradient(135deg,#FFF1F2,#FFE4E6);border:1px solid #FECDD3}
+.pend-icon{font-size:19px;flex-shrink:0;padding-top:1px}
+.pend-body{flex:1}
+.pend-title{font-size:12px;font-weight:800;margin-bottom:3px}
+.pending.warn .pend-title{color:#92400E}
+.pending.crit .pend-title{color:#9F1239}
+.pend-sub{font-size:10px;margin-bottom:8px}
+.pending.warn .pend-sub{color:#A16207}
+.pending.crit .pend-sub{color:#BE185D}
+.pend-acts{display:flex;gap:6px;flex-wrap:wrap}
+
+/* ── Panel ──────────────────────── */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-sm);overflow:hidden}
+.ph{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:7px}
+.ph-t{font-size:12px;font-weight:700;color:var(--text);flex:1}
+.ph-pct{font-size:12px;font-weight:800}
+.pb{padding:13px 14px}
+
+/* ── Stage Timeline ─────────────── */
+.timeline{display:flex;align-items:flex-start;position:relative;gap:0}
+.timeline::before{content:'';position:absolute;top:16px;left:16px;right:16px;height:2px;background:var(--border);z-index:0}
+.tl-node{flex:1;display:flex;flex-direction:column;align-items:center;position:relative;z-index:1}
+.tl-dot{
+  width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:14px;border:2.5px solid var(--border);background:var(--surface);
+  margin-bottom:6px;transition:.25s ease;position:relative
+}
+.tl-dot.done{background:var(--green);border-color:var(--green);box-shadow:0 0 0 3px rgba(5,150,105,.15)}
+.tl-dot.active{background:var(--blue);border-color:var(--blue);box-shadow:0 0 0 3px rgba(26,86,219,.15);animation:ring-pulse 2s infinite}
+@keyframes ring-pulse{0%,100%{box-shadow:0 0 0 3px rgba(26,86,219,.15)}50%{box-shadow:0 0 0 6px rgba(26,86,219,.07)}}
+.tl-dot.warn{background:var(--amber);border-color:var(--amber);box-shadow:0 0 0 3px rgba(217,119,6,.15)}
+.tl-dot.blocked{background:var(--red);border-color:var(--red);box-shadow:0 0 0 3px rgba(220,38,38,.15)}
+.tl-dot.idle{background:var(--surface);border-color:var(--border2)}
+/* Connecting line fill between nodes */
+.tl-conn{position:absolute;top:15px;left:50%;width:100%;height:2px;z-index:0}
+.tl-conn.done{background:var(--green)}
+.tl-conn.active{background:linear-gradient(90deg,var(--green),var(--blue))}
+.tl-conn.idle{background:var(--border)}
+.tl-name{font-size:9px;font-weight:800;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;text-align:center;margin-bottom:2px}
+.tl-status{font-size:9px;color:var(--text4);text-align:center;max-width:70px;line-height:1.2}
+.tl-status.done{color:var(--green);font-weight:700}
+.tl-status.active{color:var(--blue);font-weight:700}
+.tl-status.warn{color:var(--amber);font-weight:700}
+.tl-status.blocked{color:var(--red);font-weight:700}
+
+/* ── Progress strip ─────────────── */
+.prog-strip{display:flex;gap:2px;margin-bottom:10px}
+.ps{flex:1;height:4px;border-radius:2px;background:var(--border);transition:background .5s ease}
+.ps.done{background:var(--green)}
+.ps.active{background:var(--blue)}
+.ps.warn{background:var(--amber)}
+.ps.blocked{background:var(--red)}
+
+/* ── Info Grid ──────────────────── */
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0}
+.ir{padding:7px 0;border-bottom:1px solid var(--border)}
+.ir:nth-last-child(-n+2){border-bottom:none}
+.ir-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text4);margin-bottom:2px}
+.ir-val{font-size:12px;font-weight:700;color:var(--text)}
+.ir-val.muted{color:var(--text4);font-weight:400;font-style:italic}
+
+/* ── Follow-up tracker ──────────── */
+.followup-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)}
+.followup-row:last-child{border-bottom:none}
+.followup-lbl{font-size:11px;color:var(--text2);font-weight:500;flex:1}
+.followup-dots{display:flex;gap:3px}
+.followup-dot{width:7px;height:7px;border-radius:50%}
+.followup-n{font-size:10px;font-weight:800;color:var(--text3);width:20px;text-align:right}
+
+/* ── Action Panel ───────────────── */
+.action-row{display:flex;flex-wrap:wrap;gap:7px}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border:1px solid transparent;border-radius:8px;cursor:pointer;font-size:11px;font-weight:800;font-family:var(--font);transition:.15s ease;white-space:nowrap}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.b-prim{background:var(--blue);color:#fff;border-color:var(--blue)}.b-prim:not(:disabled):hover{background:var(--blue2)}
+.b-ok{background:#D1FAE5;color:#065F46;border-color:#A7F3D0}.b-ok:not(:disabled):hover{background:#A7F3D0}
+.b-no{background:#FEE2E2;color:#991B1B;border-color:#FECACA}.b-no:not(:disabled):hover{background:#FECACA}
+.b-ghost{background:var(--surface);color:var(--text3);border-color:var(--border)}.b-ghost:not(:disabled):hover{background:var(--surface2)}
+
+/* ── Complete banner ─────────────── */
+.complete-banner{
+  background:linear-gradient(135deg,#D1FAE5,#A7F3D0);
+  border:1.5px solid #6EE7B7;border-radius:11px;padding:14px;
+  display:flex;align-items:center;gap:10px;
+  animation:slideDown .4s ease
+}
+.complete-banner-icon{font-size:28px}
+.complete-banner-body{flex:1}
+.complete-banner-title{font-size:14px;font-weight:900;color:#065F46}
+.complete-banner-sub{font-size:11px;color:#047857;margin-top:2px}
+
+/* ── Badge ──────────────────────── */
+.badge{display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:20px;font-size:10px;font-weight:700;border:1px solid transparent;white-space:nowrap}
+.bd{width:4px;height:4px;border-radius:50%;flex-shrink:0}
+.bpend{background:#FEF9C3;color:#A16207;border-color:#FDE68A}.bpend .bd{background:#A16207}
+.brev{background:#DBEAFE;color:#1D4ED8;border-color:#BFDBFE}.brev .bd{background:#1D4ED8}
+.bappr{background:#D1FAE5;color:#065F46;border-color:#A7F3D0}.bappr .bd{background:#059669}
+.brej{background:#FEE2E2;color:#991B1B;border-color:#FECACA}.brej .bd{background:#dc2626}
+.bsent{background:#E0F2FE;color:#0369A1;border-color:#BAE6FD}.bsent .bd{background:#0284C7}
+.bsign{background:#F0FDF4;color:#166534;border-color:#86EFAC}.bsign .bd{background:#16A34A}
+.bdraft{background:var(--surface2);color:var(--text3);border-color:var(--border)}.bdraft .bd{background:var(--text4)}
+.bcomp{background:#D1FAE5;color:#065F46;border-color:#6EE7B7}.bcomp .bd{background:var(--green)}
+.bna{background:var(--surface2);color:var(--text4);font-style:italic}.bna .bd{background:var(--border2)}
+
+/* ── Confirm Modal ──────────────── */
+.modal-ov{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)}
+.modal{background:var(--surface);border-radius:14px;padding:20px;max-width:290px;width:90%;box-shadow:var(--shadow-lg)}
+.modal h3{font-size:14px;font-weight:800;color:var(--text);margin-bottom:5px}
+.modal p{font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.5}
+.modal-acts{display:flex;gap:6px;justify-content:flex-end}
+.mb{padding:7px 13px;border-radius:7px;border:none;cursor:pointer;font-size:11px;font-weight:700;font-family:var(--font);transition:.13s}
+.mb-cancel{background:var(--surface2);color:var(--text3);border:1px solid var(--border)}
+.mb-ok{background:var(--green);color:#fff}
+.mb-no{background:var(--red);color:#fff}
+
+/* ── Loading / empty ─────────────── */
+.empty{text-align:center;padding:36px 16px;color:var(--text4)}
+.empty-icon{font-size:32px;margin-bottom:8px}
+.sk{background:linear-gradient(90deg,var(--surface2) 25%,var(--border) 50%,var(--surface2) 75%);background-size:400%;animation:shim 1.4s ease infinite;border-radius:8px}
+@keyframes shim{0%{background-position:100%}100%{background-position:0}}
+.spin-sm{display:inline-block;width:14px;height:14px;border:2px solid rgba(0,0,0,.1);border-top-color:currentColor;border-radius:50%;animation:spin .65s linear infinite;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Toast ──────────────────────── */
+.toast{position:fixed;bottom:14px;right:14px;background:var(--navy);color:#fff;padding:9px 14px;border-radius:9px;font-size:12px;font-weight:600;box-shadow:var(--shadow-lg);z-index:200;opacity:0;transform:translateY(6px);transition:.22s;pointer-events:none;max-width:250px}
+.toast.on{opacity:1;transform:translateY(0)}
+.toast.success{background:var(--green)}
+.toast.error{background:var(--red)}
+
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
 </style>
 </head>
 <body>
 <div class="wrap" id="app">
-  <div class="loading">Loading onboarding status…</div>
+  <div class="empty"><div class="empty-icon">⏳</div><p style="font-size:12px;font-weight:500">Loading lead data…</p></div>
 </div>
+<div class="toast" id="t-el"></div>
 
 <script>
-var API = "https://barrier-thirteen-untidy.ngrok-free.dev/api/v1/onboarding";
-var _data = null;
+const API='https://barrier-thirteen-untidy.ngrok-free.dev/api/v1';
+let _data=null,_busy=false,_confirm=null;
 
-// ---------- Zoho SDK init ----------
-ZOHO.embeddedApp.on("PageLoad", function(pageData) {
-  var entity = pageData.Entity;
-  var recordId = pageData.EntityId;
-  ZOHO.CRM.API.getRecord({Entity: entity, RecordID: recordId}).then(function(resp) {
-    var record = (resp.data || [])[0];
-    if (!record) { showError("Could not read lead record from Zoho CRM."); return; }
-    var email = record.Email || record.email;
-    if (!email) { showError("This lead has no Email address in Zoho CRM."); return; }
-    loadStatus(email);
-  }).catch(function(e) { showError("Zoho API error: " + e); });
+// ── Utils ──────────────────────────────────────────────────────────────────
+const fmtDate=iso=>{if(!iso)return '—';return new Date(iso).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'2-digit'})};
+const daysAgo=iso=>{if(!iso)return null;return Math.floor((Date.now()-new Date(iso))/864e5)};
+const scoreClr=n=>n>=8?'#059669':n>=5?'#d97706':'#dc2626';
+function badgeCls(v){
+  if(!v||v==='N/A'||v==='not_started')return 'bna';
+  const s=v.toLowerCase();
+  if(s.includes('pend'))return 'bpend';if(s.includes('review'))return 'brev';
+  if(s.includes('approv'))return 'bappr';if(s.includes('reject'))return 'brej';
+  if(s.includes('draft'))return 'bdraft';if(s.includes('sent'))return 'bsent';
+  if(s.includes('sign'))return 'bsign';if(s.includes('complet')||s==='done')return 'bcomp';
+  return 'bdraft';
+}
+const dispSt=v=>{if(!v||v==='N/A')return 'N/A';return v.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())};
+function badge(st){return `<span class="badge ${badgeCls(st)}"><span class="bd"></span>${dispSt(st)}</span>`;}
+function toast(msg,type='default'){
+  const el=document.getElementById('t-el');el.textContent=msg;
+  el.className=`toast on${type!=='default'?' '+type:''}`;
+  setTimeout(()=>el.classList.remove('on'),2800);
+}
+
+// ── Stage Classifier ───────────────────────────────────────────────────────
+function stageCls(st){
+  if(!st||st==='N/A'||st==='not_started')return 'idle';
+  const s=st.toLowerCase();
+  if(s.includes('complet')||s.includes('approv')||s.includes('sign'))return 'done';
+  if(s.includes('review'))return 'warn';
+  if(s.includes('reject'))return 'blocked';
+  if(s.includes('sent')||s.includes('draft'))return 'active';
+  return 'idle';
+}
+function stageIcon(cls,name){
+  const icons={done:'✅',active:'🔄',warn:'👁',blocked:'❌',idle:'⬜'};
+  return icons[cls]||'⬜';
+}
+
+// ── API ────────────────────────────────────────────────────────────────────
+async function loadByEmail(email){
+  try{
+    const r=await fetch(`${API}/onboarding/status-by-email?email=${encodeURIComponent(email)}`);
+    if(r.ok){_data=await r.json();render();}
+    else showError('No onboarding record found for this lead.<br><span style="font-size:10px">They may not have started onboarding yet.</span>');
+  }catch{showError('Could not reach server. Check connectivity.');}
+}
+
+async function doAction(id,type,action){
+  if(_busy)return;_busy=true;render();
+  let url;
+  if(type==='kyc')url=`${API}/onboarding/kyc/review/${id}`;
+  else if(type==='nda_draft')url=`${API}/onboarding/nda/draft-review/${id}`;
+  else if(type==='nda_sign')url=`${API}/onboarding/nda/sign-review/${id}`;
+  else if(type==='agr_draft')url=`${API}/onboarding/agreement/draft-review/${id}`;
+  else url=`${API}/onboarding/agreement/sign-review/${id}`;
+  try{
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,notes:''})});
+    toast(r.ok?`${dispSt(type)} ${action}d ✓`:'Action failed',r.ok?'success':'error');
+    if(r.ok)setTimeout(()=>loadByEmail(_data?.lead_email),1500);
+  }catch{toast('Network error','error');}
+  _busy=false;closeModal();
+}
+
+async function startOnboarding(leadId){
+  if(_busy)return;_busy=true;
+  try{
+    const r=await fetch(`${API}/onboarding/start/${leadId}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+    toast(r.ok?'🚀 Onboarding started!':'Failed to start',r.ok?'success':'error');
+    if(r.ok)setTimeout(()=>loadByEmail(_data?.lead_email),1500);
+  }catch{toast('Network error','error');}
+  _busy=false;
+}
+
+// ── Modal ──────────────────────────────────────────────────────────────────
+function promptAction(id,type,action,label){
+  _confirm={id,type,action};
+  const ov=document.createElement('div');ov.className='modal-ov';ov.id='c-modal';
+  ov.onclick=e=>{if(e.target===ov)closeModal();};
+  ov.innerHTML=`<div class="modal">
+    <h3>${action==='approve'?'Confirm Approval':'Confirm Rejection'}</h3>
+    <p>${action==='approve'?'Approve':'Reject'} <strong>${label}</strong> for <strong>${_data?.lead_business_name||_data?.lead_email||'this lead'}</strong>?</p>
+    <div class="modal-acts">
+      <button class="mb mb-cancel" onclick="closeModal()">Cancel</button>
+      <button class="mb mb-${action==='approve'?'ok':'no'}" onclick="confirmAct()">
+        ${action==='approve'?'✓ Approve':'✗ Reject'}
+      </button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function confirmAct(){if(_confirm)doAction(_confirm.id,_confirm.type,_confirm.action);}
+function closeModal(){const el=document.getElementById('c-modal');if(el)el.remove();_confirm=null;}
+
+// ── SVG Ring (rendered inline) ─────────────────────────────────────────────
+function buildRing(score,max,color,size=58){
+  const r=size/2-5;const circ=2*Math.PI*r;
+  const pct=Math.round((score/max)*100);
+  const offset=circ*(1-score/max);
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(0)">
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="#E2E8F0" stroke-width="4"/>
+    <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="4"
+      stroke-dasharray="${circ}" stroke-dashoffset="${circ}"
+      stroke-linecap="round" id="ring-fill"
+      style="transform-origin:center;transform:rotate(-90deg);transition:stroke-dashoffset .9s cubic-bezier(.4,0,.2,1)"/>
+    <text x="${size/2}" y="${size/2-3}" text-anchor="middle" font-size="14" font-weight="900" fill="${color}" font-family="Inter,sans-serif">${score}</text>
+    <text x="${size/2}" y="${size/2+10}" text-anchor="middle" font-size="9" fill="#94A3B8" font-family="Inter,sans-serif">/${max}</text>
+  </svg>`;
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function showError(msg){
+  document.getElementById('app').innerHTML=`<div class="empty"><div class="empty-icon">😕</div><p style="font-size:12px">${msg}</p><button onclick="location.reload()" style="margin-top:10px;padding:7px 13px;background:var(--blue);color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font)">↻ Retry</button></div>`;
+}
+
+function render(){
+  const d=_data;
+  if(!d)return;
+  const kyc=d.kyc_status||'N/A',nda=d.nda_status||'N/A',agr=d.agreement_status||'N/A';
+  const score=d.stage_score||0,maxScore=11;
+  const clr=scoreClr(score);
+  const age=daysAgo(d.created_at);
+  const kycCls=stageCls(kyc),ndaCls=stageCls(nda),agrCls=stageCls(agr);
+  const pending=d.pending_action;
+  const isComplete=agr.toLowerCase().includes('complet');
+  const initial=(d.lead_business_name||d.lead_contact_name||'?').charAt(0).toUpperCase();
+  const pctComplete=Math.round((score/maxScore)*100);
+
+  // Progress segments
+  const segs=Array.from({length:maxScore},(_,i)=>{
+    const cls=i<score?kycCls==='blocked'&&i<3?'blocked':i<4?'done':i<8?'done':'done':'';
+    return `<div class="ps${cls?' '+cls:''}"></div>`;
+  }).join('');
+
+  // Follow-up dots helper
+  const fDots=(count,max=5)=>{
+    const dots=Array.from({length:max},(_,i)=>
+      `<div class="followup-dot" style="background:${i<count?'#1a56db':'#E2E8F0'}"></div>`
+    ).join('');
+    return `<div class="followup-dots">${dots}</div>`;
+  };
+
+  // Pending banner
+  let pendingBanner='';
+  if(pending&&!isComplete){
+    const isCrit=pending.includes('reject')||pending.includes('kyc_review');
+    pendingBanner=`<div class="pending ${isCrit?'crit':'warn'}">
+      <div class="pend-icon">${isCrit?'🚨':'⏳'}</div>
+      <div class="pend-body">
+        <div class="pend-title">${isCrit?'Urgent Action Required':'Action Pending'}</div>
+        <div class="pend-sub">${dispSt(pending)}</div>
+        <div class="pend-acts">
+          ${kyc.includes('review')?`
+            <button class="btn b-ok" onclick="promptAction('${d.id}','kyc','approve','KYC Review')" ${_busy?'disabled':''}>✓ Approve KYC</button>
+            <button class="btn b-no" onclick="promptAction('${d.id}','kyc','reject','KYC Review')" ${_busy?'disabled':''}>✗ Reject</button>
+          `:''}
+          ${nda.includes('signed')?`<button class="btn b-ok" onclick="promptAction('${d.id}','nda_sign','approve','NDA Signing')" ${_busy?'disabled':''}>✓ Approve NDA Sign</button>`:''}
+          ${nda.includes('review')?`<button class="btn b-ok" onclick="promptAction('${d.id}','nda_draft','approve','NDA Draft')" ${_busy?'disabled':''}>✓ Approve NDA Draft</button>`:''}
+          ${agr.includes('signed')?`<button class="btn b-ok" onclick="promptAction('${d.id}','agr_sign','approve','Agreement Signing')" ${_busy?'disabled':''}>✓ Approve Agreement</button>`:''}
+          ${agr.includes('review')?`<button class="btn b-ok" onclick="promptAction('${d.id}','agr_draft','approve','Agreement Draft')" ${_busy?'disabled':''}>✓ Approve Agr Draft</button>`:''}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Complete banner
+  const completeBanner=isComplete?`<div class="complete-banner">
+    <div class="complete-banner-icon">🎉</div>
+    <div class="complete-banner-body">
+      <div class="complete-banner-title">Fully Onboarded</div>
+      <div class="complete-banner-sub">${d.lead_business_name||'Lead'} — Agreement signed & approved</div>
+    </div>
+  </div>`:'';
+
+  // Build action buttons for quick-actions panel
+  let qActions=`<button class="btn b-ghost" onclick="location.reload()">↻ Refresh</button>`;
+  if(!d.id)qActions=`<button class="btn b-prim" onclick="startOnboarding('${d.lead_id}')" ${_busy?'disabled':''}>🚀 Start Onboarding</button>${qActions}`;
+  if(kyc.includes('review'))qActions=`<button class="btn b-ok" onclick="promptAction('${d.id}','kyc','approve','KYC')" ${_busy?'disabled':''}>✓ KYC</button><button class="btn b-no" onclick="promptAction('${d.id}','kyc','reject','KYC')" ${_busy?'disabled':''}>✗ Reject</button>${qActions}`;
+  if(nda.includes('review'))qActions=`<button class="btn b-ok" onclick="promptAction('${d.id}','nda_draft','approve','NDA Draft')" ${_busy?'disabled':''}>✓ NDA</button>${qActions}`;
+  if(nda.includes('signed'))qActions=`<button class="btn b-ok" onclick="promptAction('${d.id}','nda_sign','approve','NDA Sign')" ${_busy?'disabled':''}>✓ NDA Sign</button>${qActions}`;
+  if(agr.includes('review'))qActions=`<button class="btn b-ok" onclick="promptAction('${d.id}','agr_draft','approve','Agreement Draft')" ${_busy?'disabled':''}>✓ Agr Draft</button>${qActions}`;
+  if(agr.includes('signed'))qActions=`<button class="btn b-ok" onclick="promptAction('${d.id}','agr_sign','approve','Agreement Sign')" ${_busy?'disabled':''}>✓ Agr Sign</button>${qActions}`;
+
+  document.getElementById('app').innerHTML=`
+    <!-- Lead Hero Card -->
+    <div class="hero">
+      <div class="hero-avatar">${initial}</div>
+      <div class="hero-info">
+        <div class="hero-name">${d.lead_business_name||d.lead_contact_name||'Unknown Lead'}</div>
+        <div class="hero-email">${d.lead_email||''}</div>
+        <div class="hero-pills">
+          ${d.company_type?`<span class="hpill">🏢 ${d.company_type}</span>`:''}
+          ${age!=null?`<span class="hpill">📅 ${age}d active</span>`:''}
+          ${d.kyc_followup_count?`<span class="hpill">📧 ${d.kyc_followup_count} follow-ups</span>`:''}
+          ${isComplete?`<span class="hpill" style="background:rgba(5,150,105,.3);border-color:rgba(5,150,105,.4)">✅ Complete</span>`:''}
+        </div>
+      </div>
+      <div class="hero-ring">${buildRing(score,maxScore,clr)}</div>
+    </div>
+
+    ${pendingBanner}
+    ${completeBanner}
+
+    <!-- Stage Timeline -->
+    <div class="panel">
+      <div class="ph">
+        <div class="ph-t">📊 Onboarding Journey</div>
+        <span class="ph-pct" style="color:${clr}">${pctComplete}% done</span>
+      </div>
+      <div class="pb">
+        <div class="prog-strip">${segs}</div>
+        <div class="timeline">
+          ${[
+            {name:'KYC',cls:kycCls,st:kyc},
+            {name:'NDA',cls:ndaCls,st:nda},
+            {name:'Agreement',cls:agrCls,st:agr},
+          ].map((node,i,arr)=>`
+            <div class="tl-node">
+              ${i<arr.length-1?`<div class="tl-conn ${node.cls==='done'?'done':node.cls==='active'?'active':'idle'}"></div>`:''}
+              <div class="tl-dot ${node.cls}">${stageIcon(node.cls,node.name)}</div>
+              <div class="tl-name">${node.name}</div>
+              <div class="tl-status ${node.cls}">${dispSt(node.st)}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Detail -->
+    <div class="panel">
+      <div class="ph"><div class="ph-t">📋 Status Detail</div></div>
+      <div class="pb">
+        <div class="info-grid">
+          <div class="ir"><div class="ir-lbl">KYC Status</div><div class="ir-val">${badge(kyc)}</div></div>
+          <div class="ir"><div class="ir-lbl">NDA Status</div><div class="ir-val">${badge(nda)}</div></div>
+          <div class="ir"><div class="ir-lbl">Agreement</div><div class="ir-val">${badge(agr)}</div></div>
+          <div class="ir"><div class="ir-lbl">Company Type</div><div class="ir-val${!d.company_type?' muted':''}">${d.company_type||'Not detected'}</div></div>
+          <div class="ir"><div class="ir-lbl">Started</div><div class="ir-val">${fmtDate(d.created_at)}</div></div>
+          <div class="ir"><div class="ir-lbl">Contact</div><div class="ir-val${!d.lead_contact_name?' muted':''}">${d.lead_contact_name||'—'}</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Follow-up Tracker -->
+    <div class="panel">
+      <div class="ph"><div class="ph-t">📧 Follow-up Tracker</div></div>
+      <div class="pb">
+        <div class="followup-row">
+          <div class="followup-lbl">KYC Reminders</div>
+          ${fDots(d.kyc_followup_count||0)}
+          <div class="followup-n">${d.kyc_followup_count||0}</div>
+        </div>
+        <div class="followup-row">
+          <div class="followup-lbl">NDA Reminders</div>
+          ${fDots(d.nda_followup_count||0)}
+          <div class="followup-n">${d.nda_followup_count||0}</div>
+        </div>
+        <div class="followup-row">
+          <div class="followup-lbl">Agreement Reminders</div>
+          ${fDots(d.agreement_followup_count||0)}
+          <div class="followup-n">${d.agreement_followup_count||0}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="panel">
+      <div class="ph"><div class="ph-t">⚡ Quick Actions</div></div>
+      <div class="pb">
+        <div class="action-row">${qActions}</div>
+        ${_busy?'<div style="margin-top:8px;font-size:11px;color:var(--text4)"><span class="spin-sm"></span> Processing…</div>':''}
+      </div>
+    </div>
+  `;
+
+  // Animate ring after render
+  setTimeout(()=>{
+    const fill=document.getElementById('ring-fill');
+    if(fill){
+      const r=58/2-5;const circ=2*Math.PI*r;
+      fill.setAttribute('stroke-dashoffset',circ*(1-score/maxScore));
+    }
+  },50);
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+ZOHO.embeddedApp.on('PageLoad',function(data){
+  const email=data?.Email||data?.email||data?.Entity?.Email||data?.Entity?.email;
+  if(!email){showError('Could not read lead email from CRM context.');return;}
+  loadByEmail(email);
 });
 ZOHO.embeddedApp.init();
-
-// ---------- API calls ----------
-function loadStatus(email) {
-  fetch(API + "/status-by-email?email=" + encodeURIComponent(email), {
-    headers: {"ngrok-skip-browser-warning": "1"}
-  })
-  .then(function(r) {
-    if (r.status === 404) { renderNotInSystem(email); return null; }
-    return r.json();
-  })
-  .then(function(d) { if (d) { _data = d; render(d); } })
-  .catch(function(e) { showError("API error: " + e); });
-}
-
-function doAction(endpoint, payload, successMsg) {
-  var btn = document.querySelectorAll("button");
-  btn.forEach(function(b){ b.disabled = true; });
-  clearMsg();
-  fetch(endpoint, {
-    method: "POST",
-    headers: {"Content-Type":"application/json","ngrok-skip-browser-warning":"1"},
-    body: JSON.stringify(payload)
-  })
-  .then(function(r){ return r.json(); })
-  .then(function(d){
-    showMsg(d.message || successMsg, "ok");
-    setTimeout(function(){ loadStatus(_data.lead_email); }, 1800);
-  })
-  .catch(function(e){ showMsg("Error: " + e, "err"); btn.forEach(function(b){ b.disabled = false; }); });
-}
-
-// ---------- Render ----------
-function renderNotInSystem(email) {
-  document.getElementById("app").innerHTML = [
-    '<div class="card">',
-    '<h2>Onboarding Pipeline</h2>',
-    '<p style="color:#888;font-size:12px">Lead <strong>' + esc(email) + '</strong> is not yet in the scheduler system.</p>',
-    '<p style="color:#aaa;font-size:11px;margin-top:8px">Leads are auto-imported from Zoho Bookings when they book a meeting.</p>',
-    '</div>'
-  ].join("");
-}
-
-function render(d) {
-  var html = ['<div class="card">'];
-  html.push('<h2>Onboarding Pipeline</h2>');
-
-  // Lead info
-  html.push('<div class="row"><span class="label">Company</span><span class="val">' + esc(d.lead_business_name || "—") + '</span></div>');
-  html.push('<div class="row"><span class="label">Contact</span><span class="val">' + esc(d.lead_contact_name || "—") + '</span></div>');
-  if (d.company_type) {
-    var ct = d.company_type === "indian" ? "🇮🇳 Indian" : "🌐 Overseas";
-    html.push('<div class="row"><span class="label">Type</span><span class="val">' + ct + '</span></div>');
-  }
-
-  // Not started
-  if (!d.onboarding_started) {
-    html.push('<div style="margin-top:14px">');
-    html.push('<p style="color:#666;font-size:12px;margin-bottom:10px">Onboarding has not been started for this lead.</p>');
-    html.push('<button class="btn-primary" onclick="startOnboarding(\'' + d.lead_id + '\')">Start Onboarding Process</button>');
-    html.push('</div>');
-    html.push('</div>');
-    document.getElementById("app").innerHTML = html.join("");
-    return;
-  }
-
-  html.push('</div>'); // close first card
-
-  // Stage progress bar
-  html.push('<div class="card">');
-  html.push('<h2>Pipeline Stages</h2>');
-  html.push(renderStages(d));
-  html.push('<div class="row" style="margin-top:8px"><span class="label">Stage Score</span><span class="val">' + d.stage_score + ' / 11</span></div>');
-  html.push('</div>');
-
-  // Pending action banner
-  var pa = d.pending_action || {};
-  if (pa.type === "complete") {
-    html.push('<div class="complete-banner">✅ Onboarding Complete — Proceed with Training</div>');
-  } else if (pa.type !== "waiting") {
-    html.push('<div class="action-pending">⚠️ <strong>Action required:</strong> ' + esc(pa.label) + '</div>');
-    html.push(renderActionCard(d, pa));
-  } else {
-    html.push('<div class="card"><div class="row"><span class="label">Status</span><span class="val">⏳ ' + esc(pa.label) + '</span></div></div>');
-  }
-
-  document.getElementById("app").innerHTML = html.join("");
-}
-
-function renderStages(d) {
-  var k = d.kyc_status || "PENDING";
-  var n = d.nda_status || "PENDING";
-  var a = d.agreement_status || "PENDING";
-
-  function stageClass(status) {
-    if (!status || status === "PENDING") return "pending";
-    if (["APPROVED","PROCEED_NEXT"].includes(status)) return "done";
-    if (["REJECTED","DRAFT_REJECTED","SIGN_REJECTED"].includes(status)) return "rejected";
-    if (["FORM_SENT","SUBMITTED","UNDER_REVIEW","TEAM_REVIEW","DRAFT_GENERATED","SIGN_UNDER_REVIEW","SIGNED_RECEIVED"].includes(status)) return "active";
-    if (["SENT_TO_LEAD"].includes(status)) return "waiting";
-    return "pending";
-  }
-  function stageIcon(cls) {
-    return {done:"✅",active:"🔵",rejected:"❌",waiting:"📤",pending:"⬜"}[cls] || "⬜";
-  }
-
-  var kc = stageClass(k), nc = stageClass(n), ac = stageClass(a);
-  return [
-    '<div class="stages">',
-    '<div class="stage ' + kc + '"><span class="stage-icon">' + stageIcon(kc) + '</span>',
-    '<span class="stage-name">KYC</span><span class="stage-sub">' + shortStatus(k) + '</span></div>',
-    '<div class="stage ' + nc + '"><span class="stage-icon">' + stageIcon(nc) + '</span>',
-    '<span class="stage-name">NDA</span><span class="stage-sub">' + shortStatus(n) + '</span></div>',
-    '<div class="stage ' + ac + '"><span class="stage-icon">' + stageIcon(ac) + '</span>',
-    '<span class="stage-name">Agreement</span><span class="stage-sub">' + shortStatus(a) + '</span></div>',
-    '</div>'
-  ].join("");
-}
-
-function shortStatus(s) {
-  var map = {
-    PENDING:"Pending", FORM_SENT:"Sent", SUBMITTED:"Submitted",
-    UNDER_REVIEW:"In Review", REJECTED:"Rejected", APPROVED:"Approved",
-    DRAFT_GENERATED:"Draft Ready", TEAM_REVIEW:"Team Review",
-    DRAFT_REJECTED:"Rejected", SENT_TO_LEAD:"Sent to Lead",
-    SIGNED_RECEIVED:"Signed Rcvd", SIGN_UNDER_REVIEW:"Sign Review",
-    SIGN_REJECTED:"Sign Rejected", PROCEED_NEXT:"Complete"
-  };
-  return map[s] || s;
-}
-
-function renderActionCard(d, pa) {
-  var html = ['<div class="card" id="action-card">'];
-  var oid = d.id;
-
-  if (pa.type === "kyc_review") {
-    var ks = d.kyc_submission || {};
-    html.push('<h2>KYC Review</h2>');
-    html.push('<div class="kyc-details">');
-    html.push('<div class="krow"><span class="kl">Company</span><span>' + esc(ks.company_name || d.lead_business_name) + '</span></div>');
-    html.push('<div class="krow"><span class="kl">Contact</span><span>' + esc(ks.contact_name || "") + '</span></div>');
-    html.push('<div class="krow"><span class="kl">Phone</span><span>' + esc(ks.contact_number || "") + '</span></div>');
-    html.push('<div class="krow"><span class="kl">Type</span><span>' + esc(ks.company_type || "") + '</span></div>');
-    html.push('<div class="krow"><span class="kl">GST Cert</span><span>' + (ks.has_gst ? "✅ Uploaded" : "—") + '</span></div>');
-    html.push('<div class="krow"><span class="kl">Inc. Cert</span><span>' + (ks.has_incorporation ? "✅ Uploaded" : "❌ Missing") + '</span></div>');
-    html.push('<div class="krow"><span class="kl">Attempt</span><span>#' + (ks.attempt_number || 1) + '</span></div>');
-    html.push('</div>');
-    html.push('<h3 style="margin-top:10px">Rejection notes (required if rejecting)</h3>');
-    html.push('<textarea id="notes" rows="3" placeholder="Reason for rejection…"></textarea>');
-    html.push('<div class="actions">');
-    html.push('<button class="btn-success" onclick="reviewAction(\'' + API + '/kyc/review/' + oid + '\',\'approve\')">✅ Approve KYC</button>');
-    html.push('<button class="btn-danger" onclick="reviewAction(\'' + API + '/kyc/review/' + oid + '\',\'reject\')">❌ Reject KYC</button>');
-    html.push('</div>');
-
-  } else if (pa.type === "nda_draft_review") {
-    html.push('<h2>NDA Draft Review</h2>');
-    if (d.nda_draft_content) {
-      html.push('<div class="doc-preview">' + esc(d.nda_draft_content.substring(0, 600)) + (d.nda_draft_content.length > 600 ? "\n…[truncated]" : "") + '</div>');
-    }
-    html.push('<h3>Feedback / revision notes</h3>');
-    html.push('<textarea id="notes" rows="3" placeholder="Leave blank to approve. Add notes to request revision."></textarea>');
-    html.push('<div class="actions">');
-    html.push('<button class="btn-success" onclick="reviewAction(\'' + API + '/nda/draft-review/' + oid + '\',\'approve\')">✅ Approve &amp; Send to Lead</button>');
-    html.push('<button class="btn-warning" onclick="reviewAction(\'' + API + '/nda/draft-review/' + oid + '\',\'reject\')">🔄 Request Revision</button>');
-    html.push('</div>');
-
-  } else if (pa.type === "nda_sign_review") {
-    html.push('<h2>Signed NDA Review</h2>');
-    html.push('<p style="color:#555;font-size:12px;margin-bottom:8px">Lead has returned a signed copy. Review and approve to proceed to Customer Agreement.</p>');
-    html.push('<h3>Notes (required if rejecting)</h3>');
-    html.push('<textarea id="notes" rows="3" placeholder="Reason for rejection…"></textarea>');
-    html.push('<div class="actions">');
-    html.push('<button class="btn-success" onclick="reviewAction(\'' + API + '/nda/sign-review/' + oid + '\',\'approve\')">✅ Approve Signed NDA</button>');
-    html.push('<button class="btn-danger" onclick="reviewAction(\'' + API + '/nda/sign-review/' + oid + '\',\'reject\')">❌ Reject Signature</button>');
-    html.push('</div>');
-
-  } else if (pa.type === "agreement_draft_review") {
-    html.push('<h2>Customer Agreement Review</h2>');
-    if (d.agreement_draft_content) {
-      html.push('<div class="doc-preview">' + esc(d.agreement_draft_content.substring(0, 600)) + (d.agreement_draft_content.length > 600 ? "\n…[truncated]" : "") + '</div>');
-    }
-    html.push('<h3>Feedback / revision notes</h3>');
-    html.push('<textarea id="notes" rows="3" placeholder="Leave blank to approve. Add notes to request revision."></textarea>');
-    html.push('<div class="actions">');
-    html.push('<button class="btn-success" onclick="reviewAction(\'' + API + '/agreement/draft-review/' + oid + '\',\'approve\')">✅ Approve &amp; Send to Lead</button>');
-    html.push('<button class="btn-warning" onclick="reviewAction(\'' + API + '/agreement/draft-review/' + oid + '\',\'reject\')">🔄 Request Revision</button>');
-    html.push('</div>');
-
-  } else if (pa.type === "agreement_sign_review") {
-    html.push('<h2>Signed Agreement Review</h2>');
-    html.push('<p style="color:#555;font-size:12px;margin-bottom:8px">Lead has returned the signed Customer Agreement.</p>');
-    html.push('<h3>Notes (required if rejecting)</h3>');
-    html.push('<textarea id="notes" rows="3" placeholder="Reason for rejection…"></textarea>');
-    html.push('<div class="actions">');
-    html.push('<button class="btn-success" onclick="reviewAction(\'' + API + '/agreement/sign-review/' + oid + '\',\'approve\')">✅ Approve — Onboarding Complete</button>');
-    html.push('<button class="btn-danger" onclick="reviewAction(\'' + API + '/agreement/sign-review/' + oid + '\',\'reject\')">❌ Reject Signature</button>');
-    html.push('</div>');
-  }
-
-  html.push('<div id="msg"></div>');
-  html.push('</div>');
-  return html.join("");
-}
-
-// ---------- Actions ----------
-function startOnboarding(leadId) {
-  clearMsg();
-  var btn = document.querySelector("button");
-  if (btn) btn.disabled = true;
-  fetch(API + "/start/" + leadId, {
-    method: "POST",
-    headers: {"ngrok-skip-browser-warning":"1"}
-  })
-  .then(function(r){ return r.json(); })
-  .then(function(d){
-    showMsg(d.message || "Onboarding started. KYC form will be sent to the lead.", "ok");
-    setTimeout(function(){ loadStatus(_data.lead_email); }, 2500);
-  })
-  .catch(function(e){ showMsg("Error: " + e, "err"); if (btn) btn.disabled = false; });
-}
-
-function reviewAction(endpoint, action) {
-  var notesEl = document.getElementById("notes");
-  var notes = notesEl ? notesEl.value.trim() : "";
-  if (action === "reject" && !notes) {
-    showMsg("Please enter rejection notes before rejecting.", "err");
-    if (notesEl) notesEl.focus();
-    return;
-  }
-  doAction(endpoint, {action: action, notes: notes}, action === "approve" ? "Approved successfully." : "Rejected. Lead will be notified.");
-}
-
-// ---------- Helpers ----------
-function esc(s) {
-  return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-}
-function showMsg(txt, type) {
-  var el = document.getElementById("msg");
-  if (el) el.innerHTML = '<div class="msg msg-' + type + '">' + esc(txt) + '</div>';
-}
-function clearMsg() {
-  var el = document.getElementById("msg");
-  if (el) el.innerHTML = "";
-}
-function showError(txt) {
-  document.getElementById("app").innerHTML = '<div class="card"><p style="color:#dc3545;font-size:12px">⚠ ' + esc(txt) + '</p></div>';
-}
 </script>
 </body>
 </html>
