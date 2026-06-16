@@ -95,6 +95,19 @@ def create_app() -> FastAPI:
                 style="margin-top:20px;padding:10px 20px;background:#0070f3;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">
         Copy Code</button></body></html>""")
 
+    # --- React dashboard build (Stage 1 migration) served at /app ---
+    # The legacy vanilla-JS dashboard stays at /api/v1/dashboard/ until parity.
+    _react_dist = pathlib.Path(__file__).parent.parent / "frontend" / "dist"
+    if (_react_dist / "index.html").exists():
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/app/assets", StaticFiles(directory=str(_react_dist / "assets")), name="react-assets")
+
+        @app.get("/app", response_class=HTMLResponse, include_in_schema=False)
+        @app.get("/app/", response_class=HTMLResponse, include_in_schema=False)
+        async def react_dashboard() -> HTMLResponse:
+            return HTMLResponse((_react_dist / "index.html").read_text(encoding="utf-8"), headers=_no_cache)
+
     @app.exception_handler(Exception)
     async def unhandled(request: Request, exc: Exception):  # pragma: no cover
         log.error("unhandled_exception", path=request.url.path, error=str(exc))
