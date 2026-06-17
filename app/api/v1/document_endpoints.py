@@ -996,30 +996,46 @@ _EDITOR_RIBBON_JS = """
     return html || '<p style="color:#64748b;">No changes vs the original template.</p>';
   }
 
-  // Track Changes is a clean ON/OFF toggle driven by the toolbar button — no
-  // banner. ON: render the redline INLINE in the document (read-only) and the
-  // button highlights. OFF: restore the exact original bytes and editing resumes.
-  // The document text is never modified or saved while reviewing (see saveDoc).
+  // Track Changes is always active — shows inline redline of current doc vs
+  // original template. Editing temporarily exits review mode; blur/save re-enters.
   window._reviewing = false;
   window._reviewBackup = null;
-  window.toggleTrackChanges = function(){
-    var btn = document.getElementById('btn-tc');
-    if(window._reviewing){
-      if(window._reviewBackup != null) sheet.innerHTML = window._reviewBackup;   // restore untouched doc
-      window._reviewBackup = null;
-      window._reviewing = false;
-      sheet.classList.remove('review');
-      if(typeof SIGNED === 'undefined' || !SIGNED) sheet.setAttribute('contenteditable', 'true');
-      if(btn) btn.classList.remove('active');
-      return;
-    }
-    window._reviewBackup = sheet.innerHTML;          // remember the real document
+
+  function _enterReview(){
+    if(window._reviewing) return;
+    window._reviewBackup = sheet.innerHTML;
     sheet.classList.add('review');
-    sheet.setAttribute('contenteditable', 'false');  // read-only while reviewing
-    sheet.innerHTML = renderRedline();               // format-preserving inline redline
+    sheet.setAttribute('contenteditable', 'false');
+    sheet.innerHTML = renderRedline();
     window._reviewing = true;
-    if(btn) btn.classList.add('active');             // highlighted = switch ON
-  };
+  }
+  function _exitReview(){
+    if(!window._reviewing) return;
+    if(window._reviewBackup != null) sheet.innerHTML = window._reviewBackup;
+    window._reviewBackup = null;
+    window._reviewing = false;
+    sheet.classList.remove('review');
+    if(typeof SIGNED === 'undefined' || !SIGNED) sheet.setAttribute('contenteditable', 'true');
+  }
+
+  // Clicking the document exits review mode so the user can edit
+  sheet.addEventListener('click', function(){
+    if(window._reviewing && (typeof SIGNED === 'undefined' || !SIGNED)) _exitReview();
+  });
+  // Losing focus re-enters review mode automatically
+  sheet.addEventListener('blur', function(){
+    if(!window._reviewing) setTimeout(_enterReview, 400);
+  }, true);
+
+  // Auto-activate track changes on page load (after document is populated)
+  window.addEventListener('load', function(){
+    if(typeof SIGNED !== 'undefined' && SIGNED) return;
+    setTimeout(_enterReview, 300);
+  });
+
+  // Allow saveDoc to temporarily exit/re-enter review around the save
+  window._tcEnterReview = _enterReview;
+  window._tcExitReview = _exitReview;
 })();
 """
 
@@ -1290,66 +1306,37 @@ _SIG_OVERLAY_JS = """
     im.src = _sigData;
   }
 
-  // ── create-signature modal: draw / type / upload ─────────────────────────
+  // ── create-signature modal: upload only ─────────────────────────────────
   function _openCreate(){
-    if(modal){ modal.style.display = 'flex'; _showTab('draw'); _clearCanvas(); return; }
+    if(modal){ modal.style.display = 'flex'; return; }
     modal = document.createElement('div'); modal.className = 'sig-modal';
     modal.innerHTML =
       '<div class="sig-modal-box">' +
-        '<h3>Add your signature</h3>' +
-        '<div class="sig-tabs">' +
-          '<div class="sig-tab on" data-tab="draw">Draw</div>' +
-          '<div class="sig-tab" data-tab="type">Type</div>' +
-          '<div class="sig-tab" data-tab="upload">Upload</div>' +
+        '<h3>Upload your signature</h3>' +
+        '<div class="sig-panel on" data-panel="upload">' +
+          '<p style="font-size:13px;color:#374151;margin:0 0 12px;">Upload a clear PNG or JPG image of your signature.</p>' +
+          '<input type="file" id="sig-upload" accept=".png,.jpg,.jpeg" style="display:block;margin-bottom:8px;">' +
+          '<div id="sig-upload-prev" style="display:none;border:1px solid #e5e9f2;border-radius:8px;padding:8px;background:#f8fafc;margin-bottom:8px;">' +
+            '<img id="sig-upload-img" style="max-height:80px;max-width:100%;border-radius:4px;" alt="preview">' +
+          '</div>' +
+          '<p style="font-size:11.5px;color:#64748b;margin:0;">PNG or JPG · Max 5 MB</p>' +
         '</div>' +
-        '<div class="sig-panel on" data-panel="draw"><canvas id="sig-canvas"></canvas>' +
-          '<div style="text-align:right;margin-top:6px;"><button type="button" class="sig-bar-btn" id="sig-clear" ' +
-          'style="background:#eef1f6;color:#374151;border-color:#d4dae6;">Clear</button></div></div>' +
-        '<div class="sig-panel" data-panel="type"><input id="sig-type" placeholder="Type your name"><div id="sig-type-prev"></div></div>' +
-        '<div class="sig-panel" data-panel="upload"><input type="file" id="sig-upload" accept=".png,.jpg,.jpeg">' +
-          '<p style="font-size:11.5px;color:#64748b;margin-top:8px;">PNG or JPG, max 5 MB.</p></div>' +
-        '<div class="sig-modal-actions"><button type="button" class="sig-mbtn x" id="sig-cancel">Cancel</button>' +
-          '<button type="button" class="sig-mbtn ok" id="sig-use">Use signature</button></div>' +
+        '<div class="sig-modal-actions">' +
+          '<button type="button" class="sig-mbtn x" id="sig-cancel">Cancel</button>' +
+          '<button type="button" class="sig-mbtn ok" id="sig-use">Use signature</button>' +
+        '</div>' +
       '</div>';
     document.body.appendChild(modal);
-    var tabs = modal.querySelectorAll('.sig-tab');
-    for(var i=0;i<tabs.length;i++) tabs[i].addEventListener('click', function(){ _showTab(this.getAttribute('data-tab')); });
-    var cv = document.getElementById('sig-canvas');
-    cv.width = cv.clientWidth || 430; cv.height = 150; dctx = cv.getContext('2d');
-    dctx.lineWidth = 2.4; dctx.lineCap = 'round'; dctx.lineJoin = 'round'; dctx.strokeStyle = '#111';
-    cv.addEventListener('pointerdown', function(e){ drawing = true; dlast = _cpos(cv,e); try{cv.setPointerCapture(e.pointerId);}catch(x){} });
-    cv.addEventListener('pointermove', function(e){ if(!drawing) return; var p = _cpos(cv,e);
-      dctx.beginPath(); dctx.moveTo(dlast.x,dlast.y); dctx.lineTo(p.x,p.y); dctx.stroke(); dlast = p; });
-    cv.addEventListener('pointerup', function(){ drawing = false; });
-    cv.addEventListener('pointercancel', function(){ drawing = false; });
-    document.getElementById('sig-clear').addEventListener('click', _clearCanvas);
-    var ti = document.getElementById('sig-type');
-    ti.addEventListener('input', function(){ document.getElementById('sig-type-prev').textContent = ti.value; });
+    document.getElementById('sig-upload').addEventListener('change', function(){
+      var f = this.files && this.files[0];
+      var pv = document.getElementById('sig-upload-prev');
+      var pi = document.getElementById('sig-upload-img');
+      if(f){ pv.style.display = 'block'; pi.src = URL.createObjectURL(f); } else { pv.style.display = 'none'; }
+    });
     document.getElementById('sig-cancel').addEventListener('click', function(){ modal.style.display = 'none'; });
     document.getElementById('sig-use').addEventListener('click', _useSignature);
     modal.addEventListener('click', function(e){ if(e.target === modal) modal.style.display = 'none'; });
-    _showTab('draw');
   }
-  function _cpos(cv,e){ var r = cv.getBoundingClientRect();
-    return { x: (e.clientX-r.left)*(cv.width/r.width), y: (e.clientY-r.top)*(cv.height/r.height) }; }
-  function _clearCanvas(){ if(dctx){ var c = dctx.canvas; dctx.clearRect(0,0,c.width,c.height); } }
-  function _showTab(name){
-    var tabs = modal.querySelectorAll('.sig-tab'), pans = modal.querySelectorAll('.sig-panel');
-    for(var i=0;i<tabs.length;i++) tabs[i].classList.toggle('on', tabs[i].getAttribute('data-tab')===name);
-    for(var j=0;j<pans.length;j++) pans[j].classList.toggle('on', pans[j].getAttribute('data-panel')===name);
-  }
-  function _canvasNonBlank(c){
-    try{ var d = c.getContext('2d').getImageData(0,0,c.width,c.height).data;
-      for(var i=3;i<d.length;i+=4){ if(d[i]!==0) return true; } }catch(e){ return true; } return false;
-  }
-  function _typeToData(text){
-    var c = document.createElement('canvas'); c.width = 520; c.height = 150;
-    var x = c.getContext('2d'); x.fillStyle = '#111'; x.textBaseline = 'middle';
-    x.font = '64px "Brush Script MT","Segoe Script","Comic Sans MS",cursive';
-    x.fillText(text, 16, 82); return c.toDataURL('image/png');
-  }
-  // Compress to a small data URL so it ALWAYS clears the server's size cap
-  // (oversized images were being silently dropped -> "some signatures missing").
   function _compress(img){
     var maxSide = 380, sc = Math.min(1, maxSide / Math.max(img.width || 1, img.height || 1));
     var c = document.createElement('canvas');
@@ -1357,7 +1344,7 @@ _SIG_OVERLAY_JS = """
     c.height = Math.max(1, Math.round((img.height||1)*sc));
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
     var data = c.toDataURL('image/png');
-    if(data.length > 520000){                       // big photo -> flatten to JPEG
+    if(data.length > 520000){
       var c2 = document.createElement('canvas'); c2.width = c.width; c2.height = c.height;
       var x = c2.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0,0,c2.width,c2.height);
       x.drawImage(c, 0, 0); data = c2.toDataURL('image/jpeg', 0.82);
@@ -1365,24 +1352,13 @@ _SIG_OVERLAY_JS = """
     return data;
   }
   function _useSignature(){
-    var active = modal.querySelector('.sig-tab.on').getAttribute('data-tab');
-    if(active === 'draw'){
-      var c = document.getElementById('sig-canvas');
-      if(!_canvasNonBlank(c)){ alert('Please draw your signature first.'); return; }
-      _setSig(c.toDataURL('image/png'));
-    } else if(active === 'type'){
-      var t = (document.getElementById('sig-type').value || '').trim();
-      if(!t){ alert('Please type your name.'); return; }
-      _setSig(_typeToData(t));
-    } else {
-      var f = document.getElementById('sig-upload').files && document.getElementById('sig-upload').files[0];
-      if(!f){ alert('Please choose an image file.'); return; }
-      if(f.size > 5*1024*1024){ alert('Image too large — max 5 MB.'); return; }
-      var img = new Image();
-      img.onload = function(){ _setSig(_compress(img)); };
-      img.onerror = function(){ alert('Could not read that image.'); };
-      img.src = URL.createObjectURL(f);
-    }
+    var f = document.getElementById('sig-upload').files && document.getElementById('sig-upload').files[0];
+    if(!f){ alert('Please choose a signature image file (PNG or JPG).'); return; }
+    if(f.size > 5*1024*1024){ alert('Image too large — max 5 MB.'); return; }
+    var img = new Image();
+    img.onload = function(){ _setSig(_compress(img)); };
+    img.onerror = function(){ alert('Could not read that image.'); };
+    img.src = URL.createObjectURL(f);
   }
   function _setSig(data){ _sigData = data; if(modal) modal.style.display = 'none'; _refreshPalette(); _placeFromPalette(); }
 
@@ -1620,7 +1596,7 @@ async def document_live_editor(onboarding_id: str, doc_type: str, token: str,
   </div>
   <div class="rb-lbl-grp">
     <div class="rb-row">
-      <button class="tb tb-accent" id="btn-tc" onmousedown="return false" onclick="toggleTrackChanges()" title="Show tracked changes vs the original template (read-only)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>Track Changes</button>
+      <span class="tb tb-accent" style="cursor:default;opacity:.7;" title="Track changes is always active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>Changes: ON</span>
     </div><span class="rb-cap">Review</span>
   </div>
   <div class="rb-lbl-grp rb-end">
@@ -1636,6 +1612,27 @@ async def document_live_editor(onboarding_id: str, doc_type: str, token: str,
     <div id="pv-pages"></div>
   </div>
 </div>
+</div>
+
+<!-- Mandatory comment bar — slides up when P1 makes any edit -->
+<div id="edit-cmt-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:8000;
+  background:#1e3a5f;border-top:2px solid #f59e0b;padding:12px 20px;box-shadow:0 -4px 18px rgba(0,0,0,.35);
+  display:none;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+  <div style="flex:1;min-width:260px;">
+    <div style="color:#fbbf24;font-size:12px;font-weight:700;margin-bottom:5px;">
+      ✏ You made changes — a comment is required before saving
+    </div>
+    <textarea id="edit-cmt-text" placeholder="Describe what you changed and why (mandatory)…"
+      style="width:100%;padding:8px 10px;border:1.5px solid #f59e0b;border-radius:6px;
+             background:#fff;font-size:13px;font-family:inherit;resize:none;height:56px;line-height:1.4;"
+      oninput="_onCmtInput()"></textarea>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px;padding-top:20px;">
+    <button onclick="_saveCmt()" style="background:#16a34a;color:#fff;border:none;border-radius:7px;
+      padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">💾 Save with Comment</button>
+    <button onclick="_dismissCmt()" style="background:#374151;color:#9ca3af;border:none;border-radius:7px;
+      padding:6px 18px;font-size:12px;cursor:pointer;">Discard my changes</button>
+  </div>
 </div>
 
 <div class="modal-bg" id="m-versions" onclick="if(event.target===this)this.style.display='none'">
@@ -1691,11 +1688,53 @@ function cmd(c, v) {{
   dirty();
 }}
 
+let _hasUnsavedEdit = false;
+let _pendingCmt = '';
+
 function dirty() {{
   if (SIGNED) return;
   const el = document.getElementById('saved');
   el.textContent = '● editing…'; el.style.color = '#fbbf24';
-  clearTimeout(timer); timer = setTimeout(saveDoc, 2200);
+  if (!_hasUnsavedEdit) {{
+    _hasUnsavedEdit = true;
+    // Exit track-changes review so the user can see what they're editing
+    if (window._reviewing && typeof window._tcExitReview === 'function') window._tcExitReview();
+    // Show the mandatory comment bar
+    const bar = document.getElementById('edit-cmt-bar');
+    if (bar) bar.style.display = 'flex';
+  }}
+  clearTimeout(timer);
+  // Do NOT auto-save while there's a pending comment — user must fill it first
+}}
+function _onCmtInput() {{
+  _pendingCmt = (document.getElementById('edit-cmt-text').value || '').trim();
+}}
+async function _saveCmt() {{
+  _pendingCmt = (document.getElementById('edit-cmt-text').value || '').trim();
+  if (!_pendingCmt) {{
+    document.getElementById('edit-cmt-text').style.borderColor = '#dc2626';
+    document.getElementById('edit-cmt-text').focus();
+    return;
+  }}
+  document.getElementById('edit-cmt-text').style.borderColor = '#f59e0b';
+  const ok = await saveDoc({{comment: _pendingCmt}});
+  if (ok) {{
+    _hasUnsavedEdit = false;
+    _pendingCmt = '';
+    document.getElementById('edit-cmt-text').value = '';
+    const bar = document.getElementById('edit-cmt-bar');
+    if (bar) bar.style.display = 'none';
+  }}
+}}
+function _dismissCmt() {{
+  if (!confirm('Discard all unsaved changes and revert to the last saved version?')) return;
+  _hasUnsavedEdit = false;
+  _pendingCmt = '';
+  document.getElementById('edit-cmt-text').value = '';
+  const bar = document.getElementById('edit-cmt-bar');
+  if (bar) bar.style.display = 'none';
+  // Reload the page to restore last saved state
+  location.reload();
 }}
 sheet.addEventListener('input', dirty);
 
@@ -1726,6 +1765,12 @@ function togglePreview() {{
 
 async function saveDoc(extra) {{
   if (SIGNED) return false;
+  // Block auto-save if user has unsaved edits without a comment
+  if (_hasUnsavedEdit && !_pendingCmt && !(extra && extra.comment)) {{
+    const bar = document.getElementById('edit-cmt-bar');
+    if (bar) {{ bar.style.display = 'flex'; document.getElementById('edit-cmt-text').focus(); }}
+    return false;
+  }}
   const el = document.getElementById('saved');
   el.textContent = 'Saving…'; el.style.color = '#fbbf24';
   // While reviewing, the sheet shows redline markup — persist the stashed real doc instead.
@@ -1742,6 +1787,10 @@ async function saveDoc(extra) {{
     var mc = document.getElementById('mode-chip'); if (mc) mc.textContent = 'LIVE-EDITED';
     if (document.querySelector('.pv.open')) refreshPv();
     if (document.getElementById('sidebar').classList.contains('open')) loadSidebar();
+    // Re-enter track changes view after save
+    if (typeof window._tcEnterReview === 'function' && !window._reviewing) {{
+      setTimeout(window._tcEnterReview, 300);
+    }}
   }}
   return ok;
 }}
@@ -1980,36 +2029,91 @@ function toggleSidebar() {{
   if (sb.classList.toggle('open')) loadSidebar();
 }}
 
-function _sbCard(c, isDone) {{
-  const card = document.createElement('div');
-  card.className = 'sb-card' + (isDone ? ' done' : '');
-  card.onclick = () => card.classList.toggle('expanded');
-  const by = document.createElement('div');
-  by.className = 'by';
-  by.textContent = (c.by || 'Lead') + ' — ' + (c.at || '');
-  const tx = document.createElement('div');
-  tx.className = 'tx';
-  tx.textContent = c.text || '';
-  card.appendChild(by); card.appendChild(tx);
-  if (c.ai_actions && c.ai_actions.length) {{
-    const ai = document.createElement('div');
-    ai.className = 'sb-ai';
-    c.ai_actions.forEach(a => {{
-      const s = document.createElement('span');
-      s.textContent = '🤖 ' + a;
-      ai.appendChild(s);
-    }});
-    card.appendChild(ai);
-  }}
-  return card;
-}}
-
 function _sbSection(body, title) {{
   const h = document.createElement('div');
   h.className = 'sb-sec';
   h.textContent = title;
   body.appendChild(h);
 }}
+
+function _statusBadge(status) {{
+  const map = {{pending:'#f59e0b', accepted:'#16a34a', rejected:'#dc2626'}};
+  const label = {{pending:'Pending', accepted:'Accepted', rejected:'Rejected'}};
+  return `<span style="display:inline-block;padding:1px 7px;border-radius:99px;font-size:10px;font-weight:700;
+    background:${{map[status]||'#64748b'}};color:#fff;">${{label[status]||status}}</span>`;
+}}
+
+function _sbCommentCard(c) {{
+  const status = c.status || (c.done ? 'accepted' : 'pending');
+  const thread = c.thread || [];
+  const firstEntry = thread[0] || {{}};
+  const card = document.createElement('div');
+  card.style.cssText = 'background:#fff;border:1px solid #e5e9f2;border-radius:8px;padding:12px 14px;margin-bottom:10px;';
+  card.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span style="font-size:11.5px;font-weight:700;color:#374151;">${{c.by||'Lead'}} <span style="font-weight:400;color:#94a3b8;">(${{c.party==='p1'?'Jane':'Lead'}})</span></span>
+      ${{_statusBadge(status)}}
+    </div>
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">${{c.at||''}}</div>
+    <div id="thread-${{c.id}}" style="border-left:3px solid #e5e9f2;padding-left:10px;margin-bottom:10px;">
+      ${{thread.map(t => `<div style="margin-bottom:8px;">
+        <div style="font-size:11px;font-weight:700;color:${{t.party==='p1'?'#1a56db':'#059669'}};">
+          ${{t.by}} (${{t.party==='p1'?'Jane':'Lead'}}) — ${{t.action||'comment'}} — ${{t.at||''}}
+        </div>
+        <div style="font-size:12.5px;color:#374151;white-space:pre-wrap;margin-top:2px;">${{t.text||''}}</div>
+      </div>`).join('')}}
+    </div>`;
+  if (status === 'pending' || status === 'rejected') {{
+    const acts = document.createElement('div');
+    acts.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
+    if (status === 'pending') {{
+      const acc = document.createElement('button');
+      acc.textContent = '✓ Accept';
+      acc.style.cssText = 'background:#16a34a;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;';
+      acc.onclick = () => _commentAction(c.id, 'accept', '');
+      acts.appendChild(acc);
+    }}
+    const rejBtn = document.createElement('button');
+    rejBtn.textContent = status === 'rejected' ? '↩ Reply' : '✗ Reject';
+    rejBtn.style.cssText = 'background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;';
+    rejBtn.onclick = () => _showRejectBox(c.id, acts);
+    acts.appendChild(rejBtn);
+    card.appendChild(acts);
+  }}
+  return card;
+}}
+
+function _showRejectBox(commentId, container) {{
+  if (container.querySelector('.rej-box')) return;
+  const box = document.createElement('div');
+  box.className = 'rej-box';
+  box.style.cssText = 'margin-top:8px;width:100%;';
+  box.innerHTML = `<textarea placeholder="Explain why this change is not acceptable (required)…"
+    style="width:100%;min-height:70px;padding:8px;border:1px solid #fca5a5;border-radius:6px;font-size:13px;font-family:inherit;resize:vertical;"></textarea>
+    <div style="display:flex;gap:6px;margin-top:6px;">
+      <button style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;"
+        onclick="_commentReject(this)">Send Rejection</button>
+      <button style="background:#eef1f6;color:#374151;border:1px solid #d4dae6;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;"
+        onclick="this.closest('.rej-box').remove()">Cancel</button>
+    </div>`;
+  box.querySelector('button[onclick="_commentReject(this)"]').setAttribute('data-cid', commentId);
+  container.appendChild(box);
+}}
+
+async function _commentAction(commentId, action, text) {{
+  const r = await fetch(`${{BASE}}/comment-action/${{OID}}/${{DT}}/${{TOK}}`, {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{comment_id: commentId, action: action, text: text}})
+  }}).catch(() => null);
+  if (r && r.ok) {{ loadSidebar(); }} else {{ alert((await r.json().catch(()=>({{}}))).detail || 'Action failed'); }}
+}}
+
+window._commentReject = function(btn) {{
+  const cid = btn.getAttribute('data-cid');
+  const txt = btn.closest('.rej-box').querySelector('textarea').value.trim();
+  if (!txt) {{ alert('Please explain why this change is not acceptable.'); return; }}
+  _commentAction(cid, 'reject', txt);
+}};
 
 async function loadSidebar() {{
   const body = document.getElementById('sb-body');
@@ -2018,25 +2122,34 @@ async function loadSidebar() {{
     const r = await fetch(`${{BASE}}/versions/${{OID}}/${{DT}}/${{TOK}}`);
     if (r.ok) d = await r.json();
   }} catch(e) {{}}
-  const open = (d.comments || []).filter(c => !c.done);
-  const done = (d.comments || []).filter(c => c.done);
-  document.getElementById('cmt-n').textContent = open.length;
+  const comments = d.comments || [];
+  const pending = comments.filter(c => !c.status || c.status === 'pending');
+  const rejected = comments.filter(c => c.status === 'rejected');
+  const accepted = comments.filter(c => c.status === 'accepted');
+  const openCount = pending.length + rejected.length;
+  document.getElementById('cmt-n').textContent = openCount;
   body.innerHTML = '';
 
-  _sbSection(body, '📌 To-do — changes requested (' + open.length + ')');
-  if (!open.length) {{
-    const p = document.createElement('p'); p.className = 'sb-empty';
-    p.textContent = 'Nothing pending — all comments handled.'; body.appendChild(p);
+  if (openCount > 0) {{
+    const banner = document.createElement('div');
+    banner.style.cssText = 'background:#fff7ed;border:1px solid #fed7aa;color:#92400e;padding:10px 14px;border-radius:8px;font-size:12.5px;margin-bottom:12px;';
+    banner.textContent = `⚠ ${{openCount}} comment(s) pending — clean document cannot be sent for signing until all comments are accepted.`;
+    body.appendChild(banner);
   }}
-  open.slice().reverse().forEach(c => body.appendChild(_sbCard(c, false)));
 
-  _sbSection(body, '✅ Done — handled & re-sent (' + done.length + ')');
-  if (!done.length) {{
+  _sbSection(body, `🔴 Pending (${{pending.length}}) · Rejected (${{rejected.length}})`);
+  if (!openCount) {{
     const p = document.createElement('p'); p.className = 'sb-empty';
-    p.textContent = 'Comments move here automatically when you send the revised document.';
-    body.appendChild(p);
+    p.textContent = 'All comments accepted — clean document ready for signing.'; body.appendChild(p);
   }}
-  done.slice().reverse().forEach(c => body.appendChild(_sbCard(c, true)));
+  [...pending, ...rejected].slice().reverse().forEach(c => body.appendChild(_sbCommentCard(c)));
+
+  _sbSection(body, `✅ Accepted (${{accepted.length}})`);
+  if (!accepted.length) {{
+    const p = document.createElement('p'); p.className = 'sb-empty';
+    p.textContent = 'No accepted comments yet.'; body.appendChild(p);
+  }}
+  accepted.slice().reverse().forEach(c => body.appendChild(_sbCommentCard(c)));
 
   _sbSection(body, '📜 Activity — saves & sends');
   const vs = (d.versions || []).slice().reverse();
@@ -2069,7 +2182,11 @@ async function sendForReview() {{
     body: JSON.stringify({{html: window._reviewing ? (window._reviewBackup || '') : sheet.innerHTML, mode: 'live'}})
   }});
   const d = await r.json().catch(() => ({{}}));
-  alert(r.ok ? (d.message || 'Sent for review.') : (d.detail || 'Send failed'));
+  if (!r.ok && d.detail && d.detail.indexOf('pending') >= 0) {{
+    alert('Cannot send: there are pending or rejected comments that must be resolved first. Please open the Comments sidebar and accept or resolve all comments before sending.');
+  }} else {{
+    alert(r.ok ? (d.message || 'Sent for review.') : (d.detail || 'Send failed'));
+  }}
 }}
 </script>
 <script>{_EDITOR_RIBBON_JS}</script>
@@ -2086,6 +2203,7 @@ class _DocSaveBody(BaseModel):
     mode: str = ""        # "" = unchanged | "live" (store html) | "template" (drop html)
     snapshot: bool = False
     note: str = ""
+    comment: str = ""     # mandatory edit comment from P1 — saved to comments[]
     # Adobe-style signature overlays placed on the PDF preview. None = leave as-is
     # (so a text autosave never clobbers them); [] = clear all.
     signatures_overlay: list[dict] | None = None
@@ -2137,6 +2255,23 @@ async def document_save(onboarding_id: str, doc_type: str, token: str,
             except (TypeError, ValueError):
                 continue
         data["signatures_overlay"] = clean
+    if body.comment and body.comment.strip():
+        import secrets as _sec
+        now = _now_ist()
+        from app.core.config import settings as _cfg
+        p1_name = _cfg.ORGANIZER_NAME or "Jane Aerospace"
+        comments = data.setdefault("comments", [])
+        cmt_id = f"c{int(now.timestamp())}_{_sec.token_hex(4)}"
+        comments.append({
+            "id": cmt_id,
+            "by": p1_name,
+            "party": "p1",
+            "email": "",
+            "at": _fmt(now),
+            "status": "pending",
+            "thread": [{"by": p1_name, "party": "p1", "action": "edit",
+                        "text": body.comment.strip()[:2000], "at": _fmt(now)}],
+        })
     if body.snapshot:
         _snapshot_version(data, "team", body.note or "Manual save")
     data.setdefault("replacements", [])
@@ -2252,10 +2387,13 @@ async def document_send(onboarding_id: str, doc_type: str, token: str,
     data["signatory_name"] = body.signatory_name[:200] or data.get("signatory_name", "")
     data["signatory_email"] = body.signatory_email[:320] or data.get("signatory_email", "") or lead.email
     data.setdefault("replacements", [])
+    # Block send if there are any pending or rejected comments
+    open_comments = [c for c in data.get("comments", [])
+                     if (c.get("status") or ("pending" if not c.get("done") else "accepted")) in ("pending", "rejected")]
+    if open_comments:
+        raise HTTPException(409, f"Cannot send: {len(open_comments)} comment(s) are pending or rejected. "
+                                 "All comments must be accepted by both parties before sending for signing.")
     data["stage"] = "review"
-    # re-sending means the requested changes were handled — move open comments to Done
-    for c in data.get("comments", []):
-        c["done"] = True
     rev = len([v for v in data.get("versions", []) if "Sent to lead" in (v.get("note") or "")]) + 1
     _snapshot_version(data, "team", f"Sent to lead for T&C review (revision {rev})")
     _set_doc_data(rec, doc_type, data)
@@ -2318,26 +2456,101 @@ def _result_page(title: str, message: str, ok: bool = True, extra_html: str = ""
 
 
 def _review_page_html(onboarding_id: str, doc_type: str, token: str, label: str,
-                      lead: LeadV2, data: dict) -> str:
-    """Lead-facing Terms & Conditions review page — accept or request changes."""
+                      lead: LeadV2, data: dict, doc_html: str = "") -> str:
+    """Lead-facing Terms & Conditions review page — editable doc with mandatory comments."""
+    import html as _html_lib
     pdf_url = f"/api/v1/documents/pdf/{onboarding_id}/{doc_type}/{token}"
-    sig_name = data.get("signatory_name", "") or (lead.contact_name or "")
+    sig_name = _html_lib.escape(data.get("signatory_name", "") or (lead.contact_name or ""))
     comments = data.get("comments") or []
-    prev_comments = ""
-    if comments:
-        items = "".join(
-            f'<div style="background:#fff7ed;border-left:3px solid #f59e0b;border-radius:6px;'
-            f'padding:10px 14px;margin-bottom:8px;">'
-            f'<div style="font-size:11px;color:#92400e;font-weight:700;">{(c.get("by") or "You")} — {c.get("at", "")}</div>'
-            f'<div style="font-size:13px;color:#451a03;margin-top:4px;white-space:pre-wrap;">{c.get("text", "")}</div></div>'
-            for c in comments[-6:])
-        prev_comments = (f'<div class="card"><h1 style="font-size:16px;">Previous Comments</h1>'
-                         f'<p class="sub">Our team reviews every comment and sends you an updated version.</p>{items}</div>')
+
+    # Build comment history panel
+    comment_history_items = ""
+    for c in comments:
+        thread = c.get("thread") or []
+        status = c.get("status", "pending")
+        status_color = {"accepted": "#16a34a", "rejected": "#dc2626"}.get(status, "#f59e0b")
+        status_label = {"accepted": "Accepted", "rejected": "Rejected"}.get(status, "Pending")
+        thread_html = "".join(
+            f'<div style="padding:6px 0;border-bottom:1px dashed #f1f5f9;">'
+            f'<span style="font-size:10.5px;font-weight:700;color:{"#1a56db" if t.get("party")=="p1" else "#059669"};">'
+            f'{_html_lib.escape(t.get("by",""))} ({"Jane" if t.get("party")=="p1" else "You"}) — {_html_lib.escape(t.get("action","comment"))} — {_html_lib.escape(t.get("at",""))}'
+            f'</span><div style="font-size:12.5px;color:#374151;margin-top:2px;white-space:pre-wrap;">{_html_lib.escape(t.get("text",""))}</div>'
+            f'</div>'
+            for t in thread
+        )
+        comment_history_items += (
+            f'<div style="border:1px solid #e5e9f2;border-radius:8px;padding:12px 14px;margin-bottom:10px;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
+            f'<span style="font-size:12px;font-weight:700;color:#374151;">{_html_lib.escape(c.get("by","Lead"))}</span>'
+            f'<span style="display:inline-block;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;'
+            f'background:{status_color};color:#fff;">{status_label}</span>'
+            f'</div><div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">{_html_lib.escape(c.get("at",""))}</div>'
+            f'<div style="border-left:3px solid #e5e9f2;padding-left:10px;">{thread_html}</div>'
+            f'</div>'
+        )
+
+    prev_panel = ""
+    if comment_history_items:
+        prev_panel = (f'<div class="card"><h2 style="font-size:16px;color:#1a3a6b;margin:0 0 12px;">📜 Comment History</h2>'
+                      f'{comment_history_items}</div>')
+
     updated_note = ""
     if data.get("stage") == "review" and comments:
         updated_note = ('<div style="background:#ecfdf5;border-left:3px solid #16a34a;border-radius:6px;'
                         'padding:10px 14px;margin-bottom:14px;font-size:13px;color:#14532d;">'
-                        'This document was <b>updated</b> based on your previous comments — please review the latest version below.</div>')
+                        'This document was <b>updated</b> based on your previous comments — please review the latest version.</div>')
+
+    doc_content_html = ""
+    if doc_html:
+        import json as _json
+        doc_json = _json.dumps(doc_html, ensure_ascii=False).replace("</", "<\\/")
+        doc_content_html = f"""
+  <div class="card" id="edit-card">
+    <h2 style="font-size:16px;color:#1a3a6b;margin:0 0 4px;">✏ Edit Document Inline</h2>
+    <p style="font-size:13px;color:#666;margin:0 0 12px;">Make your proposed changes directly in the document below.
+      A comment explaining your changes is <strong>required</strong> before submitting.</p>
+    <div id="p2-editor" contenteditable="true" spellcheck="false"
+      style="border:1px solid #d1d5db;border-radius:8px;padding:24px 28px;min-height:300px;max-height:600px;
+             overflow-y:auto;background:#fff;font-family:'Calibri',sans-serif;font-size:10.5pt;line-height:1.5;
+             outline:none;cursor:text;">Loading…</div>
+    <div id="edit-changed-banner" style="display:none;margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;
+      border-radius:8px;padding:14px 16px;">
+      <div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:8px;">
+        ⚠ Changes detected — comment required before submitting
+      </div>
+      <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">
+        Reason for your changes <span style="color:#e11d48;">*</span></label>
+      <textarea id="p2-cmt-text" placeholder="Explain what you changed and why (mandatory)…"
+        style="width:100%;min-height:90px;padding:10px;border:1.5px solid #fed7aa;border-radius:6px;
+               font-size:13px;font-family:inherit;resize:vertical;background:#fffbeb;"></textarea>
+    </div>
+  </div>
+  <script>
+  (function(){{
+    var editor = document.getElementById('p2-editor');
+    var banner = document.getElementById('edit-changed-banner');
+    var origHtml = {doc_json};
+    editor.innerHTML = origHtml;
+    var origText = editor.innerText;
+    var changed = false;
+    editor.addEventListener('input', function(){{
+      var now = editor.innerText;
+      if(now !== origText && !changed){{
+        changed = true;
+        banner.style.display = 'block';
+        editor.style.borderColor = '#f59e0b';
+      }} else if(now === origText && changed){{
+        changed = false;
+        banner.style.display = 'none';
+        editor.style.borderColor = '#d1d5db';
+      }}
+    }});
+    window._p2EditorChanged = function(){{ return changed; }};
+    window._p2EditorHtml = function(){{ return changed ? editor.innerHTML : ''; }};
+    window._p2CmtText = function(){{ return (document.getElementById('p2-cmt-text')||{{}}).value||''; }};
+  }})();
+  </script>"""
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2345,77 +2558,77 @@ def _review_page_html(onboarding_id: str, doc_type: str, token: str, label: str,
 <style>
   *{{box-sizing:border-box;}}
   body{{font-family:Arial,sans-serif;background:#f4f6fb;margin:0;padding:20px;}}
-  .wrap{{max-width:900px;margin:0 auto;}}
-  .card{{background:#fff;border-radius:12px;box-shadow:0 2px 16px rgba(0,0,0,.1);padding:28px 32px;margin-bottom:18px;}}
+  .wrap{{max-width:940px;margin:0 auto;}}
+  .card{{background:#fff;border-radius:12px;box-shadow:0 2px 16px rgba(0,0,0,.1);padding:24px 28px;margin-bottom:18px;}}
   h1{{color:#1a3a6b;font-size:20px;margin:0 0 4px;}}
   .sub{{color:#666;font-size:13px;margin:0 0 14px;}}
-  iframe{{width:100%;height:600px;border:1px solid #d1d5db;border-radius:8px;background:#fff;}}
+  iframe{{width:100%;height:540px;border:1px solid #d1d5db;border-radius:8px;background:#fff;}}
   label{{display:block;font-size:13px;font-weight:600;color:#222;margin:14px 0 4px;}}
   input[type=text]{{width:100%;padding:11px 13px;border:1px solid #ccc;border-radius:6px;font-size:14px;}}
   textarea{{width:100%;min-height:110px;padding:11px 13px;border:1px solid #ccc;border-radius:6px;
            font-size:14px;font-family:inherit;resize:vertical;}}
-  .btn{{border:none;padding:14px 30px;border-radius:7px;font-size:15px;font-weight:700;cursor:pointer;width:100%;color:#fff;}}
+  .btn{{border:none;padding:13px 28px;border-radius:7px;font-size:14.5px;font-weight:700;cursor:pointer;width:100%;color:#fff;margin-top:10px;}}
   .btn:disabled{{background:#9ca3af!important;cursor:not-allowed;}}
   .accept{{background:#16a34a;}}
-  .changes{{background:#fff;color:#b45309;border:2px solid #f59e0b;}}
+  .changes{{background:#b45309;}}
   .grid{{display:grid;grid-template-columns:1fr 1fr;gap:18px;}}
   #err{{display:none;background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:6px;font-size:13px;margin:12px 0;}}
   .chk{{display:flex;gap:10px;align-items:flex-start;margin:14px 0;font-size:13px;color:#374151;line-height:1.5;}}
   .chk input{{margin-top:3px;width:17px;height:17px;}}
-  @media(max-width:700px){{.grid{{grid-template-columns:1fr;}}.card{{padding:20px 16px;}}iframe{{height:420px;}}}}
+  @media(max-width:700px){{.grid{{grid-template-columns:1fr;}}.card{{padding:18px 14px;}}iframe{{height:380px;}}}}
 </style></head>
 <body>
 <div class="wrap">
   <div class="card">
-    <div style="font-size:15px;font-weight:700;color:#1a3a6b;margin-bottom:12px;">✈ Jane Aerospace</div>
+    <div style="font-size:15px;font-weight:700;color:#1a3a6b;margin-bottom:10px;">✈ Jane Aerospace</div>
     <h1>{label} — Terms &amp; Conditions Review</h1>
     <p class="sub">Between <strong>Jane Aerospace Private Limited</strong> and
-      <strong>{lead.business_name}</strong>. Please review the document below. You can
-      <b>accept the terms</b> or <b>request changes</b> — no signature is needed at this stage.</p>
+      <strong>{_html_lib.escape(lead.business_name)}</strong>. Review the document below.<br>
+      You may <b>accept the terms as-is</b>, or <b>edit the document inline and submit your changes with a comment</b>.</p>
     {updated_note}
     <iframe src="{pdf_url}#toolbar=1"></iframe>
-    <p style="font-size:13px;margin-top:8px;"><a href="{pdf_url}" target="_blank" style="color:#1155cc;">Open / download the PDF ↗</a></p>
+    <p style="font-size:12.5px;margin-top:6px;"><a href="{pdf_url}" target="_blank" style="color:#1155cc;">Download PDF ↗</a></p>
   </div>
-  {prev_comments}
+
+  {doc_content_html}
+
+  {prev_panel}
+
   <div class="grid">
     <div class="card">
-      <h1 style="font-size:17px;color:#15803d;">✓ Accept Terms &amp; Conditions</h1>
-      <p class="sub">Accepting notifies our team. Jane Aerospace countersigns first, then you
-        receive the final document for your e-signature.</p>
+      <h2 style="font-size:17px;color:#15803d;margin:0 0 6px;">✓ Accept Terms &amp; Conditions</h2>
+      <p class="sub" style="margin-bottom:10px;">Accepts the document as-is (no changes). Jane Aerospace countersigns first,
+        then you receive the final document for e-signature.</p>
       <label>Your Name</label>
       <input type="text" id="acc-name" value="{sig_name}" placeholder="Full name">
       <div class="chk"><input type="checkbox" id="acc-agree">
         <span>I have reviewed this {label} and accept its Terms &amp; Conditions on behalf of
-        <strong>{lead.business_name}</strong>.</span></div>
-      <button class="btn accept" id="acc-btn" onclick="reviewAct('accept')">✓ Accept Terms</button>
+        <strong>{_html_lib.escape(lead.business_name)}</strong>.</span></div>
+      <button class="btn accept" id="acc-btn" onclick="reviewAct('accept')">✓ Accept Terms &amp; Conditions</button>
     </div>
     <div class="card">
-      <h1 style="font-size:17px;color:#b45309;">💬 Request Changes</h1>
-      <p class="sub">Add your comments or suggested modifications — our team will update the
-        document and send you a revised version.</p>
+      <h2 style="font-size:17px;color:#b45309;margin:0 0 6px;">💬 Submit Comment / Changes</h2>
+      <p class="sub" style="margin-bottom:10px;">If you edited the document above, click here to submit your changes.
+        Or describe requested changes in the text box below.</p>
       <label>Your Name</label>
       <input type="text" id="cmt-name" value="{sig_name}" placeholder="Full name">
-      <label>Comments / Suggested Changes</label>
-      <textarea id="cmt-text" placeholder="e.g. Please change the notice period in clause 7 to 30 days…"></textarea>
-      <button class="btn changes" id="cmt-btn" onclick="reviewAct('comment')">Send Comments to Jane Aerospace</button>
+      <label>Comment / Description of Changes <span style="color:#e11d48;">*</span></label>
+      <textarea id="cmt-text" placeholder="Explain what changes you are requesting or have made…"></textarea>
+      <button class="btn changes" id="cmt-btn" onclick="reviewAct('comment')">📨 Submit Changes to Jane Aerospace</button>
     </div>
   </div>
+
   <div class="card">
-    <h1 style="font-size:17px;color:#1a56db;">👤 Not the right person for this review?</h1>
-    <p class="sub">If someone else in your company (e.g. your legal / review team) should review these
-      Terms &amp; Conditions, enter their details — we will send the review link directly to them.</p>
+    <h2 style="font-size:16px;color:#1a56db;margin:0 0 6px;">👤 Not the right person for this review?</h2>
+    <p class="sub">Forward the review link to your legal or review team.</p>
     <div class="grid">
-      <div>
-        <label>Reviewer's Name</label>
-        <input type="text" id="fwd-name" placeholder="Full name of the right person">
-      </div>
-      <div>
-        <label>Reviewer's Email</label>
-        <input type="text" id="fwd-email" placeholder="name@company.com">
-      </div>
+      <div><label>Reviewer's Name</label>
+        <input type="text" id="fwd-name" placeholder="Full name"></div>
+      <div><label>Reviewer's Email</label>
+        <input type="text" id="fwd-email" placeholder="name@company.com"></div>
     </div>
-    <button class="btn" id="fwd-btn" style="background:#1a56db;margin-top:14px;"
-            onclick="reviewAct('forward')">→ Send Review Link to This Person</button>
+    <button class="btn" id="fwd-btn" style="background:#1a56db;"
+            onclick="reviewAct('forward')">→ Forward Review Link</button>
   </div>
   <div id="err"></div>
 </div>
@@ -2429,8 +2642,8 @@ async function reviewAct(action) {{
     if (!document.getElementById('acc-agree').checked) {{
       err.textContent = 'Please tick the confirmation checkbox to accept.'; err.style.display = 'block'; return; }}
   }} else if (action === 'forward') {{
-    payload.name = document.getElementById('cmt-name').value.trim()
-                   || document.getElementById('acc-name').value.trim();
+    payload.name = (document.getElementById('cmt-name')||{{}}).value||'';
+    payload.name = payload.name.trim() || (document.getElementById('acc-name').value||'').trim();
     payload.forward_name = document.getElementById('fwd-name').value.trim();
     payload.forward_email = document.getElementById('fwd-email').value.trim();
     if (!payload.forward_name) {{ err.textContent = "Please enter the reviewer's name."; err.style.display = 'block'; return; }}
@@ -2438,8 +2651,19 @@ async function reviewAct(action) {{
       err.textContent = "Please enter a valid reviewer email address."; err.style.display = 'block'; return; }}
   }} else {{
     payload.name = document.getElementById('cmt-name').value.trim();
-    payload.comments = document.getElementById('cmt-text').value.trim();
-    if (!payload.comments) {{ err.textContent = 'Please write your comments first.'; err.style.display = 'block'; return; }}
+    // Merge inline editor comment with the text comment box
+    var inlineChanged = typeof window._p2EditorChanged === 'function' && window._p2EditorChanged();
+    var inlineCmt = inlineChanged && typeof window._p2CmtText === 'function' ? window._p2CmtText().trim() : '';
+    var boxCmt = document.getElementById('cmt-text').value.trim();
+    if (inlineChanged && !inlineCmt) {{
+      err.textContent = 'You edited the document — please fill in the reason for your changes (required).';
+      err.style.display = 'block'; return;
+    }}
+    payload.comments = [inlineCmt, boxCmt].filter(Boolean).join('\\n\\n');
+    if (inlineChanged && typeof window._p2EditorHtml === 'function') {{
+      payload.edited_html = window._p2EditorHtml();
+    }}
+    if (!payload.comments) {{ err.textContent = 'Please describe your changes or comments.'; err.style.display = 'block'; return; }}
   }}
   const btn = document.getElementById(
     action === 'accept' ? 'acc-btn' : action === 'forward' ? 'fwd-btn' : 'cmt-btn');
@@ -2466,6 +2690,7 @@ class _ReviewBody(BaseModel):
     action: str            # accept | comment | forward
     name: str = ""
     comments: str = ""
+    edited_html: str = ""  # inline HTML changes made by P2 in the review editor
     forward_name: str = ""    # action=forward — the right person on the lead's side
     forward_email: str = ""
 
@@ -2513,16 +2738,33 @@ async def document_review(onboarding_id: str, doc_type: str, token: str,
         if not text:
             raise HTTPException(400, "Comments are required")
         comments = data.setdefault("comments", [])
-        entry: dict = {"by": name, "email": lead.email, "text": text,
-                       "at": _fmt(now), "done": False}
+        import secrets as _sec
+        cmt_id = f"c{int(now.timestamp())}_{_sec.token_hex(4)}"
+        entry: dict = {
+            "id": cmt_id,
+            "by": name,
+            "party": "p2",
+            "email": lead.email,
+            "at": _fmt(now),
+            "status": "pending",
+            "thread": [{"by": name, "party": "p2", "action": "comment", "text": text, "at": _fmt(now)}],
+        }
         try:  # AI filters the comment into short action items for the team
             import asyncio
             from app.services.onboarding_ai import summarize_doc_comment
-            entry["ai_actions"] = await asyncio.wait_for(
+            ai_actions = await asyncio.wait_for(
                 asyncio.to_thread(summarize_doc_comment, text), timeout=15)
+            entry["ai_actions"] = ai_actions
         except Exception:
             entry["ai_actions"] = []
         comments.append(entry)
+        # If P2 edited the document inline, save their HTML changes
+        if body.edited_html and body.edited_html.strip():
+            from app.services.pdf_documents import sanitize_live_html
+            if len(body.edited_html) <= 800_000:
+                data["html"] = sanitize_live_html(body.edited_html)
+                data["mode"] = "live"
+                data["editor_v"] = 2
         data["stage"] = "changes_requested"
         # A revision request is NOT a rejection — the draft goes back to the
         # team for revision and is re-sent to the lead after the changes.
@@ -2601,6 +2843,67 @@ async def document_review(onboarding_id: str, doc_type: str, token: str,
 def _make_edit_url(onboarding_id: str, doc_type: str) -> str:
     from app.services.onboarding_email import make_doc_edit_url
     return make_doc_edit_url(onboarding_id, doc_type)
+
+
+class _CommentActionBody(BaseModel):
+    comment_id: str
+    action: str        # accept | reject | reply
+    text: str = ""     # required for reject/reply
+
+
+@router.post("/comment-action/{onboarding_id}/{doc_type}/{token}")
+async def document_comment_action(onboarding_id: str, doc_type: str, token: str,
+                                  body: _CommentActionBody, db: AsyncSession = Depends(get_db)):
+    """P1 (Jane team) accepts, rejects or replies to a comment thread.
+    Accept: marks status=accepted and logs to thread.
+    Reject: mandatory reply text; marks status=rejected and logs to thread.
+    Reply: adds a message to the thread without changing status.
+    """
+    _check_doc_type(doc_type)
+    _check_token(onboarding_id, doc_type, token, "edit")
+    rec, lead = await _load(db, onboarding_id)
+    data = _get_doc_data(rec, doc_type)
+
+    if body.action not in ("accept", "reject", "reply"):
+        raise HTTPException(400, "action must be accept | reject | reply")
+    if body.action in ("reject", "reply") and not (body.text or "").strip():
+        raise HTTPException(400, "A text explanation is required for reject/reply actions")
+
+    comments = data.get("comments") or []
+    target = next((c for c in comments if c.get("id") == body.comment_id), None)
+    if target is None:
+        raise HTTPException(404, "Comment not found")
+
+    now = _now_ist()
+    from app.core.config import settings
+    p1_name = settings.ORGANIZER_NAME or "Jane Aerospace"
+
+    thread_entry = {
+        "by": p1_name,
+        "party": "p1",
+        "action": body.action,
+        "text": (body.text or "").strip()[:2000],
+        "at": _fmt(now),
+    }
+    target.setdefault("thread", []).append(thread_entry)
+
+    if body.action == "accept":
+        target["status"] = "accepted"
+    elif body.action == "reject":
+        target["status"] = "rejected"
+    # reply leaves status unchanged
+
+    _set_doc_data(rec, doc_type, data)
+    await db.commit()
+
+    all_accepted = all(c.get("status") == "accepted" for c in comments)
+    logger.info("comment_action", onboarding_id=onboarding_id, doc_type=doc_type,
+                action=body.action, comment_id=body.comment_id)
+    return {
+        "message": f"Comment {body.action}ed",
+        "all_accepted": all_accepted,
+        "open_count": sum(1 for c in comments if c.get("status") in ("pending", "rejected", None)),
+    }
 
 
 class _InternalSignBody(BaseModel):
@@ -2700,166 +3003,22 @@ _SIGN_WIDGET_CSS = """
 """
 
 _SIGN_WIDGET_JS = r"""
-/* Type / Draw / Upload signature capture. Builds the exact _SignBody payload
-   and self-validates the data URL against the server regex before POSTing,
-   because _clean_sig_image() drops a non-matching image SILENTLY. */
+/* Upload-only signature capture. Validates the data URL against the server
+   regex before POSTing (_clean_sig_image silently drops non-matching images). */
 window.SIGW = (function () {
   'use strict';
   var CFG = window.SIGN_CFG || {};
-  var PX_PER_PT = CFG.pxPerPt || 3;
   var MIN_PT = CFG.minPt || 30, MAX_PT = CFG.maxPt || 500, STEP = CFG.stepPt || 15;
   var MAX_B64 = CFG.maxB64 || 780000;
-  var DRAW_MAX_W = CFG.drawMaxWidth || 600, UP_MAX_W = CFG.uploadMaxWidth || 480;
-  // server contract: ^data:image/(png|jpeg);base64,[A-Za-z0-9+/=]{40,800000}$
+  var UP_MAX_W = CFG.uploadMaxWidth || 480;
   var SIG_RE = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+\/=]{40,800000}$/;
-  var mode = 'upload', sigWidthPt = CFG.defaultPt || 150;
-  var drawnURL = '', uploadURL = '', uploadImg = null, pad = null;
+  var sigWidthPt = CFG.defaultPt || 150;
+  var uploadURL = '', uploadImg = null;
   function $(id) { return document.getElementById(id); }
-  function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
-  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 
-  /* ===== HiDPI signature pad ===== */
-  function SignaturePad(canvas) {
-    this.canvas = canvas;
-    this.ctx = canvas.getContext('2d', { willReadFrequently: true });
-    this.color = '#10245c'; this.minW = 1.3; this.maxW = 3.4; this.vW = 0.7;
-    this.dpr = 1; this.history = []; this._reset();
-    var self = this;
-    this.ro = new ResizeObserver(function () { self.fit(); });
-    this.ro.observe(canvas); this._bind();
-  }
-  SignaturePad.prototype._reset = function () {
-    this.drawing = false; this.pts = []; this.lastV = 0;
-    this.lastW = (this.minW + this.maxW) / 2; this.ink = false;
-  };
-  // Backing store sized in DEVICE px (css * dpr) -> crisp on Retina; one
-  // transform lets every stroke be authored in CSS-px space.
-  SignaturePad.prototype.fit = function () {
-    var dpr = Math.max(1, window.devicePixelRatio || 1);
-    var rect = this.canvas.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;               // hidden tab -> skip
-    var prev = this.ink ? this.canvas.toDataURL() : null;
-    this.dpr = dpr;
-    this.canvas.width = Math.round(rect.width * dpr);
-    this.canvas.height = Math.round(rect.height * dpr);
-    this.canvas.style.height = rect.height + 'px';
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this._style();
-    if (prev) { var im = new Image(), c = this.ctx, w = rect.width, h = rect.height;
-      im.onload = function () { c.drawImage(im, 0, 0, w, h); }; im.src = prev; }
-  };
-  SignaturePad.prototype._style = function () {
-    var c = this.ctx; c.strokeStyle = this.color; c.fillStyle = this.color;
-    c.lineCap = 'round'; c.lineJoin = 'round';
-  };
-  // pointer -> authored CSS-px; scaleX/Y absorb responsive layout + browser zoom
-  SignaturePad.prototype._pos = function (e) {
-    var rect = this.canvas.getBoundingClientRect();
-    var lw = this.canvas.width / this.dpr, lh = this.canvas.height / this.dpr;
-    var sx = lw / rect.width, sy = lh / rect.height;
-    return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy,
-             p: (e.pressure > 0 && e.pressure !== 0.5) ? e.pressure : 0.5 };
-  };
-  SignaturePad.prototype._bind = function () {
-    var cv = this.canvas, self = this;
-    cv.addEventListener('pointerdown', function (e) {
-      if (e.button !== undefined && e.button !== 0) return;
-      cv.setPointerCapture(e.pointerId); self._snap();
-      self.drawing = true; self.pts = [self._pos(e)]; self.lastW = (self.minW + self.maxW) / 2;
-    });
-    cv.addEventListener('pointermove', function (e) {
-      if (!self.drawing) return; e.preventDefault();
-      var evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];   // full pen path
-      for (var i = 0; i < evs.length; i++) self._extend(self._pos(evs[i]));
-    });
-    function end(e) {
-      if (!self.drawing) return; self.drawing = false; self._flush();
-      try { cv.releasePointerCapture(e.pointerId); } catch (x) {}
-      onPadChange();
-    }
-    cv.addEventListener('pointerup', end);
-    cv.addEventListener('pointercancel', end);
-    cv.addEventListener('pointerleave', end);
-  };
-  // variable-width quadratic-midpoint smoothing (velocity + stylus pressure)
-  SignaturePad.prototype._extend = function (pt) {
-    this.ink = true; var p = this.pts; p.push(pt); if (p.length < 3) return;
-    var n = p.length, p0 = p[n - 3], p1 = p[n - 2], p2 = p[n - 1];
-    var m1 = mid(p0, p1), m2 = mid(p1, p2), v = dist(p1, p2);
-    this.lastV = this.vW * v + (1 - this.vW) * this.lastV;
-    var target = Math.max(this.maxW - this.lastV * 0.9, this.minW) * (0.6 + 0.8 * p2.p);
-    var w = (this.lastW + target) / 2, c = this.ctx;
-    c.beginPath(); c.lineWidth = w; c.moveTo(m1.x, m1.y);
-    c.quadraticCurveTo(p1.x, p1.y, m2.x, m2.y); c.stroke(); this.lastW = w;
-  };
-  SignaturePad.prototype._flush = function () {
-    if (this.pts.length && this.pts.length < 3) {            // tap -> dot
-      var p = this.pts[0]; this.ctx.beginPath();
-      this.ctx.arc(p.x, p.y, this.lastW / 2, 0, Math.PI * 2); this.ctx.fill(); this.ink = true;
-    }
-    this.pts = [];
-  };
-  SignaturePad.prototype._snap = function () {
-    try { this.history.push(this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height)); } catch (e) {}
-    if (this.history.length > 20) this.history.shift();
-  };
-  SignaturePad.prototype.undo = function () {
-    var im = this.history.pop(); if (!im) return;
-    var c = this.ctx; c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
-    c.putImageData(im, 0, 0); c.restore(); this.ink = !this.isEmpty(); onPadChange();
-  };
-  SignaturePad.prototype.clear = function () {
-    var c = this.ctx; c.save(); c.setTransform(1, 0, 0, 1, 0, 0);
-    c.clearRect(0, 0, this.canvas.width, this.canvas.height); c.restore();
-    this.history = []; this._reset(); onPadChange();
-  };
-  SignaturePad.prototype.setColor = function (hex) { this.color = hex; this._style(); };
-  SignaturePad.prototype._bounds = function () {       // alpha bounding box of the ink
-    var w = this.canvas.width, h = this.canvas.height, d;
-    try { d = this.ctx.getImageData(0, 0, w, h).data; } catch (e) { return null; }
-    var minX = w, minY = h, maxX = -1, maxY = -1, x, y;
-    for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
-      if (d[(y * w + x) * 4 + 3] !== 0) {
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-      }
-    }
-    return maxX < 0 ? null : { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
-  };
-  SignaturePad.prototype.isEmpty = function () { return !this._bounds(); };
-  SignaturePad.prototype.canUndo = function () { return this.history.length > 0; };
-  // ink-trim + downscale until base64 fits the server cap
-  SignaturePad.prototype.toDataURL = function (maxWidth) {
-    var box = this._bounds(); if (!box) return '';
-    var pad2 = 10 * this.dpr;
-    var sx = Math.max(0, box.minX - pad2), sy = Math.max(0, box.minY - pad2);
-    var sw = Math.min(this.canvas.width, box.maxX + pad2) - sx;
-    var sh = Math.min(this.canvas.height, box.maxY + pad2) - sy;
-    var scale = Math.min(1, maxWidth / sw), url = '';
-    for (var i = 0; i < 6; i++) {
-      var out = document.createElement('canvas');
-      out.width = Math.max(1, Math.round(sw * scale));
-      out.height = Math.max(1, Math.round(sh * scale));
-      out.getContext('2d').drawImage(this.canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
-      url = out.toDataURL('image/png');
-      if ((url.length - url.indexOf(',') - 1) <= MAX_B64) break;
-      scale *= 0.8;
-    }
-    return url;
-  };
-
-  /* ===== wiring ===== */
-  function targetWidthPx() { return Math.max(60, Math.min(DRAW_MAX_W, Math.round(sigWidthPt * PX_PER_PT))); }
-  function onPadChange() {
-    var hint = $('pad-hint'); if (hint) hint.style.opacity = pad.isEmpty() ? '1' : '0';
-    var u = $('pad-undo'); if (u) u.disabled = !pad.canUndo();
-    drawnURL = pad.isEmpty() ? '' : pad.toDataURL(targetWidthPx());
-    updatePreview();
-  }
-  // upload re-encoded to PNG, width <= min(480, target), shrink to fit the cap
   function recomputeUpload() {
     if (!uploadImg) { uploadURL = ''; return; }
-    var capW = Math.min(UP_MAX_W, targetWidthPx());
+    var capW = Math.min(UP_MAX_W, Math.round(sigWidthPt * (CFG.pxPerPt || 3)));
     var scale = Math.min(1, capW / uploadImg.width), url = '';
     for (var i = 0; i < 6; i++) {
       var c = document.createElement('canvas');
@@ -2872,18 +3031,17 @@ window.SIGW = (function () {
     }
     uploadURL = url;
   }
-  function currentImage() { return mode === 'draw' ? drawnURL : mode === 'upload' ? uploadURL : ''; }
 
-  function switchTab(m) {
-    mode = m;
-    var tabs = document.querySelectorAll('.sigtab'), i;
-    for (i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].dataset.mode === m);
-    var panels = document.querySelectorAll('.sigpanel');
-    for (i = 0; i < panels.length; i++) panels[i].classList.toggle('active', panels[i].dataset.panel === m);
-    if (m === 'draw' && pad) pad.fit();
-    updatePreview();
+  function updatePreview() {
+    var prev = $('sig-preview');
+    if (uploadURL) {
+      prev.innerHTML = '<img src="' + uploadURL + '" style="width:' + sigWidthPt + 'px;max-width:100%;height:auto;">';
+    } else {
+      prev.style.color = '#9ca3af'; prev.style.fontSize = '14px';
+      prev.textContent = 'Upload your signature image above';
+    }
   }
-  function onNameInput() { updatePreview(); }
+
   function loadUpload(input) {
     var f = input.files && input.files[0];
     if (!f) { uploadImg = null; uploadURL = ''; updatePreview(); return; }
@@ -2893,35 +3051,24 @@ window.SIGW = (function () {
     img.onerror = function () { alert('Could not read that image file.'); input.value = ''; };
     img.src = URL.createObjectURL(f);
   }
-  // signer-side resize: mirrors the editor toolbar (step 15pt, clamp 30-500)
+
   function resize(dir) {
     sigWidthPt = Math.max(MIN_PT, Math.min(MAX_PT, sigWidthPt + dir * STEP));
     $('sig-pt').textContent = sigWidthPt + ' pt';
-    if (mode === 'draw' && pad && !pad.isEmpty()) drawnURL = pad.toDataURL(targetWidthPx());
-    else if (mode === 'upload') recomputeUpload();
-    updatePreview();
+    recomputeUpload(); updatePreview();
   }
-  function updatePreview() {
-    var prev = $('sig-preview');
-    var img = currentImage();
-    if (img) {
-      prev.innerHTML = '<img src="' + img + '" style="width:' + sigWidthPt + 'px;max-width:100%;height:auto;">';
-    } else {
-      prev.style.fontFamily = 'Georgia,serif'; prev.style.color = '#9ca3af'; prev.style.fontSize = '14px';
-      prev.textContent = (mode === 'draw') ? 'Draw your signature here' : 'Upload your signature image';
-    }
-  }
+
+  function onNameInput() { /* no-op for upload-only mode */ }
+
   function showErr(msg) { var e = $('err'); e.textContent = msg; e.style.display = 'block'; }
 
   async function signDoc() {
     $('err').style.display = 'none';
     var name = ($('s-name').value || '').trim();
     if (!name) { showErr('Please enter your full legal name.'); return; }
-    var sigImage = mode === 'draw' ? drawnURL : uploadURL;
-    if (mode === 'draw' && !sigImage) { showErr('Please draw your signature in the box above.'); return; }
-    if (mode === 'upload' && !sigImage) { showErr('Please upload a signature image (PNG or JPG).'); return; }
-    if (sigImage && !SIG_RE.test(sigImage)) {
-      showErr('Signature image could not be processed — please try a smaller file or redraw.'); return;
+    if (!uploadURL) { showErr('Please upload a signature image (PNG or JPG).'); return; }
+    if (!SIG_RE.test(uploadURL)) {
+      showErr('Signature image could not be processed — please try a different file.'); return;
     }
     if (!$('s-agree').checked) { showErr('Please tick the confirmation checkbox to proceed.'); return; }
 
@@ -2933,7 +3080,7 @@ window.SIGW = (function () {
           signed_name: name,
           designation: ($('s-desig').value || '').trim(),
           sig_font: 'standard',
-          sig_image: sigImage
+          sig_image: uploadURL
         })
       });
       var d = await r.json().catch(function () { return {}; });
@@ -2947,23 +3094,12 @@ window.SIGW = (function () {
   }
 
   function init() {
-    pad = new SignaturePad($('sig-pad'));
-    var sw = $('sig-swatches');
-    if (sw) sw.addEventListener('click', function (e) {
-      var s = e.target && e.target.closest ? e.target.closest('.swatch') : null;
-      if (!s) return;
-      var all = sw.querySelectorAll('.swatch'), i;
-      for (i = 0; i < all.length; i++) all[i].classList.remove('active');
-      s.classList.add('active'); pad.setColor(s.dataset.color);
-    });
     $('sig-pt').textContent = sigWidthPt + ' pt';
     updatePreview();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
-  return { switchTab: switchTab, onNameInput: onNameInput, loadUpload: loadUpload,
-           resize: resize, undo: function () { pad.undo(); }, clearPad: function () { pad.clear(); },
-           signDoc: signDoc };
+  return { loadUpload: loadUpload, resize: resize, onNameInput: onNameInput, signDoc: signDoc };
 })();
 """
 
@@ -2997,7 +3133,16 @@ async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: 
             f"version for your signature shortly."))
 
     if stage in ("review", "changes_requested") and not internal_sig:
-        return HTMLResponse(_review_page_html(onboarding_id, doc_type, token, label, lead, data))
+        # Extract the document HTML for the inline review editor
+        try:
+            if data.get("mode") == "live" and data.get("html"):
+                _review_html = data["html"]
+            else:
+                from app.services.pdf_documents import extract_editable_html
+                _review_html = extract_editable_html(doc_type, _is_overseas(rec), data.get("replacements", []))
+        except Exception:
+            _review_html = ""
+        return HTMLResponse(_review_page_html(onboarding_id, doc_type, token, label, lead, data, _review_html))
 
     pdf_url = f"/api/v1/documents/pdf/{onboarding_id}/{doc_type}/{token}"
     if internal_sig:
@@ -3182,28 +3327,7 @@ async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: 
         </div>
       </div>
 
-      <div class="sig-section-label">Your Signature</div>
-      <div class="sigtabs" id="sig-tabs">
-        <button type="button" class="sigtab" data-mode="draw" onclick="SIGW.switchTab('draw')">✏ Draw</button>
-        <button type="button" class="sigtab active" data-mode="upload" onclick="SIGW.switchTab('upload')">⬆ Upload Image</button>
-      </div>
-
-      <div class="sigpanel" data-panel="draw">
-        <div class="pad-shell">
-          <canvas id="sig-pad"></canvas>
-          <div class="pad-baseline"></div>
-          <div class="pad-hint" id="pad-hint">Draw your signature here</div>
-        </div>
-        <div class="pad-tools">
-          <div class="swatches" id="sig-swatches">
-            <span class="swatch active" data-color="#10245c" style="background:#10245c" title="Navy"></span>
-            <span class="swatch"        data-color="#1d4ed8" style="background:#1d4ed8" title="Blue"></span>
-            <span class="swatch"        data-color="#111827" style="background:#111827" title="Black"></span>
-          </div>
-          <button type="button" class="mini-btn" id="pad-undo" onclick="SIGW.undo()" disabled>↶ Undo</button>
-          <button type="button" class="mini-btn" onclick="SIGW.clearPad()">Clear</button>
-        </div>
-      </div>
+      <div class="sig-section-label">Your Signature (Upload)</div>
 
       <div class="sigpanel active" data-panel="upload">
         <div class="upload-zone" onclick="document.getElementById('s-sigimg').click()">
