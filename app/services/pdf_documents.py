@@ -574,6 +574,19 @@ def sanitize_live_html(html: str) -> str:
                 keep = f' style="{";".join(props)}"'
         if name == "br":
             return "<br/>"
+        # Preserve safe CSS classes (chg-p1, chg-p2, chg-block, etc.) for change-tracking marks
+        cls_m = re.search(r'class\s*=\s*["\']([^"\'<>]{1,300})["\']', attrs, re.I)
+        if cls_m:
+            safe_cls = " ".join(c for c in cls_m.group(1).split() if re.fullmatch(r"[\w-]+", c))
+            if safe_cls:
+                keep += f' class="{safe_cls}"'
+        # Preserve id and data-cmt anchors used by the floating comment bubble system
+        id_m = re.search(r'\bid\s*=\s*["\']([A-Za-z0-9_-]{1,80})["\']', attrs, re.I)
+        if id_m:
+            keep += f' id="{id_m.group(1)}"'
+        dcmt_m = re.search(r'data-cmt\s*=\s*["\']([A-Za-z0-9_-]{1,80})["\']', attrs, re.I)
+        if dcmt_m:
+            keep += f' data-cmt="{dcmt_m.group(1)}"'
         return f"<{name}{keep}>"
 
     html = re.sub(r"<\s*(/?)\s*([a-zA-Z0-9]+)((?:\s[^<>]*)?)/?>", _clean, html)
@@ -1144,11 +1157,17 @@ def append_signature_page(pdf_bytes: bytes, doc_type: str, sig: dict | None = No
         return y0 + TOTAL_H
 
     # ── draw signer blocks ────────────────────────────────────────────────────
-    japl_name  = (internal_sig or {}).get("company_name", "Jane Aerospace Private Limited")
+    japl_name   = (internal_sig or {}).get("company_name", "Jane Aerospace Private Limited")
+    lead_name   = (sig or {}).get("company_name", "Counterparty")
 
     y = float(INFO_Y + 26 + BLOCK_GAP)
+    # P1: Jane Aerospace internal signatory
     y = _signer_block(y, internal_sig, "Authorised Signatory", japl_name,
                       pending=(internal_sig is None))
+    y += BLOCK_GAP
+    # P2: Lead / counterparty signatory — this is where the uploaded signature image appears
+    y = _signer_block(y, sig, "Authorised Signatory", lead_name,
+                      pending=(sig is None))
 
     # ── legal footer ──────────────────────────────────────────────────────────
     footer_y = y + 14

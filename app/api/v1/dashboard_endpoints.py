@@ -374,7 +374,7 @@ async def overview(days: int = 0, db: AsyncSession = Depends(get_db), _: User = 
 # ---------------------------------------------------------------------------
 
 def _lead_row(lead: LeadV2, rec: OnboardingRecord | None) -> dict:
-    from app.services.onboarding_email import make_doc_edit_url, make_doc_sign_url, make_kyc_view_url
+    from app.services.onboarding_email import make_doc_edit_url, make_doc_editor_url, make_doc_sign_url, make_kyc_view_url
     idx = _stage_index(lead, rec)
     row = {
         "lead_id": str(lead.id),
@@ -401,17 +401,19 @@ def _lead_row(lead: LeadV2, rec: OnboardingRecord | None) -> dict:
             "kyc_status": rec.kyc_status,
             "kyc_display": rec.kyc_status_display or "",
             "kyc_view_url": make_kyc_view_url(oid),
-            "nda_status": rec.nda_status,
+            "nda_status": getattr(rec.nda_status, "value", rec.nda_status) or "",
             "nda_display": rec.nda_status_display or "",
             "nda_signed": _signed(rec.nda_draft_content),
             "nda_stage": _doc_stage_label(rec, "nda"),
             "nda_edit_url": make_doc_edit_url(oid, "nda"),
+            "nda_editor_url": make_doc_editor_url(oid, "nda"),
             "nda_sign_url": make_doc_sign_url(oid, "nda"),
-            "agreement_status": rec.agreement_status,
+            "agreement_status": getattr(rec.agreement_status, "value", rec.agreement_status) or "",
             "agreement_display": rec.agreement_status_display or "",
             "agreement_signed": _signed(rec.agreement_draft_content),
             "agreement_stage": _doc_stage_label(rec, "agreement"),
             "agreement_edit_url": make_doc_edit_url(oid, "agreement"),
+            "agreement_editor_url": make_doc_editor_url(oid, "agreement"),
             "agreement_sign_url": make_doc_sign_url(oid, "agreement"),
         }
     return row

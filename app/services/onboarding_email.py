@@ -86,9 +86,21 @@ def make_doc_edit_url(onboarding_id: str, doc_type: str) -> str:
     return f"{settings.APP_URL.rstrip('/')}/api/v1/documents/edit/{onboarding_id}/{doc_type}/{token}"
 
 
+def make_doc_editor_url(onboarding_id: str, doc_type: str) -> str:
+    """Full live editor URL (P1 — edit content, track changes, send for review)."""
+    token = make_doc_token(onboarding_id, doc_type, "edit")
+    return f"{settings.APP_URL.rstrip('/')}/api/v1/documents/editor/{onboarding_id}/{doc_type}/{token}"
+
+
 def make_doc_sign_url(onboarding_id: str, doc_type: str) -> str:
     token = make_doc_token(onboarding_id, doc_type, "sign")
     return f"{settings.APP_URL.rstrip('/')}/api/v1/documents/sign/{onboarding_id}/{doc_type}/{token}"
+
+
+def make_doc_portal_url(onboarding_id: str, doc_type: str) -> str:
+    """Lead-facing dashboard portal URL — review or sign, depending on document stage."""
+    token = make_doc_token(onboarding_id, doc_type, "sign")
+    return f"{settings.APP_URL.rstrip('/')}/api/v1/documents/portal/{onboarding_id}/{doc_type}/{token}"
 
 
 # ---------------------------------------------------------------------------

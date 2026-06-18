@@ -764,86 +764,150 @@
       background: var(--b600);
     }
 
-    /* document pipeline circles */
+    /* ── Document tracker cards ─────────────────────────────── */
     .doc-card {
       background: #fff;
-      border: 1px solid var(--bd);
-      border-radius: 12px;
-      padding: 14px 16px;
-      margin-bottom: 10px;
-      transition: box-shadow .15s;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      margin-bottom: 14px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(15,23,42,.06);
+      transition: box-shadow .18s;
     }
+    .doc-card:hover { box-shadow: 0 6px 24px rgba(15,23,42,.10); }
 
-    .doc-card:hover {
-      box-shadow: 0 4px 18px rgba(15, 23, 42, .08);
-    }
-
+    /* card header row */
     .doc-card-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 12px;
+      padding: 14px 20px 12px;
+      border-bottom: 1px solid #f1f5f9;
+      gap: 10px;
       flex-wrap: wrap;
-      gap: 8px;
     }
+    .doc-head-company { font-size:14px;font-weight:700;color:#0f172a; }
+    .doc-head-email   { font-size:11.5px;color:#64748b;margin-top:1px; }
 
-    .doc-pipeline {
+    /* KYC badge in header */
+    .doc-kyc-badge {
+      display:flex;align-items:center;gap:6px;
+      background:#f8fafc;border:1px solid #e2e8f0;
+      border-radius:8px;padding:6px 12px;font-size:11.5px;
+    }
+    .doc-kyc-badge a {
+      font-size:11px;color:#1a56db;text-decoration:none;font-weight:600;
+    }
+    .doc-kyc-badge a:hover { text-decoration:underline; }
+
+    /* horizontal stepper track */
+    .doc-track-wrap {
+      padding: 18px 20px 4px;
+    }
+    .doc-track-label {
+      font-size:10px;font-weight:800;letter-spacing:.07em;
+      text-transform:uppercase;color:#94a3b8;margin-bottom:10px;
+      display:flex;align-items:center;gap:6px;
+    }
+    .doc-track-label span.tl-doc { color:#1e293b;font-size:11px; }
+
+    .doc-stepper {
       display: flex;
+      align-items: flex-start;
+      width: 100%;
+      margin-bottom: 14px;
+    }
+    .ds-step {
+      display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 0;
+      flex: 1;
+      position: relative;
     }
-
-    .dp-dot {
-      width: 11px;
-      height: 11px;
-      border-radius: 50%;
-      border: 2px solid #cbd5e1;
-      background: #fff;
-      flex: none;
-      transition: background .2s, border-color .2s;
-    }
-
-    .dp-dot.done {
-      background: #16a34a;
-      border-color: #16a34a;
-    }
-
-    .dp-dot.active {
-      border-color: #1a56db;
-      background: #eff6ff;
-    }
-
-    .dp-line {
-      width: 16px;
+    /* connector line between steps */
+    .ds-step:not(:last-child)::after {
+      content:'';
+      position:absolute;
+      top: 17px;
+      left: calc(50% + 17px);
+      right: calc(-50% + 17px);
       height: 2px;
       background: #e2e8f0;
-      flex: none;
-      transition: background .2s;
+      transition: background .3s;
+      z-index:0;
+    }
+    .ds-step.done:not(:last-child)::after  { background:#16a34a; }
+    .ds-step.active:not(:last-child)::after { background:#bfdbfe; }
+
+    /* node circle */
+    .ds-node {
+      width: 34px; height: 34px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px;
+      border: 2px solid #e2e8f0;
+      background: #f8fafc;
+      position: relative; z-index:1;
+      transition: all .25s;
+      flex-shrink: 0;
+    }
+    .ds-step.done  .ds-node { background:#dcfce7;border-color:#16a34a;color:#15803d; }
+    .ds-step.active .ds-node {
+      background:#eff6ff;border-color:#1a56db;color:#1a56db;
+      box-shadow: 0 0 0 4px rgba(26,86,219,.12);
+      animation: nodePulse 2s ease-in-out infinite;
+    }
+    .ds-step.skip   .ds-node { background:#fef9c3;border-color:#ca8a04;color:#92400e; }
+    @keyframes nodePulse {
+      0%,100% { box-shadow:0 0 0 4px rgba(26,86,219,.12); }
+      50%      { box-shadow:0 0 0 7px rgba(26,86,219,.06); }
     }
 
-    .dp-line.done {
-      background: #16a34a;
+    /* step label + sub */
+    .ds-lbl {
+      font-size: 10.5px; font-weight: 600; color: #64748b;
+      margin-top: 6px; text-align: center; line-height:1.3;
+      white-space: nowrap;
     }
-
-    .doc-cols {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 10px;
+    .ds-step.done   .ds-lbl { color:#15803d; }
+    .ds-step.active .ds-lbl { color:#1a56db; font-weight:700; }
+    .ds-sub {
+      font-size:9.5px;color:#94a3b8;text-align:center;
+      margin-top:2px;white-space:nowrap;
     }
+    .ds-step.active .ds-sub { color:#93c5fd; }
+    .ds-step.done   .ds-sub { color:#86efac; }
 
-    .doc-col-lbl {
-      font-size: 10px;
-      font-weight: 800;
-      color: var(--mut);
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      margin-bottom: 5px;
+    /* action bar below stepper */
+    .doc-actions {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      padding: 10px 20px 16px;
+      border-top: 1px solid #f1f5f9;
+      background: #fafbfc;
     }
+    .doc-act-btn {
+      display:inline-flex;align-items:center;gap:5px;
+      padding:6px 13px;border-radius:8px;font-size:12px;font-weight:600;
+      text-decoration:none;border:none;cursor:pointer;transition:all .15s;
+    }
+    .doc-act-primary {
+      background:#1a56db;color:#fff;
+    }
+    .doc-act-primary:hover { background:#1e40af; }
+    .doc-act-secondary {
+      background:#fff;color:#374151;border:1px solid #d1d5db;
+    }
+    .doc-act-secondary:hover { background:#f1f5f9;border-color:#9ca3af; }
+    .doc-act-green {
+      background:#dcfce7;color:#15803d;border:1px solid #86efac;
+    }
+    .doc-act-green:hover { background:#bbf7d0; }
 
-    @media(max-width:680px) {
-      .doc-cols {
-        grid-template-columns: 1fr;
-      }
+    @media(max-width:700px) {
+      .ds-lbl,.ds-sub { display:none; }
+      .ds-node { width:26px;height:26px;font-size:12px; }
+      .doc-track-wrap { padding:12px 12px 2px; }
+      .doc-card-head,.doc-actions { padding:10px 12px; }
     }
 
     .bar-row {
@@ -2496,74 +2560,176 @@
     }
 
     /* ============================ documents ============================ */
-    function docStageChip(stage) {
-      const map = {
-        nda_sent: ['c-blue', 'Sent for Review'],
-        agr_sent: ['c-blue', 'Sent for Review'],
-        nda_modify: ['c-amber', 'Changes Requested'],
-        agr_modify: ['c-amber', 'Changes Requested'],
-        lead_accept: ['c-blue', 'Terms Accepted'],
-        sign_sent: ['c-purple', 'Awaiting Signature'],
-        signed: ['c-green', '&#10003; Signed'],
+
+    // Convert raw stage key → step index (0–5) and whether changes occurred
+    function docStepInfo(stage, status) {
+      const order = { '':0, nda_sent:1, agr_sent:1, nda_modify:2, agr_modify:2,
+                      lead_accept:3, sign_sent:4, signed:5 };
+      const statusOrder = {
+        PENDING:0, DRAFT_GENERATED:0, SENT_TO_LEAD:1,
+        TEAM_REVIEW:2, SIGNED_RECEIVED:4, APPROVED:5, PROCEED_NEXT:5
       };
-      if (!stage) return '';
-      const [cls, label] = map[stage] || ['c-gray', stage];
-      return `<span class="chip ${cls}">${label}</span>`;
+      let idx = order[stage] ?? statusOrder[status] ?? 0;
+      const hadChanges = (stage === 'nda_modify' || stage === 'agr_modify' || status === 'TEAM_REVIEW');
+      return { idx, hadChanges };
     }
-    function docCell(o, k) {
-      const stage = o[k + '_stage'];
-      let h = stage ? docStageChip(stage) : chip(o[k + '_status']);
-      h += `<br><a class="btn ${canAct() ? 'btn-p' : 'btn-o'}" style="padding:5px 11px;font-size:11px;margin-top:5px;" target="_blank" href="${o[k + '_edit_url']}">${ic(canAct() ? 'edit' : 'eye')} ${canAct() ? 'Edit & Preview' : 'Preview'}</a>
-    <button class="btn btn-o" style="padding:5px 11px;font-size:11px;margin-top:5px;" onclick="navigator.clipboard.writeText('${o[k + '_sign_url']}');toast('Signing link copied')">${ic('copy')} Sign Link</button>`;
-      return h;
+
+    // Build one horizontal stepper row (NDA or Agreement)
+    function docStepper(o, k) {
+      const stage  = o[k + '_stage']  || '';
+      const status = o[k + '_status'] || '';
+      const { idx, hadChanges } = docStepInfo(stage, status);
+
+      // Steps: icon, label, subtitle, stageIndex it corresponds to
+      const steps = [
+        { icon:'📄', lbl:'Draft',    sub:'Ready to send',       at:0 },
+        { icon:'📤', lbl:'Sent',     sub:'Lead reviewing',      at:1 },
+        { icon:'✏️', lbl:'Changes',  sub:'Lead requested edits',at:2, optional:true },
+        { icon:'✅', lbl:'Accepted', sub:'Terms agreed',        at:3 },
+        { icon:'🖊', lbl:'Signing',  sub:'Jane countersigned',  at:4 },
+        { icon:'🎉', lbl:'Signed',   sub:'All done!',           at:5 },
+      ];
+
+      return steps.map(s => {
+        const done   = idx > s.at;
+        const active = idx === s.at;
+        const skip   = s.optional && !hadChanges && idx > s.at;
+        const cls    = skip ? 'skip' : done ? 'done' : active ? 'active' : '';
+        const nodeIc = done ? '✓' : s.icon;
+        return `<div class="ds-step ${cls}" title="${s.lbl}">
+          <div class="ds-node">${nodeIc}</div>
+          <div class="ds-lbl">${s.lbl}</div>
+          <div class="ds-sub">${active ? '<b>Now</b>' : (done ? s.sub : '—')}</div>
+        </div>`;
+      }).join('');
     }
-    function docPipeline(o) {
-      const kycDone = ['APPROVED', 'PROCEED_NEXT'].includes(o.kyc_status);
-      const ndaSent = !!o.nda_stage;
-      const ndaSign = o.nda_stage === 'signed';
-      const agrSent = !!o.agreement_stage;
-      const agrSign = o.agreement_stage === 'signed';
-      const dot = (done, tip) => `<div class="dp-dot${done ? ' done' : ''}" title="${tip}"></div>`;
-      const line = done => `<div class="dp-line${done ? ' done' : ''}"></div>`;
-      return `<div class="doc-pipeline" title="KYC → NDA → NDA Signed → Agreement → Agreement Signed">
-        ${dot(kycDone, 'KYC')}${line(ndaSent)}${dot(ndaSent, 'NDA Sent')}${line(ndaSign)}${dot(ndaSign, 'NDA Signed')}${line(agrSent)}${dot(agrSent, 'Agreement Sent')}${line(agrSign)}${dot(agrSign, 'Agreement Signed')}
+
+    // Action buttons relevant to current stage
+    function docActions(o) {
+      const editorUrl   = url => url;
+      const ndaEditor   = o.nda_editor_url   || o.nda_edit_url;
+      const agrEditor   = o.agreement_editor_url || o.agreement_edit_url;
+      const ndaSign     = o.nda_sign_url;
+      const agrSign     = o.agreement_sign_url;
+      const ndaSigned   = o.nda_signed;
+      const agrSigned   = o.agreement_signed;
+      const ndaStage    = o.nda_stage || '';
+      const agrStage    = o.agreement_stage || '';
+      const act = canAct();
+      let btns = '';
+
+      // NDA buttons
+      if (!ndaSigned) {
+        if (act)
+          btns += `<a class="doc-act-btn doc-act-primary" href="${ndaEditor}" target="_blank">✏️ Edit NDA</a>`;
+        else
+          btns += `<a class="doc-act-btn doc-act-secondary" href="${ndaEditor}" target="_blank">👁 Preview NDA</a>`;
+        btns += `<a class="doc-act-btn doc-act-secondary" href="${ndaSign}" target="_blank">🖊 NDA Sign Page</a>`;
+      } else {
+        btns += `<span class="doc-act-btn doc-act-green">✅ NDA Signed</span>`;
+        btns += `<button class="doc-act-btn doc-act-secondary" onclick="navigator.clipboard.writeText('${ndaSign}');toast('NDA link copied')">📋 Copy NDA Link</button>`;
+      }
+
+      btns += `<span style="width:1px;background:#e2e8f0;align-self:stretch;margin:0 2px;"></span>`;
+
+      // Agreement buttons
+      if (!agrSigned) {
+        if (act)
+          btns += `<a class="doc-act-btn doc-act-primary" href="${agrEditor}" target="_blank">✏️ Edit Agreement</a>`;
+        else
+          btns += `<a class="doc-act-btn doc-act-secondary" href="${agrEditor}" target="_blank">👁 Preview Agreement</a>`;
+        btns += `<a class="doc-act-btn doc-act-secondary" href="${agrSign}" target="_blank">🖊 Agreement Sign Page</a>`;
+      } else {
+        btns += `<span class="doc-act-btn doc-act-green">✅ Agreement Signed</span>`;
+        btns += `<button class="doc-act-btn doc-act-secondary" onclick="navigator.clipboard.writeText('${agrSign}');toast('Agreement link copied')">📋 Copy Agreement Link</button>`;
+      }
+
+      return btns;
+    }
+
+    // Overall progress % for the progress arc in header
+    function docProgress(o) {
+      const kycDone = ['APPROVED','PROCEED_NEXT'].includes(o.kyc_status);
+      const { idx: ni } = docStepInfo(o.nda_stage||'', o.nda_status||'');
+      const { idx: ai } = docStepInfo(o.agreement_stage||'', o.agreement_status||'');
+      const total = (kycDone?1:0) + ni + ai; // max = 1+5+5 = 11
+      const pct   = Math.round(total / 11 * 100);
+      const col   = pct >= 100 ? '#16a34a' : pct >= 50 ? '#1a56db' : '#f59e0b';
+      return `<div style="display:flex;align-items:center;gap:8px;">
+        <div style="font-size:11px;color:#64748b;">Overall</div>
+        <div style="font-size:18px;font-weight:800;color:${col};">${pct}%</div>
+        <div style="width:56px;height:6px;border-radius:99px;background:#e2e8f0;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:${col};border-radius:99px;transition:width .4s;"></div>
+        </div>
       </div>`;
     }
+
     function renderDocs() {
       const rows = LEADS.filter(l => l.onboarding);
       if (!rows.length) {
-        document.getElementById('view-docs').innerHTML = '<div class="panel" style="text-align:center;color:var(--mut);padding:48px;">No onboarding records yet</div>';
+        document.getElementById('view-docs').innerHTML =
+          '<div class="panel" style="text-align:center;color:var(--mut);padding:48px;">No onboarding records yet</div>';
         return;
       }
+
+      const kycLabel = s => ({
+        PENDING:'Pending', FORM_SENT:'Form Sent', SUBMITTED:'Submitted',
+        UNDER_REVIEW:'Under Review', APPROVED:'Approved ✓',
+        REJECTED:'Rejected', DRAFT_GENERATED:'KYC Done ✓',
+        SIGNED_RECEIVED:'KYC Done ✓', PROCEED_NEXT:'KYC Done ✓',
+        APPROVED_WAIT:'Approved', COMPLETED:'Done ✓',
+      }[s] || s || 'Pending');
+
+      const kycCol = s => ['APPROVED','PROCEED_NEXT','DRAFT_GENERATED','SIGNED_RECEIVED','COMPLETED'].includes(s)
+        ? '#16a34a' : ['FORM_SENT','SUBMITTED','UNDER_REVIEW'].includes(s) ? '#f59e0b' : '#94a3b8';
+
       const cards = rows.map(l => {
         const o = l.onboarding;
+        const typeChip = `<span class="chip ${o.company_type==='overseas'?'c-amber':'c-blue'}" style="font-size:10px;">${o.company_type==='overseas'?'Overseas':'Indian'}</span>`;
         return `<div class="doc-card">
+
+          <!-- ── Header ── -->
           <div class="doc-card-head">
             <div>
-              <b style="font-size:13px;">${esc(l.company)}</b>
-              <span class="chip ${o.company_type === 'overseas' ? 'c-amber' : 'c-blue'}" style="margin-left:7px;font-size:10px;">${o.company_type === 'overseas' ? 'Overseas' : 'Indian'}</span>
-              <br><span style="font-size:11px;color:var(--mut);">${esc(l.email)}</span>
+              <span class="doc-head-company">${esc(l.company)}</span> ${typeChip}
+              <div class="doc-head-email">${esc(l.email)}</div>
             </div>
-            ${docPipeline(o)}
-          </div>
-          <div class="doc-cols">
-            <div>
-              <div class="doc-col-lbl">KYC</div>
-              ${chip(o.kyc_status)}
-              <br><a class="btn btn-o" style="padding:4px 9px;font-size:11px;margin-top:5px;" target="_blank" href="${o.kyc_view_url}">${ic('eye')} View</a>
-            </div>
-            <div>
-              <div class="doc-col-lbl">NDA</div>
-              ${docCell(o, 'nda')}
-            </div>
-            <div>
-              <div class="doc-col-lbl">Agreement</div>
-              ${docCell(o, 'agreement')}
+            <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+              <div class="doc-kyc-badge">
+                <span style="color:${kycCol(o.kyc_status)};font-weight:700;font-size:11.5px;">
+                  🪪 KYC — ${kycLabel(o.kyc_status)}
+                </span>
+                <a href="${o.kyc_view_url}" target="_blank">View →</a>
+              </div>
+              ${docProgress(o)}
             </div>
           </div>
+
+          <!-- ── NDA Stepper ── -->
+          <div class="doc-track-wrap">
+            <div class="doc-track-label">
+              <span style="font-size:13px;">📑</span>
+              <span class="tl-doc">Non-Disclosure Agreement (NDA)</span>
+            </div>
+            <div class="doc-stepper">${docStepper(o, 'nda')}</div>
+          </div>
+
+          <!-- ── Agreement Stepper ── -->
+          <div class="doc-track-wrap" style="padding-top:4px;">
+            <div class="doc-track-label">
+              <span style="font-size:13px;">📃</span>
+              <span class="tl-doc">Customer Agreement</span>
+            </div>
+            <div class="doc-stepper">${docStepper(o, 'agreement')}</div>
+          </div>
+
+          <!-- ── Action Bar ── -->
+          <div class="doc-actions">${docActions(o)}</div>
         </div>`;
       });
-      document.getElementById('view-docs').innerHTML = `<div style="max-width:900px;">${cards.join('')}</div>`;
+
+      document.getElementById('view-docs').innerHTML =
+        `<div style="max-width:980px;">${cards.join('')}</div>`;
     }
 
     /* ============================ approvals ============================ */

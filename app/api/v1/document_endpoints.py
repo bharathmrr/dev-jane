@@ -37,7 +37,7 @@ from html import unescape as _html_unescape
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,7 +48,7 @@ from app.db.base import DocumentStatus
 from app.db.models import KYCSubmission, LeadV2, OnboardingRecord
 from app.db.session import get_db
 from app.services.onboarding_email import (
-    make_doc_sign_url,
+    make_doc_portal_url,
     verify_doc_token,
 )
 
@@ -1509,6 +1509,22 @@ async def document_live_editor(onboarding_id: str, doc_type: str, token: str,
   .sb-empty{{font-size:12px;color:#94a3b8;padding:4px 2px;}}
   @media(max-width:980px){{.main{{flex-direction:column;}}.pv{{min-height:38vh;}}
     #sidebar{{width:100%;}}}}
+  /* ── Change-tracking mark highlights ── */
+  [data-cmt]{{border-radius:3px;transition:background .3s,outline .2s;}}
+  .chg-p1{{background:rgba(37,99,235,0.11)!important;border-left:3px solid #2563eb!important;padding-left:6px!important;}}
+  .chg-p2{{background:rgba(245,158,11,0.14)!important;border-left:3px solid #f59e0b!important;padding-left:6px!important;}}
+  .chg-accepted{{background:rgba(22,163,74,0.09)!important;border-left:3px solid #16a34a!important;padding-left:6px!important;}}
+  .chg-rejected{{background:rgba(239,68,68,0.09)!important;border-left:3px solid #dc2626!important;padding-left:6px!important;}}
+  .jump-flash{{animation:cmtFlash 1.7s ease;}}
+  @keyframes cmtFlash{{0%,100%{{outline:none;}}25%,65%{{outline:3px solid #f59e0b;outline-offset:3px;}}}}
+  /* ── Floating comment bubbles ── */
+  .chg-bubble{{position:fixed;width:228px;background:#fff;border:1px solid #e2e8f0;
+    border-radius:10px;padding:10px 12px;
+    box-shadow:0 4px 18px rgba(15,23,42,.13);font-size:12px;font-family:'Segoe UI',Arial,sans-serif;
+    z-index:45;cursor:pointer;display:none;transition:box-shadow .15s,border-color .15s;}}
+  .chg-bubble:hover,.chg-bubble.bub-focus{{box-shadow:0 7px 26px rgba(37,99,235,.22);border-color:#93c5fd;}}
+  .bub-rej-box textarea{{width:100%;min-height:58px;padding:6px 8px;border:1px solid #fca5a5;
+    border-radius:6px;font-size:11.5px;font-family:inherit;resize:vertical;margin-top:6px;}}
 </style>
 <style>{_EDITOR_RIBBON_CSS}</style>
 <style>{_SIG_OVERLAY_CSS}</style></head>
@@ -1526,6 +1542,7 @@ async def document_live_editor(onboarding_id: str, doc_type: str, token: str,
   <input type="file" id="sig-ov-file" accept=".png,.jpg,.jpeg" style="display:none" onchange="_sigOverlayFromFile(this)">
   <a class="btn b-line" target="_blank" id="dl-btn" href="{base}/pdf/{onboarding_id}/{doc_type}/{token}" title="Download PDF"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>PDF</a>
   <button class="btn b-line" onclick="revertTemplate()" title="Restore original template"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/></svg>Original</button>
+  <span id="p1-cmt-count" style="display:none;font-size:11px;background:#dbeafe;color:#1e40af;border-radius:6px;padding:3px 10px;font-weight:700;"></span>
   <button class="btn b-green" onclick="sendForReview()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send for Review</button>
 </div>
 <div class="toolbar" id="ribbon" onmousedown="saveRange()">
@@ -1644,9 +1661,36 @@ async def document_live_editor(onboarding_id: str, doc_type: str, token: str,
   <div class="sb-body" id="sb-body"><p class="sb-empty">Loading…</p></div>
 </div>
 
+<!-- P1 per-change comment modal (shown when stage=changes_requested and P1 edits) -->
+<div id="p1-cmt-modal" style="display:none;position:fixed;inset:0;z-index:600;background:rgba(12,35,68,.6);
+     align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:14px;width:500px;max-width:93vw;padding:24px 26px;
+       box-shadow:0 24px 60px rgba(0,0,0,.38);">
+    <div style="font-size:15px;font-weight:800;color:#0c2344;margin-bottom:4px;">&#x270F; Explain your change — visible to lead</div>
+    <div style="font-size:12.5px;color:#64748b;margin-bottom:14px;">
+      You are responding to the lead&rsquo;s revision request. Explain what you changed and why — the lead will see this comment.</div>
+    <textarea id="p1-cmt-ta" rows="4"
+      placeholder="e.g. &#x27;We kept the 30-day notice period as per our standard terms. The 60-day request is not feasible.&#x27;"
+      style="width:100%;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:13px;
+             font-family:inherit;resize:vertical;outline:none;box-sizing:border-box;"></textarea>
+    <div id="p1-cmt-err" style="display:none;color:#dc2626;font-size:12px;margin-top:5px;"></div>
+    <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;">
+      <button onclick="document.getElementById('p1-cmt-modal').style.display='none';document.getElementById('p1-cmt-err').style.display='none';"
+        style="background:#f1f5f9;color:#374151;border:1px solid #d4dae6;border-radius:7px;
+               padding:9px 18px;font-size:13px;cursor:pointer;font-family:inherit;">
+        &#x2190; Continue Editing</button>
+      <button onclick="_p1SaveComment()"
+        style="background:#1a56db;color:#fff;border:none;border-radius:7px;
+               padding:9px 22px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">
+        &#x2713; Save Comment</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const BASE = '{base}', OID = '{onboarding_id}', DT = '{doc_type}', TOK = '{token}';
 const SIGNED = {str(signed).lower()};
+const STAGE = '{stage}';
 const INIT_HTML = {html_json};
 const COMMENTS = {comments_json};
 const ORIG_TEXT = {orig_text_js};
@@ -1717,6 +1761,13 @@ async function _saveCmt() {{
     return;
   }}
   document.getElementById('edit-cmt-text').style.borderColor = '#f59e0b';
+  // Inject anchor marks on every block that was edited so the HTML stores the change location
+  _editedEls.forEach(function(el) {{
+    if (el.isConnected && !el.getAttribute('data-cmt')) {{
+      el.classList.add('chg-block', 'chg-p1');
+      el.setAttribute('data-cmt', 'temp');
+    }}
+  }});
   const ok = await saveDoc({{comment: _pendingCmt}});
   if (ok) {{
     _hasUnsavedEdit = false;
@@ -1736,7 +1787,173 @@ function _dismissCmt() {{
   // Reload the page to restore last saved state
   location.reload();
 }}
-sheet.addEventListener('input', dirty);
+var _editedEls = new Set();
+sheet.addEventListener('input', function() {{
+  dirty();
+  // Track which block-level element was edited so we can anchor the change mark
+  var sel = window.getSelection && window.getSelection();
+  var node = sel && sel.anchorNode;
+  if (!node) return;
+  var el = node.nodeType === 3 ? node.parentElement : node;
+  while (el && el.parentElement && el.parentElement !== sheet) el = el.parentElement;
+  if (el && el !== sheet && el.isConnected) _editedEls.add(el);
+}});
+
+// ── Floating comment bubble system ───────────────────────────────────────────
+window._lastComments = [];
+
+function _applyCommentId(cmtId) {{
+  var idx = 0;
+  sheet.querySelectorAll('[data-cmt="temp"]').forEach(function(el) {{
+    el.setAttribute('data-cmt', cmtId);
+    if (!el.id) el.id = 'cm-' + cmtId + (idx > 0 ? '-' + idx : '');
+    idx++;
+  }});
+  _editedEls.clear();
+}}
+
+function _chgClass(party, status) {{
+  if (status === 'accepted') return 'chg-accepted';
+  if (status === 'rejected') return 'chg-rejected';
+  return party === 'p1' ? 'chg-p1' : 'chg-p2';
+}}
+
+function _applyMarkColors(comments) {{
+  window._lastComments = comments || [];
+  var map = {{}};
+  (comments || []).forEach(function(c) {{ map[c.id] = c; }});
+  sheet.querySelectorAll('[data-cmt]').forEach(function(el) {{
+    var cid = el.getAttribute('data-cmt');
+    if (!cid || cid === 'temp') return;
+    var c = map[cid]; if (!c) return;
+    // Remove old state classes, apply new one
+    el.classList.remove('chg-p1','chg-p2','chg-accepted','chg-rejected');
+    el.classList.add(_chgClass(c.party, c.status));
+    el.style.cursor = 'pointer';
+    el.title = 'Click to view / jump to comment';
+    el.onclick = (function(id) {{ return function() {{ jumpToChange(id); }}; }})(cid);
+  }});
+}}
+
+function renderBubbles(comments) {{
+  document.querySelectorAll('.chg-bubble').forEach(function(b) {{ b.remove(); }});
+  window._lastComments = comments || [];
+  if (!comments || !comments.length) return;
+  var map = {{}};
+  comments.forEach(function(c) {{ map[c.id] = c; }});
+  var seen = {{}};
+  sheet.querySelectorAll('[data-cmt]').forEach(function(mark) {{
+    var cid = mark.getAttribute('data-cmt');
+    if (!cid || cid === 'temp' || seen[cid]) return;
+    seen[cid] = true;
+    var c = map[cid]; if (!c) return;
+    var status = c.status || 'pending';
+    var pCol  = c.party === 'p1' ? '#1a56db' : '#059669';
+    var sCol  = {{pending:'#f59e0b',accepted:'#16a34a',rejected:'#dc2626'}}[status] || '#94a3b8';
+    var pLbl  = c.party === 'p1' ? 'Jane' : 'Lead';
+    var txt   = ((c.thread || [])[0] || {{}}).text || '';
+    var accRej = status === 'pending' ? (
+      '<div style="display:flex;gap:5px;margin-top:7px;">' +
+      '<button data-bub-cid="' + cid + '" onclick="event.stopPropagation();_bubAccept(this)" ' +
+        'style="flex:1;background:#16a34a;color:#fff;border:none;border-radius:5px;padding:4px 0;font-size:11px;font-weight:700;cursor:pointer;">✓ Accept</button>' +
+      '<button data-bub-cid="' + cid + '" onclick="event.stopPropagation();_bubReject(this)" ' +
+        'style="flex:1;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:5px;padding:4px 0;font-size:11px;font-weight:700;cursor:pointer;">✗ Reject</button>' +
+      '</div>') : '';
+    var bub = document.createElement('div');
+    bub.className = 'chg-bubble';
+    bub.id = 'bub-' + cid;
+    bub.setAttribute('data-for', cid);
+    bub.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">' +
+        '<span style="font-size:11px;font-weight:700;color:' + pCol + '">' + (c.by||'') +
+          ' <span style="color:#94a3b8;font-weight:400;">(' + pLbl + ')</span></span>' +
+        '<span style="font-size:9.5px;font-weight:700;background:' + sCol + ';color:#fff;padding:1px 6px;border-radius:99px;">' + status + '</span>' +
+      '</div>' +
+      '<div style="font-size:11.5px;color:#374151;line-height:1.45;margin-bottom:4px;word-break:break-word;">' +
+        txt.slice(0,130) + (txt.length > 130 ? '…' : '') +
+      '</div>' +
+      '<div style="font-size:10px;color:#94a3b8;">' + (c.at||'') + '</div>' +
+      accRej;
+    bub.onclick = (function(id) {{ return function() {{ jumpToChange(id); }}; }})(cid);
+    document.body.appendChild(bub);
+  }});
+  positionBubbles();
+}}
+
+function positionBubbles() {{
+  var sheetRect = sheet.getBoundingClientRect();
+  var bubLeft = Math.min(sheetRect.right + 14, window.innerWidth - 244);
+  var seen = {{}};
+  sheet.querySelectorAll('[data-cmt]').forEach(function(mark) {{
+    var cid = mark.getAttribute('data-cmt');
+    if (!cid || cid === 'temp' || seen[cid]) return;
+    seen[cid] = true;
+    var bub = document.getElementById('bub-' + cid); if (!bub) return;
+    var rect = mark.getBoundingClientRect();
+    var top  = Math.max(60, rect.top - 8);
+    bub.style.top  = top + 'px';
+    bub.style.left = bubLeft + 'px';
+    bub.style.display = (rect.top < -300 || rect.top > window.innerHeight + 120) ? 'none' : 'block';
+  }});
+}}
+
+function jumpToChange(cmtId) {{
+  var el = sheet.querySelector('[data-cmt="' + cmtId + '"]');
+  if (el) {{
+    el.scrollIntoView({{behavior:'smooth',block:'center'}});
+    el.classList.add('jump-flash');
+    setTimeout(function() {{ el.classList.remove('jump-flash'); }}, 1800);
+  }}
+  var bub = document.getElementById('bub-' + cmtId);
+  if (bub) {{
+    bub.classList.add('bub-focus');
+    setTimeout(function() {{ bub.classList.remove('bub-focus'); }}, 1800);
+  }}
+  // Scroll the sidebar card into view
+  setTimeout(function() {{
+    var card = document.getElementById('card-' + cmtId);
+    if (card) card.scrollIntoView({{behavior:'smooth',block:'nearest'}});
+  }}, 300);
+}}
+
+function _showBubRej(cmtId, btn) {{
+  var bub = document.getElementById('bub-' + cmtId); if (!bub) return;
+  if (bub.querySelector('.bub-rej-box')) return;
+  var box = document.createElement('div');
+  box.className = 'bub-rej-box';
+  box.innerHTML =
+    '<textarea placeholder="Explain why this change is not acceptable (required)…"></textarea>' +
+    '<div style="display:flex;gap:5px;margin-top:5px;">' +
+      '<button data-bub-cid="' + cmtId + '" onclick="event.stopPropagation();_sendBubRejClick(this)" ' +
+        'style="background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;">Send</button>' +
+      '<button onclick="event.stopPropagation();_cancelBubRej(this)" ' +
+        'style="background:#f1f5f9;color:#374151;border:1px solid #d4dae6;border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer;">Cancel</button>' +
+    '</div>';
+  bub.appendChild(box);
+}}
+
+function _sendBubRej(cmtId, btn) {{
+  var txt = btn.closest('.bub-rej-box').querySelector('textarea').value.trim();
+  if (!txt) {{ alert('Please explain why this change is not acceptable.'); return; }}
+  _commentAction(cmtId, 'reject', txt);
+}}
+function _bubAccept(btn) {{
+  _commentAction(btn.getAttribute('data-bub-cid'), 'accept', '');
+}}
+function _bubReject(btn) {{
+  _showBubRej(btn.getAttribute('data-bub-cid'), btn);
+}}
+function _sendBubRejClick(btn) {{
+  _sendBubRej(btn.getAttribute('data-bub-cid'), btn);
+}}
+function _cancelBubRej(btn) {{
+  var box = btn.parentElement;
+  while (box && !box.classList.contains('bub-rej-box')) box = box.parentElement;
+  if (box) box.remove();
+}}
+
+window.addEventListener('scroll', positionBubbles, {{passive:true}});
+window.addEventListener('resize', positionBubbles, {{passive:true}});
 
 function togglePreview() {{
   var pv = document.querySelector('.pv');
@@ -1784,6 +2001,9 @@ async function saveDoc(extra) {{
   el.textContent = ok ? 'Saved ✓' : 'Save failed';
   el.style.color = ok ? '#86efac' : '#fca5a5';
   if (ok) {{
+    var respData = {{}}; try {{ respData = await r.json(); }} catch(e) {{}}
+    // Bind the real comment ID to the temp anchor marks injected before saving
+    if (respData.comment_id) _applyCommentId(respData.comment_id);
     var mc = document.getElementById('mode-chip'); if (mc) mc.textContent = 'LIVE-EDITED';
     if (document.querySelector('.pv.open')) refreshPv();
     if (document.getElementById('sidebar').classList.contains('open')) loadSidebar();
@@ -1791,6 +2011,10 @@ async function saveDoc(extra) {{
     if (typeof window._tcEnterReview === 'function' && !window._reviewing) {{
       setTimeout(window._tcEnterReview, 300);
     }}
+    // Refresh bubbles immediately after any save
+    setTimeout(function() {{
+      var d = (window._lastComments || []); renderBubbles(d); _applyMarkColors(d);
+    }}, 400);
   }}
   return ok;
 }}
@@ -2046,15 +2270,22 @@ function _statusBadge(status) {{
 function _sbCommentCard(c) {{
   const status = c.status || (c.done ? 'accepted' : 'pending');
   const thread = c.thread || [];
-  const firstEntry = thread[0] || {{}};
   const card = document.createElement('div');
-  card.style.cssText = 'background:#fff;border:1px solid #e5e9f2;border-radius:8px;padding:12px 14px;margin-bottom:10px;';
+  card.id = 'card-' + c.id;
+  const borderCol = c.party === 'p1' ? '#2563eb' : '#f59e0b';
+  card.style.cssText = 'background:#fff;border:1px solid #e5e9f2;border-left:3px solid ' + borderCol + ';border-radius:8px;padding:12px 14px;margin-bottom:10px;';
+  // Check if there's a change-mark anchor in the document for this comment
+  const hasAnchor = !!sheet.querySelector('[data-cmt="' + c.id + '"]');
+  const jumpBtn = hasAnchor
+    ? `<button onclick="jumpToChange('${{c.id}}')" style="background:#eff6ff;color:#1a56db;border:1px solid #bfdbfe;border-radius:5px;padding:3px 9px;font-size:10.5px;font-weight:700;cursor:pointer;margin-right:4px;">↗ Jump to change</button>`
+    : '';
   card.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
       <span style="font-size:11.5px;font-weight:700;color:#374151;">${{c.by||'Lead'}} <span style="font-weight:400;color:#94a3b8;">(${{c.party==='p1'?'Jane':'Lead'}})</span></span>
       ${{_statusBadge(status)}}
     </div>
-    <div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">${{c.at||''}}</div>
+    <div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">${{c.at||''}}</div>
+    ${{jumpBtn ? '<div style="margin-bottom:8px;">' + jumpBtn + '</div>' : ''}}
     <div id="thread-${{c.id}}" style="border-left:3px solid #e5e9f2;padding-left:10px;margin-bottom:10px;">
       ${{thread.map(t => `<div style="margin-bottom:8px;">
         <div style="font-size:11px;font-weight:700;color:${{t.party==='p1'?'#1a56db':'#059669'}};">
@@ -2171,21 +2402,106 @@ async function loadSidebar() {{
     row.appendChild(ic); row.appendChild(tx); row.appendChild(when);
     body.appendChild(row);
   }});
+  // Re-render floating bubbles and highlight marks every time the sidebar refreshes
+  renderBubbles(comments);
+  _applyMarkColors(comments);
+}}
+
+// Auto-render bubbles and colour marks on page load (existing comments in saved HTML)
+(async function() {{
+  try {{
+    const r = await fetch(`${{BASE}}/versions/${{OID}}/${{DT}}/${{TOK}}`);
+    if (r.ok) {{
+      const d = await r.json();
+      const cmts = d.comments || [];
+      renderBubbles(cmts);
+      _applyMarkColors(cmts);
+    }}
+  }} catch(e) {{}}
+}})();
+
+// ── P1 per-change comment system (only active when responding to lead's revision request) ──
+var _p1HasEdits = false;
+var _p1Comments = [];
+var _p1PopupPending = false;
+
+if (STAGE === 'changes_requested' && !SIGNED) {{
+  // Detect edits via input event
+  sheet.addEventListener('input', function() {{ _p1HasEdits = true; }});
+  // When sheet loses focus after an edit, show comment popup
+  sheet.addEventListener('blur', function() {{
+    if (!_p1HasEdits || _p1PopupPending) return;
+    _p1PopupPending = true;
+    setTimeout(function() {{
+      _p1PopupPending = false;
+      if (_p1HasEdits) _p1ShowModal();
+    }}, 500);
+  }}, true);
+  // Allow Ctrl+Enter to save comment
+  document.getElementById('p1-cmt-ta').addEventListener('keydown', function(e) {{
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {{ e.preventDefault(); _p1SaveComment(); }}
+  }});
+}}
+
+function _p1ShowModal() {{
+  var modal = document.getElementById('p1-cmt-modal');
+  if (modal) {{
+    modal.style.display = 'flex';
+    var ta = document.getElementById('p1-cmt-ta');
+    if (ta) setTimeout(function() {{ ta.focus(); }}, 60);
+  }}
+}}
+
+function _p1SaveComment() {{
+  var ta = document.getElementById('p1-cmt-ta');
+  var err = document.getElementById('p1-cmt-err');
+  var txt = ta ? ta.value.trim() : '';
+  if (!txt) {{
+    if (err) {{ err.textContent = 'Please describe your change before saving.'; err.style.display = 'block'; }}
+    if (ta) ta.focus();
+    return;
+  }}
+  _p1Comments.push(txt);
+  _p1HasEdits = false;
+  document.getElementById('p1-cmt-modal').style.display = 'none';
+  if (err) err.style.display = 'none';
+  if (ta) ta.value = '';
+  // Update the saved count indicator
+  var el = document.getElementById('p1-cmt-count');
+  if (el) {{ el.textContent = _p1Comments.length + ' comment(s) saved'; el.style.display = 'inline'; }}
 }}
 
 async function sendForReview() {{
   clearTimeout(timer);
+  // If responding to lead and there are uncommitted edits → require comment first
+  if (STAGE === 'changes_requested' && !SIGNED && _p1HasEdits) {{
+    _p1ShowModal(); return;
+  }}
   if (!SIGNED && !(await saveDoc())) {{ alert('Could not save the document — not sent.'); return; }}
-  if (!confirm('Send this edited document to the lead to review the Terms & Conditions?')) return;
+  // Build confirmation message
+  var confirmMsg = STAGE === 'changes_requested'
+    ? 'Send your revised document back to the lead' + (_p1Comments.length > 0 ? ' with ' + _p1Comments.length + ' comment(s)' : '') + '?'
+    : 'Send this document to the lead for Terms & Conditions review?';
+  if (!confirm(confirmMsg)) return;
+  var p1Comment = _p1Comments.length > 0
+    ? (_p1Comments.length === 1 ? _p1Comments[0] : _p1Comments.map(function(c,i) {{ return 'Change ' + (i+1) + ': ' + c; }}).join('\n\n'))
+    : '';
   const r = await fetch(`${{BASE}}/send/${{OID}}/${{DT}}/${{TOK}}`, {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{html: window._reviewing ? (window._reviewBackup || '') : sheet.innerHTML, mode: 'live'}})
+    body: JSON.stringify({{
+      html: window._reviewing ? (window._reviewBackup || '') : sheet.innerHTML,
+      mode: 'live',
+      p1_comment: p1Comment
+    }})
   }});
   const d = await r.json().catch(() => ({{}}));
   if (!r.ok && d.detail && d.detail.indexOf('pending') >= 0) {{
-    alert('Cannot send: there are pending or rejected comments that must be resolved first. Please open the Comments sidebar and accept or resolve all comments before sending.');
+    alert('Cannot send: the lead has unresolved comments. Please open the Comments sidebar and accept or reject each lead comment before sending.');
+  }} else if (r.ok) {{
+    _p1Comments = []; _p1HasEdits = false;
+    alert(d.message || 'Sent for review.');
   }} else {{
-    alert(r.ok ? (d.message || 'Sent for review.') : (d.detail || 'Send failed'));
+    alert(d.detail || 'Send failed');
   }}
 }}
 </script>
@@ -2204,6 +2520,7 @@ class _DocSaveBody(BaseModel):
     snapshot: bool = False
     note: str = ""
     comment: str = ""     # mandatory edit comment from P1 — saved to comments[]
+    p1_comment: str = ""  # per-change comment from P1 when responding to P2's revision request
     # Adobe-style signature overlays placed on the PDF preview. None = leave as-is
     # (so a text autosave never clobbers them); [] = clear all.
     signatures_overlay: list[dict] | None = None
@@ -2255,6 +2572,7 @@ async def document_save(onboarding_id: str, doc_type: str, token: str,
             except (TypeError, ValueError):
                 continue
         data["signatures_overlay"] = clean
+    _new_cmt_id = None
     if body.comment and body.comment.strip():
         import secrets as _sec
         now = _now_ist()
@@ -2262,13 +2580,14 @@ async def document_save(onboarding_id: str, doc_type: str, token: str,
         p1_name = _cfg.ORGANIZER_NAME or "Jane Aerospace"
         comments = data.setdefault("comments", [])
         cmt_id = f"c{int(now.timestamp())}_{_sec.token_hex(4)}"
+        _new_cmt_id = cmt_id
         comments.append({
             "id": cmt_id,
             "by": p1_name,
             "party": "p1",
             "email": "",
             "at": _fmt(now),
-            "status": "pending",
+            "status": "accepted",   # P1's own edits are self-confirmed on save
             "thread": [{"by": p1_name, "party": "p1", "action": "edit",
                         "text": body.comment.strip()[:2000], "at": _fmt(now)}],
         })
@@ -2277,14 +2596,17 @@ async def document_save(onboarding_id: str, doc_type: str, token: str,
     data.setdefault("replacements", [])
     _set_doc_data(rec, doc_type, data)
     await db.commit()
-    return {"message": "Saved", "versions": len(data.get("versions", []))}
+    result: dict = {"message": "Saved", "versions": len(data.get("versions", []))}
+    if _new_cmt_id:
+        result["comment_id"] = _new_cmt_id
+    return result
 
 
 @router.get("/versions/{onboarding_id}/{doc_type}/{token}")
 async def document_versions(onboarding_id: str, doc_type: str, token: str,
                             db: AsyncSession = Depends(get_db)):
     _check_doc_type(doc_type)
-    _check_token(onboarding_id, doc_type, token, "edit")
+    _check_token(onboarding_id, doc_type, token, "edit", "sign")   # P1 or P2 may load comments
     rec, _lead = await _load(db, onboarding_id)
     data = _get_doc_data(rec, doc_type)
     return {
@@ -2384,15 +2706,41 @@ async def document_send(onboarding_id: str, doc_type: str, token: str,
         data["html"] = sanitize_live_html(body.html)
         data["mode"] = "live"
         data["editor_v"] = 2
+    # Strip P1-side editing artefacts before P2 sees the document:
+    # removes temp data-cmt anchors and chg-* CSS classes (those highlight sections blue/amber
+    # in P2's editor even before any negotiation has happened).
+    # Real data-cmt="<id>" anchors for intentional P1 comments are preserved so
+    # the bubble system still works during negotiation rounds.
+    if data.get("html"):
+        data["html"] = _strip_editor_marks(data["html"])
     data["signatory_name"] = body.signatory_name[:200] or data.get("signatory_name", "")
     data["signatory_email"] = body.signatory_email[:320] or data.get("signatory_email", "") or lead.email
     data.setdefault("replacements", [])
-    # Block send if there are any pending or rejected comments
+    # Block send only if P2 has unresolved comments (pending = awaiting P1 decision, rejected = negotiation ongoing).
+    # P1's own comments are auto-accepted on save and never block the send.
     open_comments = [c for c in data.get("comments", [])
-                     if (c.get("status") or ("pending" if not c.get("done") else "accepted")) in ("pending", "rejected")]
+                     if c.get("party") == "p2"
+                     and (c.get("status") or "pending") in ("pending", "rejected")]
     if open_comments:
-        raise HTTPException(409, f"Cannot send: {len(open_comments)} comment(s) are pending or rejected. "
-                                 "All comments must be accepted by both parties before sending for signing.")
+        raise HTTPException(409, f"Cannot send: {len(open_comments)} lead comment(s) are still unresolved. "
+                                 "Please open the Comments sidebar and accept or reject each lead comment before sending.")
+    # If P1 added per-change comments while responding to P2's revision request, store them
+    # as a party="p1" comment entry so P2 can see P1's explanation in their sidebar.
+    if body.p1_comment and body.p1_comment.strip() and data.get("stage") == "changes_requested":
+        import secrets as _sec
+        now_ts = _now_ist()
+        p1_cmt_id = f"c{int(now_ts.timestamp())}_{_sec.token_hex(4)}"
+        p1_entry = {
+            "id": p1_cmt_id,
+            "by": "Jane Aerospace",
+            "party": "p1",
+            "email": "team@janeaerospace.co.in",
+            "at": _fmt(now_ts),
+            "status": "pending",   # P2 must accept before signing can proceed
+            "thread": [{"by": "Jane Aerospace", "party": "p1", "action": "comment",
+                        "text": body.p1_comment.strip()[:4000], "at": _fmt(now_ts)}],
+        }
+        data.setdefault("comments", []).append(p1_entry)
     data["stage"] = "review"
     rev = len([v for v in data.get("versions", []) if "Sent to lead" in (v.get("note") or "")]) + 1
     _snapshot_version(data, "team", f"Sent to lead for T&C review (revision {rev})")
@@ -2410,7 +2758,7 @@ async def document_send(onboarding_id: str, doc_type: str, token: str,
     await db.commit()
 
     from app.services.onboarding_email import send_document_review_email
-    review_url = make_doc_sign_url(onboarding_id, doc_type)
+    review_url = make_doc_portal_url(onboarding_id, doc_type)
     to_email = data["signatory_email"] or lead.email
     send_document_review_email(
         to_email=to_email,
@@ -2456,100 +2804,30 @@ def _result_page(title: str, message: str, ok: bool = True, extra_html: str = ""
 
 
 def _review_page_html(onboarding_id: str, doc_type: str, token: str, label: str,
-                      lead: LeadV2, data: dict, doc_html: str = "") -> str:
-    """Lead-facing Terms & Conditions review page — editable doc with mandatory comments."""
+                      lead: LeadV2, data: dict) -> str:
+    """Lead-facing review page — PATH A (accept) or PATH B (open proper live editor to propose changes)."""
     import html as _html_lib
     pdf_url = f"/api/v1/documents/pdf/{onboarding_id}/{doc_type}/{token}"
+    p2editor_url = f"/api/v1/documents/p2editor/{onboarding_id}/{doc_type}/{token}"
     sig_name = _html_lib.escape(data.get("signatory_name", "") or (lead.contact_name or ""))
     comments = data.get("comments") or []
-
-    # Build comment history panel
-    comment_history_items = ""
-    for c in comments:
-        thread = c.get("thread") or []
-        status = c.get("status", "pending")
-        status_color = {"accepted": "#16a34a", "rejected": "#dc2626"}.get(status, "#f59e0b")
-        status_label = {"accepted": "Accepted", "rejected": "Rejected"}.get(status, "Pending")
-        thread_html = "".join(
-            f'<div style="padding:6px 0;border-bottom:1px dashed #f1f5f9;">'
-            f'<span style="font-size:10.5px;font-weight:700;color:{"#1a56db" if t.get("party")=="p1" else "#059669"};">'
-            f'{_html_lib.escape(t.get("by",""))} ({"Jane" if t.get("party")=="p1" else "You"}) — {_html_lib.escape(t.get("action","comment"))} — {_html_lib.escape(t.get("at",""))}'
-            f'</span><div style="font-size:12.5px;color:#374151;margin-top:2px;white-space:pre-wrap;">{_html_lib.escape(t.get("text",""))}</div>'
-            f'</div>'
-            for t in thread
-        )
-        comment_history_items += (
-            f'<div style="border:1px solid #e5e9f2;border-radius:8px;padding:12px 14px;margin-bottom:10px;">'
-            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
-            f'<span style="font-size:12px;font-weight:700;color:#374151;">{_html_lib.escape(c.get("by","Lead"))}</span>'
-            f'<span style="display:inline-block;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:700;'
-            f'background:{status_color};color:#fff;">{status_label}</span>'
-            f'</div><div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">{_html_lib.escape(c.get("at",""))}</div>'
-            f'<div style="border-left:3px solid #e5e9f2;padding-left:10px;">{thread_html}</div>'
-            f'</div>'
-        )
-
-    prev_panel = ""
-    if comment_history_items:
-        prev_panel = (f'<div class="card"><h2 style="font-size:16px;color:#1a3a6b;margin:0 0 12px;">📜 Comment History</h2>'
-                      f'{comment_history_items}</div>')
+    stage = data.get("stage") or ""
 
     updated_note = ""
-    if data.get("stage") == "review" and comments:
+    if stage == "review" and any(c.get("party") == "p1" for c in comments):
         updated_note = ('<div style="background:#ecfdf5;border-left:3px solid #16a34a;border-radius:6px;'
                         'padding:10px 14px;margin-bottom:14px;font-size:13px;color:#14532d;">'
-                        'This document was <b>updated</b> based on your previous comments — please review the latest version.</div>')
+                        '&#x2705; Jane Aerospace has <b>updated the document</b> based on your previous comments. '
+                        'Please review the latest version below.</div>')
 
-    doc_content_html = ""
-    if doc_html:
-        import json as _json
-        doc_json = _json.dumps(doc_html, ensure_ascii=False).replace("</", "<\\/")
-        doc_content_html = f"""
-  <div class="card" id="edit-card">
-    <h2 style="font-size:16px;color:#1a3a6b;margin:0 0 4px;">✏ Edit Document Inline</h2>
-    <p style="font-size:13px;color:#666;margin:0 0 12px;">Make your proposed changes directly in the document below.
-      A comment explaining your changes is <strong>required</strong> before submitting.</p>
-    <div id="p2-editor" contenteditable="true" spellcheck="false"
-      style="border:1px solid #d1d5db;border-radius:8px;padding:24px 28px;min-height:300px;max-height:600px;
-             overflow-y:auto;background:#fff;font-family:'Calibri',sans-serif;font-size:10.5pt;line-height:1.5;
-             outline:none;cursor:text;">Loading…</div>
-    <div id="edit-changed-banner" style="display:none;margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;
-      border-radius:8px;padding:14px 16px;">
-      <div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:8px;">
-        ⚠ Changes detected — comment required before submitting
-      </div>
-      <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">
-        Reason for your changes <span style="color:#e11d48;">*</span></label>
-      <textarea id="p2-cmt-text" placeholder="Explain what you changed and why (mandatory)…"
-        style="width:100%;min-height:90px;padding:10px;border:1.5px solid #fed7aa;border-radius:6px;
-               font-size:13px;font-family:inherit;resize:vertical;background:#fffbeb;"></textarea>
-    </div>
-  </div>
-  <script>
-  (function(){{
-    var editor = document.getElementById('p2-editor');
-    var banner = document.getElementById('edit-changed-banner');
-    var origHtml = {doc_json};
-    editor.innerHTML = origHtml;
-    var origText = editor.innerText;
-    var changed = false;
-    editor.addEventListener('input', function(){{
-      var now = editor.innerText;
-      if(now !== origText && !changed){{
-        changed = true;
-        banner.style.display = 'block';
-        editor.style.borderColor = '#f59e0b';
-      }} else if(now === origText && changed){{
-        changed = false;
-        banner.style.display = 'none';
-        editor.style.borderColor = '#d1d5db';
-      }}
-    }});
-    window._p2EditorChanged = function(){{ return changed; }};
-    window._p2EditorHtml = function(){{ return changed ? editor.innerHTML : ''; }};
-    window._p2CmtText = function(){{ return (document.getElementById('p2-cmt-text')||{{}}).value||''; }};
-  }})();
-  </script>"""
+    p2_pending = [c for c in comments if c.get("party") == "p2"
+                  and (c.get("status") or "pending") in ("pending", "rejected")]
+    changes_note = ""
+    if p2_pending:
+        changes_note = ('<div style="background:#fff7ed;border-left:3px solid #f59e0b;border-radius:6px;'
+                        'padding:10px 14px;margin-bottom:14px;font-size:13px;color:#92400e;">'
+                        '&#x231B; Your proposed changes have been submitted. Jane Aerospace is currently reviewing them. '
+                        'You will receive an email once they respond.</div>')
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -2558,129 +2836,143 @@ def _review_page_html(onboarding_id: str, doc_type: str, token: str, label: str,
 <style>
   *{{box-sizing:border-box;}}
   body{{font-family:Arial,sans-serif;background:#f4f6fb;margin:0;padding:20px;}}
-  .wrap{{max-width:940px;margin:0 auto;}}
+  .wrap{{max-width:880px;margin:0 auto;}}
   .card{{background:#fff;border-radius:12px;box-shadow:0 2px 16px rgba(0,0,0,.1);padding:24px 28px;margin-bottom:18px;}}
   h1{{color:#1a3a6b;font-size:20px;margin:0 0 4px;}}
   .sub{{color:#666;font-size:13px;margin:0 0 14px;}}
-  iframe{{width:100%;height:540px;border:1px solid #d1d5db;border-radius:8px;background:#fff;}}
+  iframe{{width:100%;height:560px;border:1px solid #d1d5db;border-radius:8px;background:#fff;}}
   label{{display:block;font-size:13px;font-weight:600;color:#222;margin:14px 0 4px;}}
   input[type=text]{{width:100%;padding:11px 13px;border:1px solid #ccc;border-radius:6px;font-size:14px;}}
-  textarea{{width:100%;min-height:110px;padding:11px 13px;border:1px solid #ccc;border-radius:6px;
-           font-size:14px;font-family:inherit;resize:vertical;}}
-  .btn{{border:none;padding:13px 28px;border-radius:7px;font-size:14.5px;font-weight:700;cursor:pointer;width:100%;color:#fff;margin-top:10px;}}
+  .btn{{display:block;border:none;padding:14px 22px;border-radius:8px;font-size:15px;font-weight:700;
+       cursor:pointer;width:100%;color:#fff;margin-top:10px;text-align:center;text-decoration:none;line-height:1.3;}}
   .btn:disabled{{background:#9ca3af!important;cursor:not-allowed;}}
-  .accept{{background:#16a34a;}}
-  .changes{{background:#b45309;}}
+  .btn-green{{background:#16a34a;}}
+  .btn-blue{{background:#1a56db;}}
+  .btn-amber{{background:#d97706;}}
   .grid{{display:grid;grid-template-columns:1fr 1fr;gap:18px;}}
   #err{{display:none;background:#fee2e2;color:#991b1b;padding:10px 14px;border-radius:6px;font-size:13px;margin:12px 0;}}
   .chk{{display:flex;gap:10px;align-items:flex-start;margin:14px 0;font-size:13px;color:#374151;line-height:1.5;}}
-  .chk input{{margin-top:3px;width:17px;height:17px;}}
+  .chk input{{margin-top:3px;width:17px;height:17px;flex-shrink:0;}}
+  .path-badge{{display:inline-block;padding:3px 11px;border-radius:99px;font-size:11px;font-weight:800;
+              letter-spacing:.04em;margin-bottom:10px;}}
+  .badge-a{{background:#dcfce7;color:#15803d;}}
+  .badge-b{{background:#fef3c7;color:#92400e;}}
+  .how-list{{margin:0 0 14px;padding-left:0;list-style:none;font-size:12.5px;color:#64748b;}}
+  .how-list li{{padding:3px 0 3px 18px;position:relative;}}
+  .how-list li:before{{content:"";position:absolute;left:4px;top:9px;width:6px;height:6px;
+    border-radius:50%;background:#d97706;}}
   @media(max-width:700px){{.grid{{grid-template-columns:1fr;}}.card{{padding:18px 14px;}}iframe{{height:380px;}}}}
 </style></head>
 <body>
 <div class="wrap">
+
   <div class="card">
-    <div style="font-size:15px;font-weight:700;color:#1a3a6b;margin-bottom:10px;">✈ Jane Aerospace</div>
-    <h1>{label} — Terms &amp; Conditions Review</h1>
-    <p class="sub">Between <strong>Jane Aerospace Private Limited</strong> and
-      <strong>{_html_lib.escape(lead.business_name)}</strong>. Review the document below.<br>
-      You may <b>accept the terms as-is</b>, or <b>edit the document inline and submit your changes with a comment</b>.</p>
+    <div style="font-size:15px;font-weight:700;color:#1a3a6b;margin-bottom:10px;">&#x2708; Jane Aerospace</div>
+    <h1>{label} — Review &amp; Response</h1>
+    <p class="sub">Sent by <strong>Jane Aerospace Private Limited</strong> to
+      <strong>{_html_lib.escape(lead.business_name)}</strong> &mdash; please read the document and choose how to respond below.</p>
     {updated_note}
-    <iframe src="{pdf_url}#toolbar=1"></iframe>
-    <p style="font-size:12.5px;margin-top:6px;"><a href="{pdf_url}" target="_blank" style="color:#1155cc;">Download PDF ↗</a></p>
+    {changes_note}
+    <iframe src="{pdf_url}#toolbar=1" title="Document Preview"></iframe>
+    <p style="font-size:12.5px;margin-top:6px;"><a href="{pdf_url}" target="_blank" style="color:#1155cc;">&#x2B07; Download PDF</a></p>
   </div>
 
-  {doc_content_html}
-
-  {prev_panel}
+  <p style="text-align:center;font-size:14px;font-weight:700;color:#374151;margin:0 0 16px;">
+    How would you like to respond to this {label}?</p>
 
   <div class="grid">
+    <!-- PATH A: Accept -->
     <div class="card">
-      <h2 style="font-size:17px;color:#15803d;margin:0 0 6px;">✓ Accept Terms &amp; Conditions</h2>
-      <p class="sub" style="margin-bottom:10px;">Accepts the document as-is (no changes). Jane Aerospace countersigns first,
-        then you receive the final document for e-signature.</p>
-      <label>Your Name</label>
-      <input type="text" id="acc-name" value="{sig_name}" placeholder="Full name">
+      <span class="path-badge badge-a">PATH A &mdash; Accept</span>
+      <h2 style="font-size:18px;color:#15803d;margin:0 0 8px;">&#x2713; Accept the Terms</h2>
+      <p class="sub" style="margin-bottom:12px;">The document is acceptable as-is. After you accept:
+        <br>&#x2794; Jane Aerospace countersigns internally
+        <br>&#x2794; You receive the final document for your e-signature</p>
+      <label>Your Full Name <span style="color:#e11d48;">*</span></label>
+      <input type="text" id="acc-name" value="{sig_name}" placeholder="Your full name">
       <div class="chk"><input type="checkbox" id="acc-agree">
-        <span>I have reviewed this {label} and accept its Terms &amp; Conditions on behalf of
+        <span>I have read this {label} and agree to its terms on behalf of
         <strong>{_html_lib.escape(lead.business_name)}</strong>.</span></div>
-      <button class="btn accept" id="acc-btn" onclick="reviewAct('accept')">✓ Accept Terms &amp; Conditions</button>
+      <button class="btn btn-green" id="acc-btn" onclick="doAccept()">&#x2713; Accept Terms &amp; Conditions</button>
     </div>
+
+    <!-- PATH B: Propose changes via the live editor -->
     <div class="card">
-      <h2 style="font-size:17px;color:#b45309;margin:0 0 6px;">💬 Submit Comment / Changes</h2>
-      <p class="sub" style="margin-bottom:10px;">If you edited the document above, click here to submit your changes.
-        Or describe requested changes in the text box below.</p>
-      <label>Your Name</label>
-      <input type="text" id="cmt-name" value="{sig_name}" placeholder="Full name">
-      <label>Comment / Description of Changes <span style="color:#e11d48;">*</span></label>
-      <textarea id="cmt-text" placeholder="Explain what changes you are requesting or have made…"></textarea>
-      <button class="btn changes" id="cmt-btn" onclick="reviewAct('comment')">📨 Submit Changes to Jane Aerospace</button>
+      <span class="path-badge badge-b">PATH B &mdash; Propose Changes</span>
+      <h2 style="font-size:18px;color:#d97706;margin:0 0 8px;">&#x270F; Request Edits</h2>
+      <p class="sub" style="margin-bottom:10px;">You want changes made before agreeing. Click the button below
+        to open the <strong>live document editor</strong> where you can edit text and add a comment.</p>
+      <ul class="how-list">
+        <li>Open the editor (link below)</li>
+        <li>Edit the document directly</li>
+        <li>Add a comment explaining your changes</li>
+        <li>Submit &mdash; Jane Aerospace reviews &amp; responds</li>
+        <li>Signing only begins once <em>both parties agree</em></li>
+      </ul>
+      <a class="btn btn-amber" href="{p2editor_url}" id="edit-btn">
+        &#x270F; Open Document Editor &rarr;</a>
     </div>
   </div>
 
   <div class="card">
-    <h2 style="font-size:16px;color:#1a56db;margin:0 0 6px;">👤 Not the right person for this review?</h2>
-    <p class="sub">Forward the review link to your legal or review team.</p>
+    <h2 style="font-size:16px;color:#1a56db;margin:0 0 6px;">&#x1F464; Not the right person for this review?</h2>
+    <p class="sub">Forward this review link to your legal or review team.</p>
     <div class="grid">
       <div><label>Reviewer's Name</label>
         <input type="text" id="fwd-name" placeholder="Full name"></div>
       <div><label>Reviewer's Email</label>
         <input type="text" id="fwd-email" placeholder="name@company.com"></div>
     </div>
-    <button class="btn" id="fwd-btn" style="background:#1a56db;"
-            onclick="reviewAct('forward')">→ Forward Review Link</button>
+    <button class="btn btn-blue" id="fwd-btn" onclick="doForward()" style="margin-top:10px;">
+      &#x2192; Forward Review Link</button>
   </div>
+
   <div id="err"></div>
 </div>
+
 <script>
-async function reviewAct(action) {{
-  const err = document.getElementById('err'); err.style.display = 'none';
-  let payload = {{action: action}};
-  if (action === 'accept') {{
-    payload.name = document.getElementById('acc-name').value.trim();
-    if (!payload.name) {{ err.textContent = 'Please enter your name.'; err.style.display = 'block'; return; }}
-    if (!document.getElementById('acc-agree').checked) {{
-      err.textContent = 'Please tick the confirmation checkbox to accept.'; err.style.display = 'block'; return; }}
-  }} else if (action === 'forward') {{
-    payload.name = (document.getElementById('cmt-name')||{{}}).value||'';
-    payload.name = payload.name.trim() || (document.getElementById('acc-name').value||'').trim();
-    payload.forward_name = document.getElementById('fwd-name').value.trim();
-    payload.forward_email = document.getElementById('fwd-email').value.trim();
-    if (!payload.forward_name) {{ err.textContent = "Please enter the reviewer's name."; err.style.display = 'block'; return; }}
-    if (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(payload.forward_email)) {{
-      err.textContent = "Please enter a valid reviewer email address."; err.style.display = 'block'; return; }}
-  }} else {{
-    payload.name = document.getElementById('cmt-name').value.trim();
-    // Merge inline editor comment with the text comment box
-    var inlineChanged = typeof window._p2EditorChanged === 'function' && window._p2EditorChanged();
-    var inlineCmt = inlineChanged && typeof window._p2CmtText === 'function' ? window._p2CmtText().trim() : '';
-    var boxCmt = document.getElementById('cmt-text').value.trim();
-    if (inlineChanged && !inlineCmt) {{
-      err.textContent = 'You edited the document — please fill in the reason for your changes (required).';
-      err.style.display = 'block'; return;
-    }}
-    payload.comments = [inlineCmt, boxCmt].filter(Boolean).join('\\n\\n');
-    if (inlineChanged && typeof window._p2EditorHtml === 'function') {{
-      payload.edited_html = window._p2EditorHtml();
-    }}
-    if (!payload.comments) {{ err.textContent = 'Please describe your changes or comments.'; err.style.display = 'block'; return; }}
-  }}
-  const btn = document.getElementById(
-    action === 'accept' ? 'acc-btn' : action === 'forward' ? 'fwd-btn' : 'cmt-btn');
-  btn.disabled = true;
+function showErr(msg) {{
+  var e = document.getElementById('err');
+  e.textContent = msg; e.style.display = 'block';
+  setTimeout(function() {{ e.scrollIntoView({{behavior:'smooth',block:'nearest'}}); }}, 50);
+}}
+function hideErr() {{ document.getElementById('err').style.display = 'none'; }}
+
+async function doAccept() {{
+  hideErr();
+  var name = document.getElementById('acc-name').value.trim();
+  if (!name) {{ showErr('Please enter your full name.'); return; }}
+  if (!document.getElementById('acc-agree').checked) {{
+    showErr('Please tick the checkbox to confirm you have read and accept the terms.'); return; }}
+  var btn = document.getElementById('acc-btn'); btn.disabled = true; btn.textContent = 'Submitting…';
   try {{
-    const r = await fetch('/api/v1/documents/review/{onboarding_id}/{doc_type}/{token}', {{
-      method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify(payload)
+    var r = await fetch('/api/v1/documents/review/{onboarding_id}/{doc_type}/{token}', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{action: 'accept', name: name}})
     }});
-    const d = await r.json().catch(() => ({{}}));
-    if (r.ok) {{
-      if (action === 'forward') {{ alert(d.message || 'Review link sent.'); }}
-      window.location.reload();
-    }}
-    else {{ err.textContent = d.detail || 'Something went wrong.'; err.style.display = 'block'; btn.disabled = false; }}
-  }} catch(e) {{
-    err.textContent = 'Network error — ' + e.message; err.style.display = 'block'; btn.disabled = false;
-  }}
+    var d = await r.json().catch(function() {{ return {{}}; }});
+    if (r.ok) {{ window.location.reload(); }}
+    else {{ showErr(d.detail || 'Something went wrong. Please try again.'); btn.disabled = false; btn.textContent = '✓ Accept Terms & Conditions'; }}
+  }} catch(e) {{ showErr('Network error: ' + e.message); btn.disabled = false; btn.textContent = '✓ Accept Terms & Conditions'; }}
+}}
+
+async function doForward() {{
+  hideErr();
+  var fwdName = document.getElementById('fwd-name').value.trim();
+  var fwdEmail = document.getElementById('fwd-email').value.trim();
+  if (!fwdName) {{ showErr("Please enter the reviewer's name."); return; }}
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fwdEmail)) {{
+    showErr("Please enter a valid email address."); return; }}
+  var btn = document.getElementById('fwd-btn'); btn.disabled = true;
+  try {{
+    var r = await fetch('/api/v1/documents/review/{onboarding_id}/{doc_type}/{token}', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{action: 'forward', forward_name: fwdName, forward_email: fwdEmail}})
+    }});
+    var d = await r.json().catch(function() {{ return {{}}; }});
+    if (r.ok) {{ alert(d.message || 'Review link sent successfully.'); btn.disabled = false; }}
+    else {{ showErr(d.detail || 'Something went wrong.'); btn.disabled = false; }}
+  }} catch(e) {{ showErr('Network error: ' + e.message); btn.disabled = false; }}
 }}
 </script>
 </body></html>"""
@@ -2693,6 +2985,7 @@ class _ReviewBody(BaseModel):
     edited_html: str = ""  # inline HTML changes made by P2 in the review editor
     forward_name: str = ""    # action=forward — the right person on the lead's side
     forward_email: str = ""
+    comment_ids: list[str] = []   # client-assigned IDs matching data-cmt in edited_html
 
 
 @router.post("/review/{onboarding_id}/{doc_type}/{token}")
@@ -2739,26 +3032,49 @@ async def document_review(onboarding_id: str, doc_type: str, token: str,
             raise HTTPException(400, "Comments are required")
         comments = data.setdefault("comments", [])
         import secrets as _sec
-        cmt_id = f"c{int(now.timestamp())}_{_sec.token_hex(4)}"
-        entry: dict = {
-            "id": cmt_id,
-            "by": name,
-            "party": "p2",
-            "email": lead.email,
-            "at": _fmt(now),
-            "status": "pending",
-            "thread": [{"by": name, "party": "p2", "action": "comment", "text": text, "at": _fmt(now)}],
-        }
-        try:  # AI filters the comment into short action items for the team
-            import asyncio
-            from app.services.onboarding_ai import summarize_doc_comment
-            ai_actions = await asyncio.wait_for(
-                asyncio.to_thread(summarize_doc_comment, text), timeout=15)
-            entry["ai_actions"] = ai_actions
-        except Exception:
-            entry["ai_actions"] = []
-        comments.append(entry)
-        # If P2 edited the document inline, save their HTML changes
+
+        # Build individual (id, text) pairs.
+        # If client sent comment_ids (one per edit round), parse the combined text back into
+        # individual texts so each changed element gets its own comment entry.
+        client_ids = [cid.strip() for cid in body.comment_ids if cid.strip()]
+        if client_ids and len(client_ids) > 1:
+            # Combined text is "Change 1: ...\n\nChange 2: ..." — split it back
+            import re as _re2
+            parts = _re2.split(r'\nChange \d+: ', text)
+            # First part may start without the prefix if len==1
+            if parts and parts[0].startswith('Change 1: '):
+                parts[0] = parts[0][len('Change 1: '):]
+            # Pad/trim to match ids
+            while len(parts) < len(client_ids):
+                parts.append(parts[-1] if parts else text)
+            pairs = list(zip(client_ids, parts))
+        elif client_ids:
+            pairs = [(client_ids[0], text)]
+        else:
+            pairs = [(f"c{int(now.timestamp())}_{_sec.token_hex(4)}", text)]
+
+        for cmt_id, cmt_text in pairs:
+            cmt_text = cmt_text.strip()[:4000] or text[:4000]
+            entry: dict = {
+                "id": cmt_id,
+                "by": name,
+                "party": "p2",
+                "email": lead.email,
+                "at": _fmt(now),
+                "status": "pending",
+                "thread": [{"by": name, "party": "p2", "action": "comment", "text": cmt_text, "at": _fmt(now)}],
+            }
+            try:
+                import asyncio
+                from app.services.onboarding_ai import summarize_doc_comment
+                ai_actions = await asyncio.wait_for(
+                    asyncio.to_thread(summarize_doc_comment, cmt_text), timeout=15)
+                entry["ai_actions"] = ai_actions
+            except Exception:
+                entry["ai_actions"] = []
+            comments.append(entry)
+
+        # Save the edited HTML (elements already carry their data-cmt IDs from the client)
         if body.edited_html and body.edited_html.strip():
             from app.services.pdf_documents import sanitize_live_html
             if len(body.edited_html) <= 800_000:
@@ -2816,7 +3132,7 @@ async def document_review(onboarding_id: str, doc_type: str, token: str,
         await db.commit()
 
         from app.services.onboarding_email import send_document_review_email
-        review_url = make_doc_sign_url(onboarding_id, doc_type)
+        review_url = make_doc_portal_url(onboarding_id, doc_type)
         send_document_review_email(
             to_email=fwd_email, lead_name=fwd_name,
             company_name=lead.business_name, doc_type=doc_type, review_url=review_url)
@@ -2840,9 +3156,748 @@ async def document_review(onboarding_id: str, doc_type: str, token: str,
     raise HTTPException(400, "Unknown action")
 
 
-def _make_edit_url(onboarding_id: str, doc_type: str) -> str:
-    from app.services.onboarding_email import make_doc_edit_url
-    return make_doc_edit_url(onboarding_id, doc_type)
+@router.get("/p2editor/{onboarding_id}/{doc_type}/{token}", response_class=HTMLResponse, include_in_schema=False)
+async def p2_document_editor(onboarding_id: str, doc_type: str, token: str,
+                             db: AsyncSession = Depends(get_db)):
+    """Full live editor for the lead (P2) — opened via PATH B on the review page.
+    Shows real inline track changes (strikethrough old, new text) vs the original template.
+    P2 adds a mandatory comment and submits — backend saves data-cmt anchors for P1 bubbles."""
+    import html as _html_lib
+    _check_doc_type(doc_type)
+    _check_token(onboarding_id, doc_type, token, "sign")
+    rec, lead = await _load(db, onboarding_id)
+    data = await _ensure_doc_data(db, rec, lead, doc_type)
+
+    stage = data.get("stage") or ""
+    if stage not in ("review", "changes_requested"):
+        raise HTTPException(409, "This document is not currently open for review")
+
+    label = _DOC_LABELS[doc_type]
+
+    # INIT_HTML = what P2 edits (current stored version — what P1 sent)
+    if data.get("mode") == "live" and data.get("html"):
+        doc_html = data["html"]
+    else:
+        from app.services.pdf_documents import extract_editable_html
+        doc_html = extract_editable_html(doc_type, _is_overseas(rec), data.get("replacements", []))
+
+    # ORIG_HTML baseline for track-changes diff:
+    #   First send (stage="review")       → baseline is P1's sent version, so only P2's new edits show as redlines
+    #   Subsequent rounds (changes_requested) → baseline is original template, so ALL accumulated changes from both parties show
+    if stage == "review":
+        orig_html = doc_html
+    else:
+        from app.services.pdf_documents import extract_editable_html as _ext_orig
+        orig_html = _ext_orig(doc_type, _is_overseas(rec), data.get("replacements", []))
+
+    html_json = json.dumps(doc_html, ensure_ascii=False).replace("</", "<\\/")
+    orig_html_js = json.dumps(orig_html, ensure_ascii=False).replace("</", "<\\/")
+    review_url = f"/api/v1/documents/sign/{onboarding_id}/{doc_type}/{token}"
+    biz = _html_lib.escape(lead.business_name)
+
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Propose Changes — {label} — Jane Aerospace</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0;}}
+  body{{font-family:'Segoe UI',Arial,sans-serif;background:#e4e6ea;overflow:hidden;}}
+  .work{{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;}}
+  .topbar{{height:52px;background:#0c2344;color:#fff;display:flex;align-items:center;
+          gap:10px;padding:0 16px;flex-shrink:0;}}
+  .ttl{{font-weight:800;font-size:13px;}}
+  .tsub{{font-size:11px;color:#b9c8e4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
+  .grow{{flex:1;}}
+  .btn{{display:inline-flex;align-items:center;gap:5px;padding:8px 14px;border-radius:7px;
+       border:none;color:#fff;font-size:12.5px;font-weight:700;cursor:pointer;
+       font-family:inherit;text-decoration:none;white-space:nowrap;}}
+  .btn:disabled{{opacity:.5;cursor:not-allowed;}}
+  .b-amber{{background:#d97706;}} .b-line{{background:transparent;color:#cdd9f0;border:1.4px solid #3b5379;}}
+  .b-green{{background:#16a34a;}}
+  /* Editor body row */
+  .body-row{{flex:1;display:flex;overflow:hidden;}}
+  .edwrap{{flex:1;overflow-y:auto;padding:26px 18px 20px;display:flex;justify-content:center;}}
+  /* Sidebar */
+  .sb2{{width:0;overflow:hidden;transition:width .25s;background:#f8fafc;border-left:1px solid #e2e8f0;
+       display:flex;flex-direction:column;flex-shrink:0;}}
+  .sb2.open{{width:280px;}}
+  .sb2-head{{padding:12px 14px;font-weight:800;font-size:13px;color:#0c2344;border-bottom:1px solid #e2e8f0;
+            display:flex;justify-content:space-between;align-items:center;}}
+  .sb2-body{{flex:1;overflow-y:auto;padding:12px;}}
+  .sb2-card{{background:#fff;border:1px solid #e5e9f2;border-radius:8px;padding:12px 13px;
+            margin-bottom:10px;font-size:12px;}}
+  .sb2-card .thread-entry{{border-left:3px solid #e5e9f2;padding-left:9px;margin:6px 0;}}
+  .sb2-empty{{color:#94a3b8;font-size:12px;text-align:center;padding:16px 0;}}
+  .all-ok-banner{{background:#dcfce7;border:1px solid #86efac;color:#14532d;
+                 padding:14px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:700;}}
+  /* Document sheet */
+  .sheet{{background:#fff;width:794px;max-width:100%;min-height:900px;
+         box-shadow:0 1px 4px rgba(0,0,0,.12),0 10px 30px rgba(12,35,68,.16);
+         border:1px solid #d6dae2;border-radius:2px;
+         padding:62px 58px;outline:none;
+         font-family:Calibri,Carlito,'Segoe UI',sans-serif;font-size:10.5pt;line-height:1.24;color:#111;}}
+  .sheet p{{margin:3pt 0;}}
+  .sheet table{{border-collapse:collapse;width:100%;margin:8pt 0;table-layout:fixed;}}
+  .sheet td{{border:1px solid #999;padding:4pt 6pt;vertical-align:top;word-wrap:break-word;}}
+  .sheet:focus{{border-color:#bcd0f2;
+    box-shadow:0 1px 4px rgba(0,0,0,.12),0 12px 34px rgba(26,86,219,.18);}}
+  .sheet.review{{background:#fcfcfd;cursor:default;}}
+  .hint-bar{{flex-shrink:0;background:#fffbeb;border-top:2px solid #fde68a;
+             padding:10px 18px;font-size:12px;color:#92400e;line-height:1.5;}}
+  #chg-count{{font-size:11.5px;color:#92400e;background:#fef3c7;border-radius:6px;
+             padding:4px 10px;font-weight:700;display:none;white-space:nowrap;}}
+  #review-tip{{display:none;font-size:11px;color:#1a56db;background:#eff6ff;border-radius:6px;
+              padding:4px 10px;white-space:nowrap;}}
+  /* Change-tracking mark highlights */
+  [data-cmt]{{border-radius:3px;transition:background .3s;}}
+  .chg-p1{{background:rgba(37,99,235,0.11)!important;border-left:3px solid #2563eb!important;padding-left:6px!important;}}
+  .chg-p2{{background:rgba(245,158,11,0.14)!important;border-left:3px solid #f59e0b!important;padding-left:6px!important;}}
+  .chg-accepted{{background:rgba(22,163,74,0.09)!important;border-left:3px solid #16a34a!important;padding-left:6px!important;}}
+  .chg-rejected{{background:rgba(239,68,68,0.09)!important;border-left:3px solid #dc2626!important;padding-left:6px!important;}}
+  .jump-flash{{animation:cmtFlash 1.7s ease;}}
+  @keyframes cmtFlash{{0%,100%{{outline:none;}}25%,65%{{outline:3px solid #f59e0b;outline-offset:3px;}}}}
+  /* Floating comment bubbles */
+  .chg-bubble{{position:fixed;width:228px;background:#fff;border:1px solid #e2e8f0;
+    border-radius:10px;padding:10px 12px;
+    box-shadow:0 4px 18px rgba(15,23,42,.13);font-size:12px;font-family:'Segoe UI',Arial,sans-serif;
+    z-index:45;cursor:pointer;display:none;transition:box-shadow .15s,border-color .15s;}}
+  .chg-bubble:hover,.chg-bubble.bub-focus{{box-shadow:0 7px 26px rgba(37,99,235,.22);border-color:#93c5fd;}}
+  .bub-rej-box textarea{{width:100%;min-height:58px;padding:6px 8px;border:1px solid #fca5a5;
+    border-radius:6px;font-size:11.5px;font-family:inherit;resize:vertical;margin-top:6px;}}
+  /* Redline styles */
+  ins.rl-ins{{background:none;color:#1a56db;text-decoration:underline;
+    text-decoration-thickness:1px;text-underline-offset:2px;padding:0;}}
+  del.rl-del{{background:none;color:#c0182f;text-decoration:line-through;
+    text-decoration-thickness:1px;padding:0;}}
+  p.rl-blank{{margin:0;height:8px;}}
+  [data-cmt="temp"]{{border-left:3px solid #f59e0b!important;padding-left:6px!important;border-radius:3px;}}
+  #cmt-badge{{background:#ef4444;color:#fff;border-radius:99px;padding:1px 6px;
+             font-size:10px;font-weight:700;margin-left:3px;display:none;}}
+  @media(max-width:860px){{.sheet{{padding:28px 16px;width:100%;}}}}
+</style></head>
+<body>
+<div class="work">
+  <div class="topbar">
+    <div>
+      <div class="ttl">&#x270F; Propose Changes — {label}</div>
+      <div class="tsub">{biz} &middot; Click to edit &bull; click away to see redlines</div>
+    </div>
+    <span class="grow"></span>
+    <span id="review-tip">&#x1F441; Viewing track changes — click document to edit</span>
+    <span id="chg-count">0 sections changed</span>
+    <button class="btn b-line" id="sb2-btn" onclick="toggleSb2()" title="View comments from Jane">
+      &#x1F4AC; Comments<span id="cmt-badge"></span></button>
+    <a class="btn b-line" href="{review_url}">&#x2190; Back to Review</a>
+    <button class="btn b-amber" id="sub-btn" onclick="submitChanges()">
+      &#x2709; Submit Changes</button>
+  </div>
+  <div class="body-row">
+    <div class="edwrap">
+      <div class="sheet" id="sheet" contenteditable="true" spellcheck="true"></div>
+    </div>
+    <div class="sb2" id="sb2">
+      <div class="sb2-head">
+        <span>&#x1F4AC; Comments &amp; Changes</span>
+        <button onclick="toggleSb2()" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:16px;">&#x2715;</button>
+      </div>
+      <div class="sb2-body" id="sb2-body"><p class="sb2-empty">Loading…</p></div>
+    </div>
+  </div>
+  <!-- Comment bar: appears inline below the document when P2 makes an edit -->
+  <div id="cmt-bar" style="display:none;flex-direction:column;gap:8px;background:#fffbeb;
+       border-top:3px solid #f59e0b;padding:14px 18px;">
+    <div style="font-size:14px;font-weight:800;color:#92400e;">
+      &#x270F; You made a change — explain it before continuing</div>
+    <div style="font-size:12px;color:#78350f;">
+      Jane Aerospace will review this. Describe what you changed and why it is needed.</div>
+    <textarea id="cmt-bar-ta" rows="3"
+      placeholder="e.g. Changed notice period from 30 to 60 days to align with our standard contract terms."
+      style="width:100%;padding:10px 12px;border:1.5px solid #f59e0b;border-radius:8px;font-size:13px;
+             font-family:inherit;resize:vertical;outline:none;box-sizing:border-box;background:#fff;"></textarea>
+    <div id="cmt-bar-err" style="display:none;color:#dc2626;font-size:12px;"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button onclick="_saveComment()"
+        style="background:#d97706;color:#fff;border:none;border-radius:7px;
+               padding:10px 22px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;flex:1;">
+        &#x2713; Save Comment &amp; Continue Editing</button>
+    </div>
+  </div>
+  <!-- Saved comments list + submit -->
+  <div id="session-cmts" style="display:none;background:#f8fafc;border-top:1px solid #e2e8f0;
+       padding:10px 18px;max-height:220px;overflow-y:auto;"></div>
+  <div class="hint-bar">
+    &#x270F; <b>Tap</b> the document to edit &rarr; a yellow comment box appears below &rarr; explain your change &rarr; save &rarr; repeat for each change &rarr; tap <b>Submit Changes</b> when done.
+    &nbsp;&nbsp;<span id="cmt-saved-info" style="display:none;background:#dcfce7;color:#14532d;border-radius:6px;padding:2px 10px;font-weight:700;"></span>
+  </div>
+</div>
+<script>
+var BASE = '/api/v1/documents';
+var OID  = '{onboarding_id}';
+var DT   = '{doc_type}';
+var TOK  = '{token}';
+// Globals required by _EDITOR_RIBBON_JS track-changes system
+var ORIG_HTML = {orig_html_js};
+var ORIG_TEXT = '';
+var SIGNED = false;
+var sheet = document.getElementById('sheet');
+// Populate sheet with current document content before ribbon JS fires
+sheet.innerHTML = {html_json};
+// Stubs for ribbon functions not used in p2editor
+function cmd(){{}} function dirty(){{}} function restoreRange(){{}} function saveRange(){{}}
+</script>
+<script>{_EDITOR_RIBBON_JS}</script>
+<script>
+// ── Comment bubble system (P2 can accept/reject P1's comments) ──
+
+function _chgClass(party, status) {{
+  if (status === 'accepted') return 'chg-accepted';
+  if (status === 'rejected') return 'chg-rejected';
+  return party === 'p1' ? 'chg-p1' : 'chg-p2';
+}}
+
+function _applyMarkColors(comments) {{
+  var map = {{}};
+  (comments || []).forEach(function(c) {{ map[c.id] = c; }});
+  sheet.querySelectorAll('[data-cmt]').forEach(function(el) {{
+    var cid = el.getAttribute('data-cmt');
+    if (!cid || cid === 'temp') return;
+    var c = map[cid]; if (!c) return;
+    el.classList.remove('chg-p1','chg-p2','chg-accepted','chg-rejected');
+    el.classList.add(_chgClass(c.party, c.status));
+    el.style.cursor = 'pointer';
+    el.title = 'Click to jump to comment';
+    el.onclick = (function(id) {{ return function() {{ jumpToChange(id); }}; }})(cid);
+  }});
+}}
+
+function renderBubbles(comments) {{
+  document.querySelectorAll('.chg-bubble').forEach(function(b) {{ b.remove(); }});
+  if (!comments || !comments.length) return;
+  var map = {{}};
+  comments.forEach(function(c) {{ map[c.id] = c; }});
+  var seen = {{}};
+  sheet.querySelectorAll('[data-cmt]').forEach(function(mark) {{
+    var cid = mark.getAttribute('data-cmt');
+    if (!cid || cid === 'temp' || seen[cid]) return;
+    seen[cid] = true;
+    var c = map[cid]; if (!c) return;
+    var status = c.status || 'pending';
+    var pCol  = c.party === 'p1' ? '#1a56db' : '#059669';
+    var sCol  = {{pending:'#f59e0b',accepted:'#16a34a',rejected:'#dc2626'}}[status] || '#94a3b8';
+    var pLbl  = c.party === 'p1' ? 'Jane' : 'You';
+    // Full thread display
+    var threadHtml = '';
+    (c.thread || []).forEach(function(t) {{
+      var tCol = t.party === 'p1' ? '#1a56db' : '#059669';
+      threadHtml += '<div style="border-left:2px solid #e5e9f2;padding-left:7px;margin-top:6px;">' +
+        '<span style="font-size:10px;font-weight:700;color:' + tCol + ';">' +
+          (t.by || '') + ' — ' + (t.action || 'comment') + '</span>' +
+        '<div style="font-size:11px;color:#374151;margin-top:2px;white-space:pre-wrap;">' +
+          (t.text || '').slice(0, 200) + '</div></div>';
+    }});
+    // Only show Accept/Reject for P1's comments that are pending AND P2 has not yet commented
+    var accRej = (status === 'pending' && c.party === 'p1') ? (
+      '<div style="display:flex;gap:5px;margin-top:7px;">' +
+      '<button data-bub-cid="' + cid + '" onclick="event.stopPropagation();_bubAccept(this)" ' +
+        'style="flex:1;background:#16a34a;color:#fff;border:none;border-radius:5px;padding:4px 0;font-size:11px;font-weight:700;cursor:pointer;">&#x2713; Accept</button>' +
+      '<button data-bub-cid="' + cid + '" onclick="event.stopPropagation();_bubReject(this)" ' +
+        'style="flex:1;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:5px;padding:4px 0;font-size:11px;font-weight:700;cursor:pointer;">&#x2717; Reject</button>' +
+      '</div>') : (status === 'rejected' && c.party === 'p1' ? (
+      '<div style="display:flex;gap:5px;margin-top:7px;">' +
+      '<button data-bub-cid="' + cid + '" onclick="event.stopPropagation();_bubReply(this)" ' +
+        'style="flex:1;background:#f1f5f9;color:#374151;border:1px solid #d4dae6;border-radius:5px;padding:4px 0;font-size:11px;font-weight:700;cursor:pointer;">&#x21A9; Reply</button>' +
+      '</div>') : '');
+    var bub = document.createElement('div');
+    bub.className = 'chg-bubble';
+    bub.id = 'bub-' + cid;
+    bub.setAttribute('data-for', cid);
+    bub.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">' +
+        '<span style="font-size:11px;font-weight:700;color:' + pCol + '">' + (c.by||'') +
+          ' <span style="color:#94a3b8;font-weight:400;">(' + pLbl + ')</span></span>' +
+        '<span style="font-size:9.5px;font-weight:700;background:' + sCol + ';color:#fff;padding:1px 6px;border-radius:99px;">' + status + '</span>' +
+      '</div>' + threadHtml +
+      '<div style="font-size:10px;color:#94a3b8;margin-top:5px;">' + (c.at||'') + '</div>' +
+      accRej;
+    bub.onclick = (function(id) {{ return function() {{ jumpToChange(id); }}; }})(cid);
+    document.body.appendChild(bub);
+  }});
+  positionBubbles();
+}}
+
+function positionBubbles() {{
+  var sheetRect = sheet.getBoundingClientRect();
+  var sb2 = document.getElementById('sb2');
+  var sbWidth = sb2 && sb2.classList.contains('open') ? sb2.offsetWidth : 0;
+  var bubLeft = Math.min(sheetRect.right + 14, window.innerWidth - sbWidth - 244);
+  var seen = {{}};
+  sheet.querySelectorAll('[data-cmt]').forEach(function(mark) {{
+    var cid = mark.getAttribute('data-cmt');
+    if (!cid || cid === 'temp' || seen[cid]) return;
+    seen[cid] = true;
+    var bub = document.getElementById('bub-' + cid); if (!bub) return;
+    var rect = mark.getBoundingClientRect();
+    var top  = Math.max(60, rect.top - 8);
+    bub.style.top  = top + 'px';
+    bub.style.left = bubLeft + 'px';
+    bub.style.display = (rect.top < -300 || rect.top > window.innerHeight + 120) ? 'none' : 'block';
+  }});
+}}
+
+function jumpToChange(cmtId) {{
+  var el = sheet.querySelector('[data-cmt="' + cmtId + '"]');
+  if (el) {{
+    el.scrollIntoView({{behavior:'smooth',block:'center'}});
+    el.classList.add('jump-flash');
+    setTimeout(function() {{ el.classList.remove('jump-flash'); }}, 1800);
+  }}
+  var bub = document.getElementById('bub-' + cmtId);
+  if (bub) {{ bub.classList.add('bub-focus'); setTimeout(function() {{ bub.classList.remove('bub-focus'); }}, 1800); }}
+}}
+
+function _bubAccept(btn) {{
+  _commentAction(btn.getAttribute('data-bub-cid'), 'accept', '');
+}}
+function _bubReject(btn) {{
+  _showBubRejBox(btn.getAttribute('data-bub-cid'));
+}}
+function _bubReply(btn) {{
+  _showBubRejBox(btn.getAttribute('data-bub-cid'));
+}}
+function _showBubRejBox(cmtId) {{
+  var bub = document.getElementById('bub-' + cmtId); if (!bub) return;
+  if (bub.querySelector('.bub-rej-box')) return;
+  var box = document.createElement('div');
+  box.className = 'bub-rej-box';
+  box.innerHTML =
+    '<textarea placeholder="Explain your concern (required)…"></textarea>' +
+    '<div style="display:flex;gap:5px;margin-top:5px;">' +
+      '<button data-bub-cid="' + cmtId + '" onclick="event.stopPropagation();_sendBubRejClick(this)" ' +
+        'style="background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;">Send</button>' +
+      '<button onclick="event.stopPropagation();this.closest(\'.bub-rej-box\').remove()" ' +
+        'style="background:#f1f5f9;color:#374151;border:1px solid #d4dae6;border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer;">Cancel</button>' +
+    '</div>';
+  bub.appendChild(box);
+}}
+function _sendBubRejClick(btn) {{
+  var txt = btn.closest('.bub-rej-box').querySelector('textarea').value.trim();
+  if (!txt) {{ alert('Please explain your concern.'); return; }}
+  _commentAction(btn.getAttribute('data-bub-cid'), 'reject', txt);
+}}
+
+async function _commentAction(commentId, action, text) {{
+  var r = await fetch(BASE + '/comment-action/' + OID + '/' + DT + '/' + TOK, {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{comment_id: commentId, action: action, text: text}})
+  }}).catch(function() {{ return null; }});
+  if (r && r.ok) {{
+    var d = await r.json().catch(function() {{ return {{}}; }});
+    loadComments();
+    if (d.all_accepted) {{
+      document.getElementById('err-bar').style.display = 'none';
+      var banner = document.getElementById('all-ok');
+      if (!banner) {{
+        banner = document.createElement('div');
+        banner.id = 'all-ok';
+        banner.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);' +
+          'background:#16a34a;color:#fff;padding:14px 28px;border-radius:10px;font-size:14px;font-weight:700;' +
+          'z-index:999;box-shadow:0 4px 18px rgba(0,0,0,.2);text-align:center;';
+        banner.innerHTML = '&#x2705; All changes agreed by both parties!<br>' +
+          '<span style="font-size:12px;font-weight:400;">Jane Aerospace will now proceed to sign — you will receive an email to complete your signature.</span>';
+        document.body.appendChild(banner);
+      }}
+    }}
+  }} else {{
+    var errD = r ? await r.json().catch(function() {{ return {{}}; }}) : {{}};
+    alert(errD.detail || 'Action failed. Please try again.');
+  }}
+}}
+
+window.addEventListener('scroll', positionBubbles, {{passive:true}});
+window.addEventListener('resize', positionBubbles, {{passive:true}});
+
+// ── Sidebar ──
+function toggleSb2() {{
+  var sb = document.getElementById('sb2');
+  sb.classList.toggle('open');
+  if (sb.classList.contains('open')) loadComments();
+  positionBubbles();
+}}
+
+function _statusBadge(status) {{
+  var map = {{pending:'#f59e0b',accepted:'#16a34a',rejected:'#dc2626'}};
+  var label = {{pending:'Pending',accepted:'Accepted',rejected:'Rejected'}};
+  return '<span style="display:inline-block;padding:1px 7px;border-radius:99px;font-size:10px;font-weight:700;background:' +
+    (map[status]||'#64748b') + ';color:#fff;">' + (label[status]||status) + '</span>';
+}}
+
+async function loadComments() {{
+  var body = document.getElementById('sb2-body');
+  var cmts = [];
+  try {{
+    var r = await fetch(BASE + '/versions/' + OID + '/' + DT + '/' + TOK);
+    if (r.ok) {{ var d = await r.json(); cmts = d.comments || []; }}
+  }} catch(e) {{}}
+
+  var open = cmts.filter(function(c) {{ return !c.status || c.status === 'pending' || c.status === 'rejected'; }});
+  var accepted = cmts.filter(function(c) {{ return c.status === 'accepted'; }});
+
+  var badge = document.getElementById('cmt-badge');
+  if (open.length > 0) {{ badge.textContent = open.length; badge.style.display='inline'; }}
+  else {{ badge.style.display='none'; }}
+
+  body.innerHTML = '';
+  if (cmts.length === 0) {{
+    body.innerHTML = '<p class="sb2-empty">No comments yet — Jane Aerospace has not reviewed your changes yet.</p>';
+  }} else {{
+    var allOk = cmts.length > 0 && cmts.every(function(c) {{ return c.status === 'accepted'; }});
+    if (allOk) {{
+      var okDiv = document.createElement('div'); okDiv.className = 'all-ok-banner';
+      okDiv.innerHTML = '&#x2705; All changes agreed! Signing process will begin shortly.';
+      body.appendChild(okDiv);
+    }} else if (open.length > 0) {{
+      var warn = document.createElement('div');
+      warn.style.cssText = 'background:#fff7ed;border:1px solid #fed7aa;color:#92400e;padding:10px;border-radius:7px;font-size:12px;margin-bottom:10px;';
+      warn.textContent = open.length + ' comment(s) still need resolution.';
+      body.appendChild(warn);
+    }}
+    var sec1 = document.createElement('div');
+    sec1.style.cssText = 'font-size:11px;font-weight:700;color:#64748b;margin:8px 0 6px;text-transform:uppercase;letter-spacing:.06em;';
+    sec1.textContent = 'Open (' + open.length + ')';
+    body.appendChild(sec1);
+    open.forEach(function(c) {{ body.appendChild(_buildSb2Card(c)); }});
+    var sec2 = document.createElement('div');
+    sec2.style.cssText = 'font-size:11px;font-weight:700;color:#64748b;margin:12px 0 6px;text-transform:uppercase;letter-spacing:.06em;';
+    sec2.textContent = 'Accepted (' + accepted.length + ')';
+    body.appendChild(sec2);
+    if (accepted.length === 0) {{
+      var emp = document.createElement('p'); emp.className = 'sb2-empty'; emp.textContent = 'None yet.';
+      body.appendChild(emp);
+    }} else {{ accepted.forEach(function(c) {{ body.appendChild(_buildSb2Card(c)); }}); }}
+  }}
+  renderBubbles(cmts);
+  _applyMarkColors(cmts);
+}}
+
+function _buildSb2Card(c) {{
+  var status = c.status || 'pending';
+  var borderCol = c.party === 'p1' ? '#2563eb' : '#f59e0b';
+  var card = document.createElement('div');
+  card.className = 'sb2-card';
+  card.style.borderLeft = '3px solid ' + borderCol;
+  var thread = c.thread || [];
+  var threadHtml = thread.map(function(t) {{
+    var tCol = t.party === 'p1' ? '#1a56db' : '#059669';
+    return '<div class="thread-entry">' +
+      '<div style="font-size:10.5px;font-weight:700;color:' + tCol + ';">' +
+        (t.by||'') + ' — ' + (t.action||'comment') + ' — ' + (t.at||'') + '</div>' +
+      '<div style="font-size:12px;color:#374151;margin-top:2px;white-space:pre-wrap;">' + (t.text||'') + '</div>' +
+    '</div>';
+  }}).join('');
+  var hasAnchor = !!sheet.querySelector('[data-cmt="' + c.id + '"]');
+  var jumpBtn = hasAnchor
+    ? '<button onclick="jumpToChange(\'' + c.id + '\')" style="background:#eff6ff;color:#1a56db;border:1px solid #bfdbfe;border-radius:5px;padding:3px 9px;font-size:10.5px;font-weight:700;cursor:pointer;margin:5px 0 0;">&#x2197; Jump to change</button>'
+    : '';
+  card.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">' +
+      '<span style="font-size:12px;font-weight:700;color:#374151;">' + (c.by||'Lead') +
+        ' <span style="font-weight:400;color:#94a3b8;">(' + (c.party==='p1'?'Jane':'You') + ')</span></span>' +
+      _statusBadge(status) +
+    '</div>' +
+    '<div style="font-size:10px;color:#94a3b8;margin-bottom:5px;">' + (c.at||'') + '</div>' +
+    (jumpBtn ? '<div>' + jumpBtn + '</div>' : '') +
+    '<div id="sb2-thread-' + c.id + '">' + threadHtml + '</div>';
+  // P2 can Accept / Reject P1's pending or rejected comments
+  if (c.party === 'p1' && (status === 'pending' || status === 'rejected')) {{
+    var acts = document.createElement('div');
+    acts.style.cssText = 'display:flex;gap:7px;margin-top:8px;flex-wrap:wrap;';
+    if (status === 'pending') {{
+      var acc = document.createElement('button');
+      acc.textContent = '✓ Accept';
+      acc.style.cssText = 'background:#16a34a;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;';
+      acc.onclick = (function(id) {{ return function() {{ _commentAction(id,'accept',''); }}; }})(c.id);
+      acts.appendChild(acc);
+    }}
+    var rejBtn = document.createElement('button');
+    rejBtn.textContent = status === 'rejected' ? '↩ Reply' : '✗ Reject';
+    rejBtn.style.cssText = 'background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;';
+    rejBtn.onclick = (function(id, container) {{ return function() {{ _showSb2RejBox(id, container); }}; }})(c.id, acts);
+    acts.appendChild(rejBtn);
+    card.appendChild(acts);
+  }}
+  return card;
+}}
+
+function _showSb2RejBox(commentId, container) {{
+  if (container.querySelector('.rej-box')) return;
+  var box = document.createElement('div');
+  box.className = 'rej-box';
+  box.style.cssText = 'margin-top:8px;width:100%;';
+  box.innerHTML = '<textarea placeholder="Explain your concern (required)…" ' +
+    'style="width:100%;min-height:60px;padding:8px;border:1px solid #fca5a5;border-radius:6px;font-size:12px;font-family:inherit;resize:vertical;"></textarea>' +
+    '<div style="display:flex;gap:6px;margin-top:6px;">' +
+      '<button style="background:#dc2626;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;" ' +
+        'onclick="(function(btn){{var box=btn.closest(\'.rej-box\');var txt=box.querySelector(\'textarea\').value.trim();' +
+        'if(!txt){{alert(\'Please explain your concern.\');return;}}' +
+        '_commentAction(\'' + commentId + '\',\'reject\',txt);}}).call(this,this)">Send</button>' +
+      '<button style="background:#eef1f6;color:#374151;border:1px solid #d4dae6;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;" ' +
+        'onclick="this.closest(\'.rej-box\').remove()">Cancel</button>' +
+    '</div>';
+  container.appendChild(box);
+}}
+
+// ── Main editor logic ──
+(function() {{
+  var INIT_HTML = {html_json};
+  try {{ sheet.innerHTML = INIT_HTML; }} catch(e) {{}}
+
+  var _hasEdit   = false;   // user has edited since last comment save
+  var _comments  = [];      // {{id, text}} per saved comment
+  var _cmtSeq    = 0;       // unique ID counter
+  var _idleTimer = null;    // fires comment popup after 1.5s idle
+
+  // ── Exit review mode before any edit so innerHTML isn't clobbered mid-input ──
+  // ── Exit review mode before keystroke so innerHTML isn't clobbered mid-edit ──
+  function _exitIfReviewing() {{
+    if (window._reviewing && typeof window._tcExitReview === 'function') window._tcExitReview();
+  }}
+  sheet.addEventListener('keydown',    _exitIfReviewing);
+  sheet.addEventListener('touchstart', _exitIfReviewing, {{passive: true}});
+  sheet.addEventListener('click',      _exitIfReviewing);
+
+  // ── Detect edits — show the inline comment bar immediately ──
+  sheet.addEventListener('input', function() {{
+    _hasEdit = true;
+    // Stamp the block being edited
+    var sel = window.getSelection();
+    if (sel && sel.rangeCount) {{
+      var node = sel.getRangeAt(0).startContainer;
+      while (node && node.parentElement && node.parentElement !== sheet) node = node.parentElement;
+      if (node && node !== sheet && node.isConnected && !node.getAttribute('data-cmt'))
+        node.setAttribute('data-cmt', 'temp');
+    }}
+    _showCommentBar();
+    _updateUI();
+  }});
+
+  // ── Show / hide the inline comment bar ──
+  function _showCommentBar() {{
+    var bar = document.getElementById('cmt-bar');
+    if (bar) bar.style.display = 'flex';
+  }}
+  function _hideCommentBar() {{
+    var bar = document.getElementById('cmt-bar');
+    if (bar) bar.style.display = 'none';
+    var ta  = document.getElementById('cmt-bar-ta');
+    var err = document.getElementById('cmt-bar-err');
+    if (ta)  ta.value = '';
+    if (err) err.style.display = 'none';
+  }}
+
+  // ── UI state ──
+  function _updateUI() {{
+    var cc  = document.getElementById('chg-count');
+    var inf = document.getElementById('cmt-saved-info');
+    var btn = document.getElementById('sub-btn');
+    var c   = _comments.length;
+    cc.style.display = 'none';
+    if (c > 0) {{
+      inf.textContent = c + ' comment' + (c === 1 ? ' saved' : 's saved');
+      inf.style.display = 'inline-block';
+    }} else {{
+      inf.style.display = 'none';
+    }}
+    if (c > 0 && !_hasEdit) {{
+      btn.style.background = '#16a34a';
+    }} else {{
+      btn.style.background = '';
+    }}
+    _renderSessionComments();
+  }}
+
+  // ── Save a comment ──
+  window._saveComment = function() {{
+    var ta  = document.getElementById('cmt-bar-ta');
+    var err = document.getElementById('cmt-bar-err');
+    var txt = ta ? ta.value.trim() : '';
+    if (!txt) {{
+      if (err) {{ err.textContent = 'Please describe your change before saving.'; err.style.display = 'block'; }}
+      if (ta) ta.focus();
+      return;
+    }}
+    // Stamp all temp-marked elements with a permanent per-comment ID
+    var cmtId = 'p2c_' + Date.now() + '_' + (++_cmtSeq);
+    sheet.querySelectorAll('[data-cmt="temp"]').forEach(function(el) {{
+      el.setAttribute('data-cmt', cmtId);
+    }});
+    _comments.push({{ id: cmtId, text: txt }});
+    _hasEdit = false;
+    _hideCommentBar();
+    _updateUI();
+  }};
+
+  // ── Jump to changed paragraph ──
+  window._jumpToChange = function(id) {{
+    if (window._reviewing && typeof window._tcExitReview === 'function') window._tcExitReview();
+    setTimeout(function() {{
+      var el = sheet.querySelector('[data-cmt="' + id + '"]');
+      if (!el) return;
+      el.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+      el.style.outline = '2.5px solid #f59e0b';
+      el.style.borderRadius = '3px';
+      setTimeout(function() {{ el.style.outline = ''; el.style.borderRadius = ''; }}, 1800);
+    }}, 120);
+  }};
+
+  // ── In-session saved comment list ──
+  function _esc(s) {{ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }}
+  function _renderSessionComments() {{
+    var panel = document.getElementById('session-cmts');
+    if (!panel) return;
+    if (_comments.length === 0) {{ panel.style.display = 'none'; return; }}
+    panel.style.display = 'block';
+    panel.innerHTML = '<div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px;' +
+      'text-transform:uppercase;letter-spacing:.5px;">Your saved comments this session</div>' +
+      _comments.map(function(c, i) {{
+        var preview = c.text.length > 80 ? c.text.slice(0, 80) + '…' : c.text;
+        return '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;' +
+          'background:#fff;border:1px solid #e2e8f0;border-radius:7px;margin-bottom:5px;">' +
+          '<div style="flex:1;font-size:12px;color:#374151;">' +
+            '<span style="font-weight:700;color:#d97706;">Change ' + (i+1) + ':</span> ' + _esc(preview) +
+          '</div>' +
+          '<button onclick="_jumpToChange(\'' + c.id + '\')" style="white-space:nowrap;' +
+            'background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:5px;' +
+            'padding:3px 10px;font-size:11.5px;cursor:pointer;font-family:inherit;">&#x2192; Jump</button>' +
+          '</div>';
+      }}).join('');
+  }}
+
+  // Ctrl/Cmd+Enter in comment bar saves quickly
+  var _cmtBarTa = document.getElementById('cmt-bar-ta');
+  if (_cmtBarTa) _cmtBarTa.addEventListener('keydown', function(e) {{
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {{ e.preventDefault(); _saveComment(); }}
+  }});
+
+  // ── Submit all changes to Jane ──
+  window.submitChanges = async function() {{
+    if (_hasEdit) {{ _showCommentBar(); alert('Please save your comment first before submitting.'); return; }}
+    if (_comments.length === 0) {{
+      alert('Please make at least one change to the document and add a comment explaining it before submitting.');
+      return;
+    }}
+    var combined = _comments.length === 1
+      ? _comments[0].text
+      : _comments.map(function(c, i) {{ return 'Change ' + (i+1) + ': ' + c.text; }}).join('\n\n');
+    if (window._reviewing && typeof window._tcExitReview === 'function') window._tcExitReview();
+    var html = sheet.innerHTML;
+    var btn  = document.getElementById('sub-btn');
+    btn.disabled = true; btn.textContent = 'Submitting…';
+    try {{
+      var r = await fetch(BASE + '/review/' + OID + '/' + DT + '/' + TOK, {{
+        method: 'POST', headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{
+          action: 'comment', name: '', comments: combined,
+          comment_ids: _comments.map(function(c) {{ return c.id; }}),
+          edited_html: html
+        }})
+      }});
+      var d = await r.json().catch(function() {{ return {{}}; }});
+      if (r.ok) {{
+        window.location.href = '{review_url}';
+      }} else {{
+        alert(d.detail || 'Something went wrong. Please try again.');
+        btn.disabled = false; btn.innerHTML = '&#x2709; Submit Changes';
+      }}
+    }} catch(e) {{
+      alert('Network error: ' + e.message);
+      btn.disabled = false;
+    }}
+  }};
+
+  _updateUI();
+  loadComments();
+}})();
+</script>
+</body></html>""")
+
+
+@router.get("/portal/{onboarding_id}/{doc_type}/{token}")
+async def document_portal(onboarding_id: str, doc_type: str, token: str,
+                          db: AsyncSession = Depends(get_db)):
+    """Lead-facing document portal — validates token then serves the sign/review page.
+    This URL is what gets emailed; the underlying sign page handles stage routing."""
+    _check_doc_type(doc_type)
+    _check_token(onboarding_id, doc_type, token, "sign")
+    await _load(db, onboarding_id)   # confirm record exists before redirect
+    return RedirectResponse(
+        url=f"/api/v1/documents/sign/{onboarding_id}/{doc_type}/{token}",
+        status_code=302,
+    )
+
+
+def _make_edit_url(_onboarding_id: str, _doc_type: str) -> str:
+    """Returns the Jane team dashboard URL — P1 manages all document actions from there."""
+    return f"{settings.APP_URL.rstrip('/')}/api/v1/dashboard"
+
+
+import re as _re
+
+
+def _strip_redlines(html_str: str) -> str:
+    """Remove <del class="rl-del"> elements (deleted words) and unwrap <ins class="rl-ins">
+    (keeping inserted text) to produce a clean agreed copy.  Also removes data-cmt markers."""
+    # Remove deleted content
+    html_str = _re.sub(
+        r'<del\b[^>]*class="[^"]*rl-del[^"]*"[^>]*>.*?</del>',
+        '', html_str, flags=_re.DOTALL | _re.IGNORECASE)
+    # Unwrap inserted content (keep the text inside)
+    html_str = _re.sub(
+        r'<ins\b[^>]*class="[^"]*rl-ins[^"]*"[^>]*>(.*?)</ins>',
+        r'\1', html_str, flags=_re.DOTALL | _re.IGNORECASE)
+    # Strip data-cmt markers from all elements
+    html_str = _re.sub(r'\s*data-cmt="[^"]*"', '', html_str)
+    return html_str
+
+
+_CHG_CLASSES = frozenset({'chg-block', 'chg-p1', 'chg-p2', 'chg-accepted', 'chg-rejected'})
+
+
+def _strip_editor_marks(html_str: str) -> str:
+    """Called at send time: strip P1-side ephemeral editing artefacts from HTML.
+
+    Removes:
+      - data-cmt="temp"  — unsaved temp anchors left by the editor JS
+      - chg-block / chg-p1 / chg-p2 CSS classes — the editor highlights;
+        p2editor re-applies them dynamically from comment data so storing them
+        causes false blue/amber highlighting for P2 before comments load.
+
+    Keeps:
+      - data-cmt="<real-id>"  — real comment anchors that link bubbles to the text
+      - All other attributes and content
+    """
+    # Remove orphan temp marks
+    html_str = _re.sub(r'\s*data-cmt="temp"', '', html_str)
+
+    # Strip chg-* CSS classes while leaving other classes intact
+    def _clean_class_attr(m: "_re.Match[str]") -> str:
+        tag = m.group(0)
+        cls_m = _re.search(r'class\s*=\s*"([^"]*)"', tag)
+        if not cls_m:
+            return tag
+        old_cls = cls_m.group(1)
+        new_cls = ' '.join(c for c in old_cls.split() if c not in _CHG_CLASSES)
+        if new_cls == old_cls:
+            return tag
+        if new_cls:
+            return tag.replace(cls_m.group(0), f'class="{new_cls}"')
+        # Remove the class attribute entirely if empty
+        cleaned = tag.replace(' ' + cls_m.group(0), '')
+        if cls_m.group(0) in cleaned:
+            cleaned = cleaned.replace(cls_m.group(0), '')
+        return cleaned
+
+    html_str = _re.sub(r'<[a-zA-Z][^>]*class="[^"]*"[^>]*>', _clean_class_attr, html_str)
+    return html_str
 
 
 class _CommentActionBody(BaseModel):
@@ -2854,13 +3909,19 @@ class _CommentActionBody(BaseModel):
 @router.post("/comment-action/{onboarding_id}/{doc_type}/{token}")
 async def document_comment_action(onboarding_id: str, doc_type: str, token: str,
                                   body: _CommentActionBody, db: AsyncSession = Depends(get_db)):
-    """P1 (Jane team) accepts, rejects or replies to a comment thread.
+    """P1 or P2 accepts, rejects or replies to a comment thread.
     Accept: marks status=accepted and logs to thread.
     Reject: mandatory reply text; marks status=rejected and logs to thread.
     Reply: adds a message to the thread without changing status.
+    When all comments reach accepted: auto-strips redlines and advances stage to 'accepted'.
     """
     _check_doc_type(doc_type)
-    _check_token(onboarding_id, doc_type, token, "edit")
+    # Determine caller: P1 uses edit token, P2 uses sign token
+    is_p1 = verify_doc_token(onboarding_id, doc_type, "edit", token)
+    is_p2 = (not is_p1) and verify_doc_token(onboarding_id, doc_type, "sign", token)
+    if not is_p1 and not is_p2:
+        raise HTTPException(403, "Invalid or expired link")
+
     rec, lead = await _load(db, onboarding_id)
     data = _get_doc_data(rec, doc_type)
 
@@ -2875,12 +3936,16 @@ async def document_comment_action(onboarding_id: str, doc_type: str, token: str,
         raise HTTPException(404, "Comment not found")
 
     now = _now_ist()
-    from app.core.config import settings
-    p1_name = settings.ORGANIZER_NAME or "Jane Aerospace"
+    if is_p1:
+        actor_name = settings.ORGANIZER_NAME or "Jane Aerospace"
+        actor_party = "p1"
+    else:
+        actor_name = lead.business_name or lead.full_name or lead.email
+        actor_party = "p2"
 
     thread_entry = {
-        "by": p1_name,
-        "party": "p1",
+        "by": actor_name,
+        "party": actor_party,
         "action": body.action,
         "text": (body.text or "").strip()[:2000],
         "at": _fmt(now),
@@ -2893,12 +3958,36 @@ async def document_comment_action(onboarding_id: str, doc_type: str, token: str,
         target["status"] = "rejected"
     # reply leaves status unchanged
 
+    # When ALL comments are accepted: generate clean copy and advance stage
+    all_accepted = bool(comments) and all(c.get("status") == "accepted" for c in comments)
+    if all_accepted:
+        if data.get("html"):
+            data["html"] = _strip_redlines(data["html"])
+        # Only advance if still in negotiation stages
+        if (data.get("stage") or "") in ("review", "changes_requested"):
+            data["stage"] = "accepted"
+
     _set_doc_data(rec, doc_type, data)
     await db.commit()
 
-    all_accepted = all(c.get("status") == "accepted" for c in comments)
     logger.info("comment_action", onboarding_id=onboarding_id, doc_type=doc_type,
-                action=body.action, comment_id=body.comment_id)
+                action=body.action, comment_id=body.comment_id, party=actor_party)
+
+    # When all comments are accepted: email P1 (Jane team) to proceed with countersignature
+    if all_accepted:
+        try:
+            from app.services.onboarding_email import notify_team_terms_accepted
+            accepted_by = (lead.business_name or lead.contact_name or lead.email)
+            notify_team_terms_accepted(
+                company_name=lead.business_name,
+                lead_email=lead.email,
+                doc_type=doc_type,
+                accepted_by=f"{accepted_by} (negotiation complete — all changes agreed)",
+                edit_url=_make_edit_url(onboarding_id, doc_type),
+            )
+        except Exception as _exc:
+            logger.warning("notify_all_accepted_failed", error=str(_exc))
+
     return {
         "message": f"Comment {body.action}ed",
         "all_accepted": all_accepted,
@@ -2927,6 +4016,13 @@ async def document_internal_sign(onboarding_id: str, doc_type: str, token: str,
         raise HTTPException(409, "Document already signed by the lead")
     if data.get("internal_signature"):
         raise HTTPException(409, "Document already internally signed")
+    # Enforce: all comments from both parties must be accepted before internal signing
+    unresolved = [c for c in data.get("comments", [])
+                  if (c.get("status") or "pending") in ("pending", "rejected")]
+    if unresolved:
+        raise HTTPException(409, f"Cannot countersign yet: {len(unresolved)} comment(s) are still "
+                                 "unresolved. Both parties must accept all comments before signing begins. "
+                                 "Open the document editor and accept or reject each comment.")
     rep_name = body.signed_name.strip() or settings.ORGANIZER_NAME
 
     now = _now_ist()
@@ -2948,7 +4044,7 @@ async def document_internal_sign(onboarding_id: str, doc_type: str, token: str,
     await db.commit()
 
     from app.services.onboarding_email import send_document_sign_email
-    sign_url = make_doc_sign_url(onboarding_id, doc_type)
+    sign_url = make_doc_portal_url(onboarding_id, doc_type)
     to_email = data.get("signatory_email") or lead.email
     send_document_sign_email(
         to_email=to_email,
@@ -3133,22 +4229,87 @@ async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: 
             f"version for your signature shortly."))
 
     if stage in ("review", "changes_requested") and not internal_sig:
-        # Extract the document HTML for the inline review editor
-        try:
-            if data.get("mode") == "live" and data.get("html"):
-                _review_html = data["html"]
-            else:
-                from app.services.pdf_documents import extract_editable_html
-                _review_html = extract_editable_html(doc_type, _is_overseas(rec), data.get("replacements", []))
-        except Exception:
-            _review_html = ""
-        return HTMLResponse(_review_page_html(onboarding_id, doc_type, token, label, lead, data, _review_html))
+        return HTMLResponse(_review_page_html(onboarding_id, doc_type, token, label, lead, data))
+
+    # If internal sign exists but comments are still unresolved, block P2 signing
+    comments = data.get("comments") or []
+    open_cmts = [c for c in comments if (c.get("status") or "pending") in ("pending", "rejected")]
+    if open_cmts and internal_sig:
+        import html as _hlib
+        items_html = "".join(
+            f'<li style="margin-bottom:8px;"><b>{_hlib.escape(c.get("by","?"))}</b> '
+            f'({c.get("party","?").upper()}): '
+            f'{_hlib.escape((c.get("thread") or [{}])[0].get("text","")[:120])} '
+            f'<span style="background:#fee2e2;color:#991b1b;font-size:11px;padding:1px 6px;border-radius:5px;">'
+            f'{c.get("status","pending")}</span></li>'
+            for c in open_cmts
+        )
+        return HTMLResponse(_result_page(
+            "Comments Pending Resolution",
+            f"There are {len(open_cmts)} unresolved comment(s) on this {label}. "
+            "Both parties must accept all comments before signing can proceed.",
+            extra_html=f'<ul style="text-align:left;max-width:540px;margin:16px auto 0;'
+                       f'font-size:13px;line-height:1.6;">{items_html}</ul>'))
 
     pdf_url = f"/api/v1/documents/pdf/{onboarding_id}/{doc_type}/{token}"
     if internal_sig:
         # show the internally countersigned document for the lead's signature
         pdf_url = f"/api/v1/documents/signed/{onboarding_id}/{doc_type}/{token}"
+    import html as _hlib2
     sig_name = data.get("signatory_name", "") or (lead.contact_name or "")
+    comments = data.get("comments") or []
+
+    # Build comment history HTML for the legal record section on sign page
+    _status_chip = {"accepted": ("#dcfce7", "#15803d", "Accepted"),
+                    "rejected":  ("#fee2e2", "#991b1b", "Rejected")}
+    _history_rows = ""
+    for cmt in comments:
+        if not isinstance(cmt, dict):
+            continue
+        by = _hlib2.escape(cmt.get("by") or "Unknown")
+        party_lbl = "Jane Aerospace" if cmt.get("party") == "p1" else _hlib2.escape(lead.business_name)
+        at = _hlib2.escape(cmt.get("at") or "")
+        status = cmt.get("status") or "pending"
+        chip_bg, chip_fg, chip_txt = _status_chip.get(status, ("#fef3c7", "#92400e", status.title()))
+        thread = cmt.get("thread") or []
+        thread_html = ""
+        for t in thread:
+            if not isinstance(t, dict):
+                continue
+            t_by = _hlib2.escape(t.get("by") or "")
+            t_act = _hlib2.escape(t.get("action") or "comment")
+            t_txt = _hlib2.escape((t.get("text") or "")[:500])
+            t_at = _hlib2.escape(t.get("at") or "")
+            thread_html += (f'<div style="margin-top:6px;padding-left:12px;border-left:2px solid #e5e7eb;'
+                            f'font-size:11.5px;color:#374151;">'
+                            f'<span style="font-weight:700;color:#1a3a6b;">{t_by}</span> '
+                            f'<span style="color:#94a3b8;">({t_act}) &bull; {t_at}</span><br>'
+                            f'<span style="white-space:pre-wrap;">{t_txt}</span></div>')
+        _history_rows += (
+            f'<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px;margin-bottom:10px;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
+            f'<span style="font-weight:700;font-size:13px;color:#1a3a6b;">{by}</span>'
+            f'<span style="font-size:11px;color:#64748b;">{party_lbl} &bull; {at}</span>'
+            f'<span style="background:{chip_bg};color:{chip_fg};font-size:11px;font-weight:700;'
+            f'padding:2px 8px;border-radius:99px;">{chip_txt}</span></div>'
+            f'{thread_html}</div>'
+        )
+
+    history_card = ""
+    if _history_rows:
+        history_card = f"""
+  <div class="card">
+    <div class="card-head">
+      <div class="step-badge" style="background:#64748b;">&#x1F4DC;</div>
+      <h2>Change &amp; Comment History</h2>
+    </div>
+    <div class="card-pad">
+      <p style="font-size:12.5px;color:#64748b;margin-bottom:12px;">
+        Complete audit trail of all proposed changes and comments by both parties.
+        This history is preserved as part of the legal record.</p>
+      {_history_rows}
+    </div>
+  </div>"""
 
     sign_cfg = {
         "endpoint": f"/api/v1/documents/sign/{onboarding_id}/{doc_type}/{token}",
@@ -3359,6 +4520,8 @@ async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: 
     </div>
   </div>
 
+  {history_card}
+
 </div>
 <div class="trust">
   <span>🔒 Encrypted in transit</span>
@@ -3433,6 +4596,7 @@ async def document_sign(onboarding_id: str, doc_type: str, token: str,
         "user_agent": (request.headers.get("user-agent") or "")[:300],
     }
     data["signature"] = sig
+    data["stage"] = "signed"
     # merge the lead's placed signature overlays so they stamp onto the page(s)
     if body.signatures_overlay:
         merged = list(data.get("signatures_overlay") or [])
