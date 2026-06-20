@@ -18,6 +18,7 @@ import html as _htmllib
 import io
 import re
 import statistics
+from app.core.config import settings as _settings
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -991,6 +992,73 @@ def stamp_overlays(pdf_bytes: bytes, overlays: list[dict] | None) -> bytes:
         doc.close()
 
 
+def stamp_signatures_on_document(pdf_bytes: bytes,
+                                  internal_sig: dict | None = None,
+                                  sig: dict | None = None) -> bytes:
+    """Append a clean signature page (only shows parties that have signed)."""
+    if not internal_sig and not sig:
+        return pdf_bytes
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        page = doc.new_page()
+        w, h = page.rect.width, page.rect.height
+        ML, MR = 54.0, w - 54.0
+        C_NAVY  = (0.07, 0.18, 0.36)
+        C_GRAY  = (0.38, 0.42, 0.50)
+        C_LINE  = (0.78, 0.83, 0.92)
+
+        # Title
+        page.insert_text((ML, 56), "Signatures", fontsize=18, fontname="hebo", color=C_NAVY)
+        page.draw_line((ML, 68), (MR, 68), color=C_LINE, width=0.8)
+
+        def _sig_block(s: dict, y: float, company: str) -> float:
+            """Draw one signature block; return bottom y."""
+            # Company label
+            page.insert_text((ML, y + 14), company, fontsize=9, fontname="hebo", color=C_NAVY)
+
+            img_b64 = s.get("sig_image", "")
+            img_h = 80
+            if img_b64 and img_b64.startswith("data:image"):
+                try:
+                    raw = base64.b64decode(img_b64.split(",", 1)[1])
+                    page.insert_image(fitz.Rect(ML, y + 20, ML + 200, y + 20 + img_h),
+                                      stream=raw, keep_proportion=True)
+                except Exception:
+                    img_h = 0
+            else:
+                img_h = 0
+
+            info_y = y + 20 + img_h + 8
+            name  = s.get("signed_name", "")
+            desig = s.get("designation", "Authorised Signatory")
+            signed_at = s.get("signed_at", "")
+            if signed_at and "T" in signed_at:
+                d, t = signed_at.split("T", 1)
+                signed_at = f"{d}  {t[:5]} IST"
+            page.draw_line((ML, info_y), (ML + 220, info_y), color=C_LINE, width=0.5)
+            page.insert_text((ML, info_y + 12), name,      fontsize=9,   fontname="hebo", color=C_NAVY)
+            page.insert_text((ML, info_y + 24), desig,     fontsize=8,   fontname="helv", color=C_GRAY)
+            page.insert_text((ML, info_y + 36), signed_at, fontsize=7.5, fontname="helv", color=C_GRAY)
+            return info_y + 50
+
+        y = 84.0
+        if internal_sig:
+            company = internal_sig.get("company_name") or _settings.COMPANY_LEGAL_NAME
+            y = _sig_block(internal_sig, y, company)
+            y += 24
+            page.draw_line((ML, y), (MR, y), color=C_LINE, width=0.4)
+            y += 16
+        if sig:
+            company = sig.get("company_name", "Counterparty")
+            _sig_block(sig, y, company)
+
+        out = doc.tobytes(deflate=True, garbage=3)
+        doc.close()
+        return out
+    except Exception:
+        return pdf_bytes
+
+
 def append_signature_page(pdf_bytes: bytes, doc_type: str, sig: dict | None = None,  # noqa: ARG001
                           internal_sig: dict | None = None) -> bytes:
     """Append an Adobe-Sign-style e-signature certificate page.
@@ -1157,17 +1225,17 @@ def append_signature_page(pdf_bytes: bytes, doc_type: str, sig: dict | None = No
         return y0 + TOTAL_H
 
     # ── draw signer blocks ────────────────────────────────────────────────────
-    japl_name   = (internal_sig or {}).get("company_name", "Jane Aerospace Private Limited")
+    japl_name   = (internal_sig or {}).get("company_name") or _settings.COMPANY_LEGAL_NAME
     lead_name   = (sig or {}).get("company_name", "Counterparty")
 
     y = float(INFO_Y + 26 + BLOCK_GAP)
-    # P1: Jane Aerospace internal signatory
-    y = _signer_block(y, internal_sig, "Authorised Signatory", japl_name,
-                      pending=(internal_sig is None))
-    y += BLOCK_GAP
-    # P2: Lead / counterparty signatory — this is where the uploaded signature image appears
-    y = _signer_block(y, sig, "Authorised Signatory", lead_name,
-                      pending=(sig is None))
+    # Only render blocks for parties that have actually signed — no "Signature pending" shown
+    if internal_sig:
+        y = _signer_block(y, internal_sig, "Authorised Signatory", japl_name, pending=False)
+        y += BLOCK_GAP
+    if sig:
+        y = _signer_block(y, sig, "Authorised Signatory", lead_name, pending=False)
+        y += BLOCK_GAP
 
     # ── legal footer ──────────────────────────────────────────────────────────
     footer_y = y + 14

@@ -902,6 +902,10 @@
       background:#dcfce7;color:#15803d;border:1px solid #86efac;
     }
     .doc-act-green:hover { background:#bbf7d0; }
+    .doc-act-sign {
+      background:#16a34a;color:#fff;border:none;
+    }
+    .doc-act-sign:hover { background:#15803d; }
 
     @media(max-width:700px) {
       .ds-lbl,.ds-sub { display:none; }
@@ -2606,8 +2610,9 @@
 
     // Action buttons relevant to current stage
     function docActions(o) {
-      const editorUrl   = url => url;
-      const ndaEditor   = o.nda_editor_url   || o.nda_edit_url;
+      const ndaEditUrl  = o.nda_edit_url;      // /edit/ — side panel + sign modal
+      const ndaEditor   = o.nda_editor_url || o.nda_edit_url; // /editor/ — live editor
+      const agrEditUrl  = o.agreement_edit_url;
       const agrEditor   = o.agreement_editor_url || o.agreement_edit_url;
       const ndaSign     = o.nda_sign_url;
       const agrSign     = o.agreement_sign_url;
@@ -2620,11 +2625,17 @@
 
       // NDA buttons
       if (!ndaSigned) {
-        if (act)
+        if (ndaStage === 'lead_accept' && act) {
+          // Lead accepted T&C — team must countersign; link directly to the sign page
+          btns += `<a class="doc-act-btn doc-act-sign" href="${ndaEditUrl}" target="_blank">✍ Sign NDA</a>`;
+          btns += `<button class="doc-act-btn doc-act-secondary" onclick="navigator.clipboard.writeText('${ndaSign}');toast('Lead sign link copied')">📋 Lead Link</button>`;
+        } else if (act) {
           btns += `<a class="doc-act-btn doc-act-primary" href="${ndaEditor}" target="_blank">✏️ Edit NDA</a>`;
-        else
-          btns += `<a class="doc-act-btn doc-act-secondary" href="${ndaEditor}" target="_blank">👁 Preview NDA</a>`;
-        btns += `<a class="doc-act-btn doc-act-secondary" href="${ndaSign}" target="_blank">🖊 NDA Sign Page</a>`;
+          btns += `<button class="doc-act-btn doc-act-secondary" onclick="navigator.clipboard.writeText('${ndaSign}');toast('Lead sign link copied')">📋 Lead Link</button>`;
+        } else {
+          btns += `<a class="doc-act-btn doc-act-secondary" href="${ndaEditUrl}" target="_blank">👁 Preview NDA</a>`;
+          btns += `<button class="doc-act-btn doc-act-secondary" onclick="navigator.clipboard.writeText('${ndaSign}');toast('Lead sign link copied')">📋 Lead Link</button>`;
+        }
       } else {
         btns += `<span class="doc-act-btn doc-act-green">✅ NDA Signed</span>`;
         btns += `<button class="doc-act-btn doc-act-secondary" onclick="navigator.clipboard.writeText('${ndaSign}');toast('NDA link copied')">📋 Copy NDA Link</button>`;
@@ -2634,11 +2645,16 @@
 
       // Agreement buttons
       if (!agrSigned) {
-        if (act)
+        if (agrStage === 'lead_accept' && act) {
+          btns += `<a class="doc-act-btn doc-act-green" href="${agrEditUrl}" target="_blank">✍ Sign Agreement</a>`;
+          btns += `<button class="doc-act-btn doc-act-secondary" onclick="navigator.clipboard.writeText('${agrSign}');toast('Lead sign link copied')">📋 Lead Link</button>`;
+        } else if (act) {
           btns += `<a class="doc-act-btn doc-act-primary" href="${agrEditor}" target="_blank">✏️ Edit Agreement</a>`;
-        else
-          btns += `<a class="doc-act-btn doc-act-secondary" href="${agrEditor}" target="_blank">👁 Preview Agreement</a>`;
-        btns += `<a class="doc-act-btn doc-act-secondary" href="${agrSign}" target="_blank">🖊 Agreement Sign Page</a>`;
+          btns += `<button class="doc-act-btn doc-act-secondary" onclick="navigator.clipboard.writeText('${agrSign}');toast('Lead sign link copied')">📋 Lead Link</button>`;
+        } else {
+          btns += `<a class="doc-act-btn doc-act-secondary" href="${agrEditUrl}" target="_blank">👁 Preview Agreement</a>`;
+          btns += `<button class="doc-act-btn doc-act-secondary" onclick="navigator.clipboard.writeText('${agrSign}');toast('Lead sign link copied')">📋 Lead Link</button>`;
+        }
       } else {
         btns += `<span class="doc-act-btn doc-act-green">✅ Agreement Signed</span>`;
         btns += `<button class="doc-act-btn doc-act-secondary" onclick="navigator.clipboard.writeText('${agrSign}');toast('Agreement link copied')">📋 Copy Agreement Link</button>`;
@@ -2734,10 +2750,12 @@
 
     /* ============================ approvals ============================ */
     const APPROVABLE = { kyc: 1, nda_draft: 1, agreement_draft: 1 };
+    const INTERNAL_SIGNABLE = { nda_internal_sign: 1, agreement_internal_sign: 1 };
     function aprChip(k) {
       const m = {
         kyc: 'c-amber', nda_draft: 'c-purple', agreement_draft: 'c-blue', nda_sign: 'c-purple',
-        agreement_sign: 'c-blue', kyc_wait: 'c-gray', nda_wait: 'c-gray', agreement_wait: 'c-gray'
+        agreement_sign: 'c-blue', kyc_wait: 'c-gray', nda_wait: 'c-gray', agreement_wait: 'c-gray',
+        nda_internal_sign: 'c-green', agreement_internal_sign: 'c-green'
       };
       return m[k] || 'c-gray';
     }
@@ -2753,6 +2771,10 @@
     <td>${withDecision ? (canAct() && APPROVABLE[a.kind] ? `
       <button class="btn btn-g" style="padding:5px 12px;font-size:11px;" onclick="approve('${a.onboarding_id}','${a.kind}','approve')">${ic('check2')} Approve${a.kind !== 'kyc' ? ' & Send' : ''}</button>
       <button class="btn btn-r" style="padding:5px 12px;font-size:11px;" onclick="approveReject('${a.onboarding_id}','${a.kind}')">${ic('x')} Reject</button>`
+      : canAct() && INTERNAL_SIGNABLE[a.kind] ? `
+      <button class="btn btn-p" style="padding:5px 14px;font-size:11px;font-weight:700;gap:5px;"
+        onclick="openDashSign('${a.onboarding_id}','${a.kind.replace(/_internal_sign$/,'')}','${a.view_url || ''}')">
+        ✍ Sign Document</button>`
           : '<span style="font-size:11px;color:var(--mut);">' + (canAct() ? 'review via Open' : 'approver only') + '</span>')
           : `<span class="chip c-gray">WAITING</span>
         <div style="font-size:10.5px;color:var(--mut);margin-top:3px;max-width:220px;">${esc(a.display)}</div>`}</td></tr>`;
@@ -2778,6 +2800,99 @@
     function approveReject(id, kind) {
       const notes = prompt('Reason for rejection (sent to the lead for KYC):', '');
       if (notes === null) return; approve(id, kind, 'reject', notes);
+    }
+
+    /* ============================ internal sign modal ============================ */
+    let _dsSigMode = 'draw', _dsUploadB64 = '', _dsCanvas, _dsCtx, _dsDrawing = false;
+
+    function openDashSign(oid, docType, editUrl) {
+      // editUrl = /api/v1/documents/edit/{oid}/{docType}/{token}
+      const tok = (editUrl || '').split('/').filter(Boolean).pop();
+      document.getElementById('ds-oid').value = oid;
+      document.getElementById('ds-dt').value = docType;
+      document.getElementById('ds-tok').value = tok;
+      document.getElementById('ds-desig').value = '';
+      document.getElementById('ds-sign-name').textContent = NAME || 'Authorised Signatory';
+      _dsUploadB64 = '';
+      dsSigTab('draw');
+      document.getElementById('ds-modal').style.display = 'flex';
+      setTimeout(dsInitCanvas, 60);
+    }
+    function closeDashSign() { document.getElementById('ds-modal').style.display = 'none'; }
+    function dsSigTab(mode) {
+      _dsSigMode = mode;
+      ['draw','upload'].forEach(m => {
+        const btn = document.getElementById('ds-tab-' + m);
+        const panel = document.getElementById('ds-panel-' + m);
+        const active = m === mode;
+        btn.style.background = active ? '#eff6ff' : '#f8fafc';
+        btn.style.color = active ? '#1d4ed8' : '#64748b';
+        panel.style.display = active ? '' : 'none';
+      });
+      if (mode === 'draw') setTimeout(dsInitCanvas, 40);
+    }
+    function dsInitCanvas() {
+      _dsCanvas = document.getElementById('ds-canvas');
+      if (!_dsCanvas) return;
+      _dsCtx = _dsCanvas.getContext('2d');
+      _dsCtx.strokeStyle = '#0c2344'; _dsCtx.lineWidth = 2.2;
+      _dsCtx.lineCap = 'round'; _dsCtx.lineJoin = 'round';
+      const pt = (e) => {
+        const r = _dsCanvas.getBoundingClientRect();
+        const sx = _dsCanvas.width / r.width, sy = _dsCanvas.height / r.height;
+        return e.touches
+          ? { x: (e.touches[0].clientX - r.left) * sx, y: (e.touches[0].clientY - r.top) * sy }
+          : { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
+      };
+      _dsCanvas.onmousedown = _dsCanvas.ontouchstart = (e) => {
+        _dsDrawing = true; const p = pt(e); _dsCtx.beginPath(); _dsCtx.moveTo(p.x, p.y); e.preventDefault();
+      };
+      _dsCanvas.onmousemove = _dsCanvas.ontouchmove = (e) => {
+        if (!_dsDrawing) return; const p = pt(e); _dsCtx.lineTo(p.x, p.y); _dsCtx.stroke(); e.preventDefault();
+      };
+      _dsCanvas.onmouseup = _dsCanvas.ontouchend = _dsCanvas.onmouseleave = () => { _dsDrawing = false; };
+    }
+    function dsClearCanvas() {
+      if (_dsCanvas) _dsCtx.clearRect(0, 0, _dsCanvas.width, _dsCanvas.height);
+    }
+    function dsLoadUpload(inp) {
+      const f = inp.files && inp.files[0];
+      if (!f) { _dsUploadB64 = ''; return; }
+      if (f.size > 5 * 1024 * 1024) { alert('Image too large — max 5 MB.'); inp.value = ''; return; }
+      const reader = new FileReader();
+      reader.onload = ev => {
+        _dsUploadB64 = ev.target.result;
+        const img = document.getElementById('ds-upload-img');
+        img.src = _dsUploadB64; img.parentElement.style.display = 'block';
+      };
+      reader.readAsDataURL(f);
+    }
+    async function submitDashSign() {
+      const oid = document.getElementById('ds-oid').value;
+      const dt  = document.getElementById('ds-dt').value;
+      const tok = document.getElementById('ds-tok').value;
+      const desig = (document.getElementById('ds-desig').value || '').trim();
+      if (!desig) { alert('Please enter a designation (e.g. Authorised Signatory).'); return; }
+      let sigImage = '';
+      if (_dsSigMode === 'upload') {
+        sigImage = _dsUploadB64;
+      } else if (_dsCanvas) {
+        const d = _dsCtx.getImageData(0, 0, _dsCanvas.width, _dsCanvas.height).data;
+        if (Array.from(d).some((v, i) => i % 4 === 3 && v > 10)) sigImage = _dsCanvas.toDataURL('image/png');
+      }
+      const btn = document.getElementById('ds-submit-btn');
+      btn.disabled = true; btn.textContent = 'Signing…';
+      try {
+        const r = await fetch(`/api/v1/documents/internal-sign/${oid}/${dt}/${tok}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ signed_name: '', designation: desig, sig_image: sigImage })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { alert(data.detail || 'Signing failed — ' + r.status); return; }
+        toast('Document signed & emailed to lead ✓');
+        closeDashSign(); loadApprovals();
+      } catch (e) { alert('Network error: ' + e.message); }
+      finally { btn.disabled = false; btn.textContent = '✍ Sign & Send to Lead'; }
     }
 
     /* ============================ bulk ============================ */
@@ -3147,6 +3262,107 @@
       if (TOKEN) vaWelcome();
     })();
   </script>
+
+  <!-- ===== Internal Sign Modal (Dashboard) ===== -->
+  <div id="ds-modal" style="display:none;position:fixed;inset:0;z-index:9000;align-items:center;justify-content:center;background:rgba(12,35,68,.55);backdrop-filter:blur(4px);">
+    <div style="background:#fff;border-radius:16px;width:min(520px,96vw);box-shadow:0 24px 60px rgba(12,35,68,.22);display:flex;flex-direction:column;overflow:hidden;">
+      <!-- Header -->
+      <div style="background:linear-gradient(135deg,#0c2344 0%,#1d4ed8 100%);padding:20px 24px 16px;display:flex;align-items:center;gap:12px;">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+          <path d="M12 2L2 7v10l10 5 10-5V7L12 2z" stroke="rgba(255,255,255,.7)" stroke-width="1.5" fill="rgba(255,255,255,.1)"/>
+          <path d="M8 12h8M8 15h5" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <div>
+          <div style="color:#fff;font-weight:700;font-size:15px;letter-spacing:-.01em;">Sign Document</div>
+          <div style="color:rgba(255,255,255,.65);font-size:11.5px;margin-top:1px;">Jane Aerospace — Internal Authorisation</div>
+        </div>
+        <button onclick="closeDashSign()" style="margin-left:auto;background:rgba(255,255,255,.12);border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;color:rgba(255,255,255,.8);font-size:16px;display:flex;align-items:center;justify-content:center;transition:background .15s;"
+          onmouseover="this.style.background='rgba(255,255,255,.22)'" onmouseout="this.style.background='rgba(255,255,255,.12)'">×</button>
+      </div>
+      <!-- Body -->
+      <div style="padding:22px 24px 0;">
+        <!-- Status notice -->
+        <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:11px 14px;display:flex;gap:10px;align-items:flex-start;margin-bottom:18px;">
+          <svg width="16" height="16" style="margin-top:1px;flex-shrink:0;color:#2563eb;" fill="currentColor" viewBox="0 0 16 16"><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm.93-9.412-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381 2.29-.287zM8 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/></svg>
+          <div style="font-size:12px;color:#1e40af;line-height:1.5;">After signing, the document will be emailed to the lead for their counter-signature.</div>
+        </div>
+        <!-- Signing as -->
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+          <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#0c2344,#1d4ed8);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg width="16" height="16" fill="white" viewBox="0 0 16 16"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4z"/></svg>
+          </div>
+          <div>
+            <div style="font-size:10.5px;color:#64748b;font-weight:500;text-transform:uppercase;letter-spacing:.06em;">Signing as</div>
+            <div id="ds-sign-name" style="font-size:13.5px;font-weight:700;color:#0c2344;margin-top:1px;">—</div>
+          </div>
+        </div>
+        <!-- Designation -->
+        <div style="margin-bottom:18px;">
+          <label style="display:block;font-size:11.5px;font-weight:600;color:#374151;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;">Designation <span style="color:#dc2626;">*</span></label>
+          <input id="ds-desig" type="text" placeholder="e.g. Authorised Signatory, CEO, Director…"
+            style="width:100%;box-sizing:border-box;border:1.5px solid #d1d5db;border-radius:8px;padding:9px 13px;font-size:13px;color:#111827;outline:none;transition:border-color .15s;"
+            onfocus="this.style.borderColor='#1d4ed8'" onblur="this.style.borderColor='#d1d5db'"/>
+        </div>
+        <!-- Signature tabs -->
+        <div style="margin-bottom:4px;">
+          <label style="display:block;font-size:11.5px;font-weight:600;color:#374151;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em;">Signature</label>
+          <div style="display:flex;gap:0;border:1.5px solid #e2e8f0;border-radius:8px;overflow:hidden;width:fit-content;margin-bottom:12px;">
+            <button id="ds-tab-draw" onclick="dsSigTab('draw')"
+              style="padding:7px 18px;font-size:12px;font-weight:600;border:none;cursor:pointer;transition:background .15s,color .15s;background:#eff6ff;color:#1d4ed8;">
+              ✏️ Draw
+            </button>
+            <button id="ds-tab-upload" onclick="dsSigTab('upload')"
+              style="padding:7px 18px;font-size:12px;font-weight:600;border:none;cursor:pointer;border-left:1.5px solid #e2e8f0;transition:background .15s,color .15s;background:#f8fafc;color:#64748b;">
+              📎 Upload
+            </button>
+          </div>
+          <!-- Draw panel -->
+          <div id="ds-panel-draw">
+            <div style="position:relative;border:2px dashed #cbd5e1;border-radius:10px;background:#f8fafc;overflow:hidden;">
+              <canvas id="ds-canvas" width="468" height="130" style="display:block;width:100%;height:130px;cursor:crosshair;touch-action:none;"></canvas>
+              <button onclick="dsClearCanvas()"
+                style="position:absolute;top:8px;right:8px;background:rgba(255,255,255,.9);border:1px solid #e2e8f0;border-radius:6px;padding:4px 9px;font-size:11px;color:#64748b;cursor:pointer;">
+                Clear
+              </button>
+              <div style="position:absolute;bottom:8px;left:50%;transform:translateX(-50%);font-size:10.5px;color:#94a3b8;pointer-events:none;white-space:nowrap;">
+                Draw your signature above
+              </div>
+            </div>
+          </div>
+          <!-- Upload panel -->
+          <div id="ds-panel-upload" style="display:none;">
+            <label style="display:block;border:2px dashed #cbd5e1;border-radius:10px;background:#f8fafc;padding:22px;text-align:center;cursor:pointer;transition:border-color .15s;"
+              onmouseover="this.style.borderColor='#1d4ed8'" onmouseout="this.style.borderColor='#cbd5e1'">
+              <input type="file" accept="image/*" style="display:none;" onchange="dsLoadUpload(this)"/>
+              <div style="font-size:24px;margin-bottom:8px;">🖼️</div>
+              <div style="font-size:12.5px;color:#374151;font-weight:500;">Click to upload signature image</div>
+              <div style="font-size:11px;color:#94a3b8;margin-top:3px;">PNG, JPG, SVG — max 5 MB</div>
+            </label>
+            <div style="display:none;margin-top:10px;border:1px solid #e2e8f0;border-radius:8px;padding:8px;background:#fff;text-align:center;">
+              <img id="ds-upload-img" src="" alt="signature preview" style="max-height:80px;max-width:100%;border-radius:4px;"/>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Footer -->
+      <div style="padding:18px 24px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #f1f5f9;margin-top:20px;">
+        <button onclick="closeDashSign()"
+          style="padding:9px 20px;border:1.5px solid #e2e8f0;border-radius:8px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;"
+          onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+          Cancel
+        </button>
+        <button id="ds-submit-btn" onclick="submitDashSign()"
+          style="padding:9px 22px;border:none;border-radius:8px;background:linear-gradient(135deg,#0c2344,#1d4ed8);color:#fff;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:-.01em;transition:opacity .15s;"
+          onmouseover="this.style.opacity='.88'" onmouseout="this.style.opacity='1'">
+          ✍ Sign &amp; Send to Lead
+        </button>
+      </div>
+    </div>
+    <!-- hidden state -->
+    <input id="ds-oid" type="hidden"/><input id="ds-dt" type="hidden"/><input id="ds-tok" type="hidden"/>
+  </div>
+  <!-- ===== /Internal Sign Modal ===== -->
+
 </body>
 
 </html>

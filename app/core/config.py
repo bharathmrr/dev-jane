@@ -112,6 +112,7 @@ class Settings(BaseSettings):
     # --- Organizer contact ---
     ORGANIZER_EMAIL: str = "bharath.p@janeaerospace.co.in"
     ORGANIZER_NAME: str = "Leo Charles"
+    COMPANY_LEGAL_NAME: str = "Jane Aerospace Private Limited"
 
     # --- Zoho availability cache ---
     ZOHO_CACHE_TTL: int = 300

@@ -316,9 +316,9 @@ async def document_signed_pdf(onboarding_id: str, doc_type: str, token: str, db:
     internal_sig = data.get("internal_signature")
     if not sig and not internal_sig:
         raise HTTPException(404, "Document has not been signed yet")
-    from app.services.pdf_documents import append_signature_page
-    pdf = append_signature_page(_render_pdf(rec, doc_type, data), doc_type,
-                                sig=sig, internal_sig=internal_sig)
+    from app.services.pdf_documents import stamp_signatures_on_document
+    pdf = stamp_signatures_on_document(_render_pdf(rec, doc_type, data),
+                                       internal_sig=internal_sig, sig=sig)
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{doc_type}_signed_jane_aerospace.pdf"'})
 
@@ -366,32 +366,48 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
     signed_btn = (f'<a class="btn b-blue" target="_blank" href="{base}/signed/{onboarding_id}/{doc_type}/{token}">⬇ Signed PDF</a>'
                   if (signed or internal_sig) else "")
     needs_internal_sign = (stage == "accepted" and not internal_sig and not signed)
-    sign_topbar_btn = (
-        f'<button class="btn b-green" onclick="openSignModal()">✍ Sign &amp; Send to Lead</button>'
-        if needs_internal_sign else ""
-    )
 
-    # Lead comments panel
+    # Signing phase: dedicated page — no modal, no editor clutter
+    if needs_internal_sign:
+        return HTMLResponse(_build_internal_sign_page(
+            onboarding_id, doc_type, token, label, lead, base
+        ))
+
+    # Edit phase: build comments and panel for normal editor
     comments_html = ""
     if comments:
         items = "".join(
-            f'<div style="background:#fff7ed;border-left:3px solid #f59e0b;border-radius:5px;'
-            f'padding:8px 11px;margin-bottom:8px;">'
-            f'<div style="font-size:10.5px;color:#92400e;font-weight:700;">'
-            f'{(c.get("by") or "Lead")} — {c.get("at", "")}</div>'
-            f'<div style="font-size:12.5px;color:#451a03;margin-top:3px;white-space:pre-wrap;">{c.get("text", "")}</div></div>'
+            f'<div style="background:#fff;border:1.5px solid #fcd34d;border-radius:9px;'
+            f'padding:10px 13px;margin-bottom:8px;">'
+            f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">'
+            f'<span style="font-size:10px;background:#fef3c7;color:#92400e;font-weight:700;'
+            f'border-radius:4px;padding:2px 7px;">{(c.get("by") or "Lead")}</span>'
+            f'<span style="font-size:10px;color:#94a3b8;">{c.get("at", "")}</span></div>'
+            f'<div style="font-size:12.5px;color:#451a03;white-space:pre-wrap;line-height:1.5;">{c.get("text", "")}</div></div>'
             for c in reversed(comments[-10:]))
         comments_html = f'<div class="sec">Lead Comments ({len(comments)})</div>{items}'
 
     # Internal signature — only show status note in panel; form lives in the modal
     internal_html = ""
     if not signed and internal_sig:
-        internal_html = (f'<div class="sec">Internal Signature</div>'
-                         f'<div class="note" style="background:#ecfdf5;border-left-color:#16a34a;color:#14532d;">'
-                         f'✓ Signed by <b>{internal_sig.get("signed_name", "")}</b> '
-                         f'({internal_sig.get("designation") or "Authorised Signatory"}) '
-                         f'on {internal_sig.get("signed_at", "")}. '
-                         f'Document emailed to lead for counter-signature.</div>')
+        signer = internal_sig.get("signed_name", "") or settings.ORGANIZER_NAME or settings.COMPANY_LEGAL_NAME
+        desig  = internal_sig.get("designation") or "Authorised Signatory"
+        sig_at = internal_sig.get("signed_at", "")
+        _sig_at_html = (
+            '<div style="font-size:10.5px;color:#4ade80;margin-top:3px;">' + sig_at + '</div>'
+            if sig_at else ""
+        )
+        internal_html = (
+            f'<div class="sec">Internal Signature</div>'
+            f'<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:9px;'
+            f'padding:11px 14px;margin-bottom:4px;display:flex;align-items:flex-start;gap:10px;">'
+            f'<span style="font-size:18px;margin-top:1px;">✅</span>'
+            f'<div><div style="font-size:12px;font-weight:700;color:#15803d;">Signed by {signer}</div>'
+            f'<div style="font-size:11px;color:#166534;margin-top:2px;">{desig}</div>'
+            f'{_sig_at_html}'
+            f'<div style="font-size:11px;color:#15803d;margin-top:4px;">Document emailed to lead for counter-signature.</div>'
+            f'</div></div>'
+        )
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -416,92 +432,38 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
   .split{{position:fixed;top:56px;left:0;right:0;bottom:0;display:flex;}}
   .pv{{flex:1;background:#525659;}}
   .pv iframe{{width:100%;height:100%;border:none;}}
-  .panel{{width:400px;max-width:46vw;background:#fff;border-left:1px solid #d9e1ef;overflow-y:auto;
-         padding:18px 20px 40px;}}
-  .sec{{font-size:11px;font-weight:800;color:#1a3a6b;text-transform:uppercase;letter-spacing:.07em;
-       border-bottom:2px solid #dbeafe;padding-bottom:6px;margin:18px 0 12px;}}
-  .fld{{margin-bottom:11px;}}
-  .fld label{{display:block;font-size:11.5px;font-weight:700;color:#374151;margin-bottom:4px;}}
-  .fld .ph{{font-family:monospace;font-size:10px;color:#92400e;background:#fff7ed;border-radius:4px;
-           padding:1px 6px;margin-left:6px;font-weight:600;}}
-  .fld input{{width:100%;padding:9px 11px;border:1.5px solid #cbd5e1;border-radius:7px;font-size:13px;}}
-  .fld input:focus{{outline:none;border-color:#1a56db;box-shadow:0 0 0 3px rgba(26,86,219,.12);}}
-  .custom{{display:grid;grid-template-columns:1fr 1fr 26px;gap:6px;margin-bottom:8px;align-items:center;}}
-  .custom input{{padding:8px 9px;border:1.5px solid #cbd5e1;border-radius:7px;font-size:12px;width:100%;}}
-  .custom input.cf{{font-family:monospace;background:#f8fafc;color:#92400e;}}
-  .del{{background:none;border:none;color:#dc2626;font-size:16px;cursor:pointer;}}
-  .note{{background:#eff6ff;border-left:3px solid #1a56db;padding:9px 12px;font-size:11.5px;color:#1e3a8a;
-        border-radius:5px;margin-bottom:14px;line-height:1.5;}}
-  .addbtn{{background:#fff;color:#1a3a6b;border:1.5px dashed #94a3b8;border-radius:7px;padding:8px;width:100%;
-          font-size:12px;font-weight:700;cursor:pointer;}}
-  /* Internal sign modal */
-  .modal-overlay{{position:fixed;inset:0;background:rgba(7,16,32,.55);z-index:100;
-    display:none;align-items:center;justify-content:center;backdrop-filter:blur(2px);}}
-  .modal-overlay.open{{display:flex;}}
-  .modal-box{{background:#fff;border-radius:14px;width:420px;max-width:94vw;
-    box-shadow:0 20px 60px rgba(7,16,32,.3);overflow:hidden;}}
-  .modal-head{{background:#0c2344;color:#fff;padding:16px 20px;display:flex;align-items:center;gap:10px;}}
-  .modal-head h3{{font-size:14px;font-weight:800;letter-spacing:.02em;flex:1;}}
-  .modal-head button{{background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:6px;
-    width:28px;height:28px;font-size:16px;cursor:pointer;line-height:1;}}
-  .modal-body{{padding:20px;}}
-  .modal-note{{background:#ecfdf5;border-left:3px solid #16a34a;color:#14532d;
-    padding:9px 12px;border-radius:5px;font-size:12px;line-height:1.5;margin-bottom:16px;}}
-  .modal-fld{{margin-bottom:12px;}}
-  .modal-fld label{{display:block;font-size:11.5px;font-weight:700;color:#374151;margin-bottom:4px;}}
-  .modal-fld input,.modal-fld select{{width:100%;padding:9px 11px;border:1.5px solid #cbd5e1;
-    border-radius:7px;font-size:13px;font-family:inherit;}}
-  .modal-fld input:focus,.modal-fld select:focus{{outline:none;border-color:#1a56db;
-    box-shadow:0 0 0 3px rgba(26,86,219,.12);}}
-  .modal-upload-zone{{border:2px dashed #c7d4ee;border-radius:8px;background:#f8fafc;
-    padding:18px;text-align:center;cursor:pointer;transition:border-color .15s;margin-bottom:8px;}}
-  .modal-upload-zone:hover{{border-color:#1a56db;background:#eff6ff;}}
-  .modal-footer{{display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;
-    border-top:1px solid #e5eaf2;}}
+  .panel{{width:420px;max-width:46vw;background:#f8fafc;border-left:1.5px solid #dde5f0;overflow-y:auto;
+         padding:0 0 40px;}}
+  .panel-inner{{padding:16px 18px;}}
+  .sec{{font-size:10.5px;font-weight:800;color:#1a3a6b;text-transform:uppercase;letter-spacing:.08em;
+       display:flex;align-items:center;gap:8px;margin:18px 0 10px;}}
+  .sec::after{{content:'';flex:1;height:1.5px;background:#dbeafe;border-radius:2px;}}
+  .sec:first-child{{margin-top:0;}}
+  .fld{{margin-bottom:10px;background:#fff;border:1.5px solid #e2e8f0;border-radius:9px;padding:9px 12px;}}
+  .fld label{{display:block;font-size:10.5px;font-weight:700;color:#64748b;margin-bottom:4px;
+             text-transform:uppercase;letter-spacing:.05em;}}
+  .fld .ph{{font-family:monospace;font-size:9.5px;color:#92400e;background:#fff7ed;border-radius:4px;
+           padding:1px 5px;margin-left:4px;font-weight:600;}}
+  .fld input{{width:100%;padding:7px 0;border:none;border-radius:0;font-size:13px;color:#111827;
+             background:transparent;outline:none;font-family:inherit;}}
+  .fld input:focus{{border-bottom:1.5px solid #1a56db;}}
+  .custom{{display:grid;grid-template-columns:1fr 1fr 28px;gap:6px;margin-bottom:6px;align-items:center;}}
+  .custom input{{padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:12px;width:100%;
+                background:#fff;font-family:inherit;outline:none;}}
+  .custom input:focus{{border-color:#1a56db;box-shadow:0 0 0 3px rgba(26,86,219,.1);}}
+  .custom input.cf{{font-family:monospace;background:#fffbf5;color:#92400e;}}
+  .del{{background:none;border:none;color:#dc2626;font-size:17px;cursor:pointer;padding:2px 4px;border-radius:5px;}}
+  .del:hover{{background:#fef2f2;}}
+  .note{{background:#eff6ff;border:1px solid #bfdbfe;padding:10px 13px;font-size:11.5px;color:#1e3a8a;
+        border-radius:8px;margin-bottom:12px;line-height:1.6;}}
+  .addbtn{{background:#fff;color:#1a3a6b;border:1.5px dashed #94a3b8;border-radius:8px;padding:9px;
+          width:100%;font-size:12px;font-weight:700;cursor:pointer;margin-top:4px;transition:border-color .15s;}}
+  .addbtn:hover{{border-color:#1a56db;color:#1a56db;}}
   @media(max-width:760px){{.split{{flex-direction:column;}}.panel{{width:100%;max-width:100%;height:55%;}}
     .pv{{height:45%;}}}}
 </style></head>
 <body>
 
-<!-- Internal signing modal (only relevant when stage==accepted and not yet signed) -->
-<div class="modal-overlay" id="sign-modal">
-  <div class="modal-box">
-    <div class="modal-head">
-      <h3>✍ Sign on Behalf of Jane Aerospace</h3>
-      <button onclick="closeSignModal()" title="Cancel">✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="modal-note">
-        The lead has accepted the Terms &amp; Conditions. Sign below and the counter-signed document
-        will be emailed to the lead automatically for their signature.
-      </div>
-      <div class="modal-fld">
-        <label>Designation</label>
-        <input type="text" id="int-desig" placeholder="e.g. Director, Authorised Signatory">
-      </div>
-      <div class="modal-fld">
-        <label>Signature Style</label>
-        <select id="int-font">
-          <option value="standard">Standard</option>
-          <option value="dancing">Cursive</option>
-        </select>
-      </div>
-      <div class="modal-fld">
-        <label>Upload Signature Image (PNG / JPG)</label>
-        <div class="modal-upload-zone" onclick="document.getElementById('int-sigimg').click()">
-          🖊 Click to upload signature image
-          <div style="font-size:11px;color:#64748b;margin-top:4px;">PNG or JPG recommended</div>
-          <input type="file" id="int-sigimg" accept=".png,.jpg,.jpeg" onchange="loadIntSig(this)" style="display:none;">
-        </div>
-        <div id="int-sig-preview" style="margin-top:6px;"></div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn b-line" onclick="closeSignModal()">Cancel</button>
-      <button class="btn b-green" onclick="internalSign()">✍ Sign &amp; Send to Lead</button>
-    </div>
-  </div>
-</div>
 
 <div class="topbar">
   <span class="ttl">✈ JANE AEROSPACE</span>
@@ -513,26 +475,25 @@ async def document_edit_page(onboarding_id: str, doc_type: str, token: str, db: 
   <a class="btn b-line" href="{base}/editor/{onboarding_id}/{doc_type}/{token}" title="Edit the full document content">📝 Live Editor</a>
   <button class="btn b-line" id="btn-reset" onclick="resetDoc()" title="Rebuild values from KYC data" style="display:none">↺ Reset</button>
   {signed_btn}
-  {sign_topbar_btn}
   <button class="btn b-green" id="btn-send" onclick="sendToLead()" style="display:none">📨 Send to Lead</button>
 </div>
 
 <div class="split">
   <div class="pv"><iframe id="pv" src="{base}/pdf/{onboarding_id}/{doc_type}/{token}#toolbar=1"></iframe></div>
   <div class="panel">
+    <div class="panel-inner">
     {internal_html}
     {comments_html}
-    <div class="note">The official PDF template is shown exactly as-is — its format and content never change.
-      Only the placeholder values below are written into it. Edit a value and the preview updates.
-      Need to change the actual content? Use the <b>Live Editor</b>.</div>
+    <div class="note">PDF template is fixed — only placeholder values are written into it. Edit below and the preview refreshes. To change document content, use <b>Live Editor</b>.</div>
     <div class="sec">Placeholder Values</div>
     <div id="std-fields"></div>
     <div class="sec">Custom Replacements</div>
     <div id="custom-rows"></div>
     <button class="addbtn" onclick="addCustom('','')">+ Add custom find &amp; replace</button>
-    <div class="sec">Signatory (receives the signing link)</div>
-    <div class="fld"><label>Full Name</label><input type="text" id="sig-name" oninput="dirty()"></div>
-    <div class="fld"><label>Email</label><input type="email" id="sig-email" oninput="dirty()"></div>
+    <div class="sec">Signatory</div>
+    <div class="fld"><label>Full Name</label><input type="text" id="sig-name" oninput="dirty()" placeholder="Signatory full name"></div>
+    <div class="fld"><label>Email</label><input type="email" id="sig-email" oninput="dirty()" placeholder="Signatory email address"></div>
+    </div>
   </div>
 </div>
 
@@ -636,56 +597,6 @@ async function sendToLead() {{
   const d = await r.json().catch(() => ({{}}));
   alert(r.ok ? (d.message || 'Sent for review.') : (d.detail || 'Send failed'));
   if (r.ok) location.reload();
-}}
-
-let INT_SIG_IMAGE = '';
-function loadIntSig(input) {{
-  const f = input.files && input.files[0];
-  const pv = document.getElementById('int-sig-preview');
-  if (!f) {{ INT_SIG_IMAGE = ''; pv.innerHTML = ''; return; }}
-  if (f.size > 5 * 1024 * 1024) {{ alert('Signature image too large — max 5 MB.'); input.value = ''; return; }}
-  const img = new Image();
-  img.onload = function() {{
-    const scale = Math.min(1, 480 / img.width);
-    const c = document.createElement('canvas');
-    c.width = Math.round(img.width * scale);
-    c.height = Math.round(img.height * scale);
-    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    INT_SIG_IMAGE = c.toDataURL('image/png');
-    pv.innerHTML = '<img src="' + INT_SIG_IMAGE + '" style="max-height:46px;border:1px dashed #c7d4ee;border-radius:5px;padding:3px;">';
-  }};
-  img.onerror = function() {{ alert('Could not read that image file.'); input.value = ''; }};
-  img.src = URL.createObjectURL(f);
-}}
-
-function openSignModal() {{
-  document.getElementById('sign-modal').classList.add('open');
-}}
-function closeSignModal() {{
-  document.getElementById('sign-modal').classList.remove('open');
-}}
-document.getElementById('sign-modal').addEventListener('click', function(e) {{
-  if (e.target === this) closeSignModal();
-}});
-
-async function internalSign() {{
-  const desig = (document.getElementById('int-desig') || {{}}).value || '';
-  const font  = (document.getElementById('int-font') || {{}}).value || 'standard';
-  const r = await fetch(`${{BASE}}/internal-sign/${{OID}}/${{DT}}/${{TOK}}`, {{
-    method: 'POST', headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{
-      signed_name: ORGANIZER_NAME,
-      designation: desig,
-      sig_font: font,
-      sig_image: INT_SIG_IMAGE,
-    }})
-  }});
-  const d = await r.json().catch(() => ({{}}));
-  if (!r.ok) {{ alert(d.detail || 'Signing failed'); return; }}
-  closeSignModal();
-  const pv = document.getElementById('pv');
-  if (pv) pv.src = `${{BASE}}/signed/${{OID}}/${{DT}}/${{TOK}}`;
-  location.reload();
 }}
 
 render();
@@ -2726,7 +2637,7 @@ async def document_save(onboarding_id: str, doc_type: str, token: str,
         import secrets as _sec
         now = _now_ist()
         from app.core.config import settings as _cfg
-        p1_name = _cfg.ORGANIZER_NAME or "Jane Aerospace"
+        p1_name = _cfg.ORGANIZER_NAME or _cfg.COMPANY_LEGAL_NAME
         comments = data.setdefault("comments", [])
         cmt_id = f"c{int(now.timestamp())}_{_sec.token_hex(4)}"
         _new_cmt_id = cmt_id
@@ -2944,6 +2855,281 @@ async def document_send(onboarding_id: str, doc_type: str, token: str,
 
 
 # ---------------------------------------------------------------------------
+# Internal signing page (team countersigns before sending to lead)
+# ---------------------------------------------------------------------------
+
+def _build_internal_sign_page(oid: str, doc_type: str, token: str,
+                               label: str, lead, base: str) -> str:
+    from app.core.config import settings as _s
+    import json as _json
+    signer_json = _json.dumps(_s.ORGANIZER_NAME or "Authorised Signatory")
+    lead_email  = _json.dumps(lead.email or "")
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign {label} — {lead.business_name}</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0;}}
+html,body{{height:100vh;overflow:hidden;font-family:'Segoe UI',Arial,sans-serif;background:#0a1e38;
+  display:flex;flex-direction:column;}}
+
+/* topbar */
+.topbar{{height:56px;background:#0c2344;display:flex;align-items:center;gap:12px;padding:0 18px;
+  border-bottom:1px solid rgba(255,255,255,.10);flex-shrink:0;position:relative;z-index:20;}}
+.t-brand{{font-size:11px;font-weight:800;color:#fff;letter-spacing:.08em;flex-shrink:0;}}
+.t-div{{width:1px;height:16px;background:rgba(255,255,255,.2);flex-shrink:0;}}
+.t-label{{font-size:12px;color:#b9c8e4;font-weight:600;flex-shrink:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;max-width:260px;}}
+.t-chip{{padding:2px 9px;border-radius:99px;font-size:10px;font-weight:800;
+  background:#dcfce7;color:#15803d;letter-spacing:.04em;flex-shrink:0;}}
+.t-grow{{flex:1;min-width:0;}}
+
+/* upload + tray toggle group */
+.sig-group{{display:flex;align-items:center;gap:6px;flex-shrink:0;}}
+.btn-upload{{display:flex;align-items:center;gap:5px;background:rgba(255,255,255,.08);
+  border:1.5px dashed #4a6fa1;border-radius:7px;color:#b9c8e4;font-size:12px;font-weight:600;
+  padding:6px 14px;cursor:pointer;font-family:inherit;transition:background .15s,border-color .15s;
+  position:relative;white-space:nowrap;}}
+.btn-upload:hover{{background:rgba(255,255,255,.13);border-color:#7badde;}}
+.btn-upload input{{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;}}
+.badge{{background:#1a56db;color:#fff;font-size:10px;font-weight:800;border-radius:99px;
+  padding:1px 6px;margin-left:2px;display:none;}}
+.btn-tray{{background:rgba(255,255,255,.08);border:none;color:#b9c8e4;border-radius:6px;
+  width:30px;height:30px;cursor:pointer;font-size:14px;display:flex;align-items:center;
+  justify-content:center;transition:background .15s;flex-shrink:0;}}
+.btn-tray:hover{{background:rgba(255,255,255,.16);}}
+
+/* send button */
+.btn-send{{background:#16a34a;color:#fff;border:none;border-radius:8px;padding:8px 18px;
+  font-size:12.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;
+  flex-shrink:0;font-family:inherit;transition:background .15s;white-space:nowrap;}}
+.btn-send:hover{{background:#15803d;}}
+.btn-send:disabled{{background:#2d3f55;color:#5a7a99;cursor:not-allowed;}}
+
+/* signature tray (slides down) */
+.sig-tray{{background:#0e2845;border-bottom:1px solid rgba(255,255,255,.10);
+  flex-shrink:0;overflow:hidden;max-height:0;transition:max-height .25s ease;}}
+.sig-tray.open{{max-height:200px;}}
+.tray-inner{{padding:14px 18px;display:flex;gap:12px;align-items:flex-start;
+  flex-wrap:wrap;min-height:60px;}}
+.tray-empty{{color:#5a7a99;font-size:12.5px;padding:10px 0;}}
+
+/* each signature card in tray */
+.sig-card{{position:relative;border:2px solid #2a4a6a;border-radius:8px;background:#0a1e38;
+  padding:6px;cursor:pointer;transition:border-color .15s;flex-shrink:0;}}
+.sig-card:hover{{border-color:#4a7ab8;}}
+.sig-card.selected{{border-color:#4ade80;background:rgba(74,222,128,.06);}}
+.sig-card img{{display:block;height:70px;max-width:130px;object-fit:contain;border-radius:4px;
+  background:#fff;padding:4px;}}
+.sig-card .sel-badge{{position:absolute;top:-7px;right:-7px;background:#16a34a;color:#fff;
+  border-radius:99px;font-size:10px;font-weight:800;padding:2px 6px;display:none;}}
+.sig-card.selected .sel-badge{{display:block;}}
+.sig-card .rm{{position:absolute;top:-7px;left:-7px;background:#dc2626;color:#fff;
+  border:none;border-radius:99px;width:18px;height:18px;font-size:11px;cursor:pointer;
+  display:none;align-items:center;justify-content:center;line-height:1;}}
+.sig-card:hover .rm{{display:flex;}}
+.sig-card .name{{font-size:10px;color:#7a9dbf;margin-top:5px;text-align:center;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px;}}
+
+/* drag overlay — always in DOM so pointer-events flip is instant (no reflow lag) */
+.drag-overlay{{position:fixed;inset:0;z-index:200;pointer-events:none;opacity:0;
+  background:rgba(26,86,219,.22);border:3px dashed #4a9eff;
+  display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;
+  transition:opacity .1s;}}
+.drag-overlay.active{{pointer-events:all;opacity:1;}}
+.drag-overlay-icon{{font-size:48px;}}
+.drag-overlay-lbl{{font-size:17px;font-weight:700;color:#fff;}}
+
+/* error bar */
+.err-bar{{background:#fef2f2;color:#991b1b;padding:6px 18px;font-size:12px;font-weight:600;
+  display:none;border-bottom:1px solid #fca5a5;flex-shrink:0;}}
+
+/* pdf */
+.doc-frame{{flex:1;border:none;display:block;background:#fff;width:100%;}}
+
+/* success overlay */
+.success{{display:none;position:fixed;inset:0;background:rgba(12,35,68,.95);
+  align-items:center;justify-content:center;z-index:50;}}
+.s-card{{background:#fff;border-radius:14px;padding:44px 40px;text-align:center;
+  max-width:400px;width:90%;}}
+.s-icon{{font-size:48px;margin-bottom:14px;}}
+.s-title{{font-size:19px;font-weight:800;color:#15803d;margin-bottom:8px;}}
+.s-body{{font-size:13.5px;color:#374151;line-height:1.65;}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="t-brand">✈ JANE AEROSPACE</span>
+  <span class="t-div"></span>
+  <span class="t-label">{label} — {lead.business_name}</span>
+  <span class="t-chip">TERMS ACCEPTED BY LEAD</span>
+
+  <div class="sig-group">
+    <label class="btn-upload" title="Upload one or more signature images">
+      <input type="file" id="sig-file" accept=".png,.jpg,.jpeg,.svg" multiple onchange="onPick(this)">
+      ⬆ Upload Signatures
+      <span class="badge" id="badge">0</span>
+    </label>
+    <button class="btn-tray" id="btn-tray" onclick="toggleTray()" title="Show / hide uploaded signatures">▾</button>
+  </div>
+
+  <span class="t-grow"></span>
+
+  <button class="btn-send" id="btn-send" disabled onclick="submitSign()">✍ Sign &amp; Send to Lead</button>
+</div>
+
+<div class="sig-tray open" id="sig-tray">
+  <div class="tray-inner" id="tray-inner">
+    <span class="tray-empty" id="tray-empty">No signatures uploaded yet — click Upload Signatures above.</span>
+  </div>
+</div>
+
+<div class="err-bar" id="err-bar"></div>
+
+<div class="drag-overlay" id="drag-overlay">
+  <div class="drag-overlay-icon">🖊</div>
+  <div class="drag-overlay-lbl">Drop signature image here</div>
+</div>
+
+<iframe class="doc-frame" src="{base}/pdf/{oid}/{doc_type}/{token}#toolbar=1"></iframe>
+
+<div class="success" id="success">
+  <div class="s-card">
+    <div class="s-icon">✅</div>
+    <div class="s-title">Document Sent to Lead</div>
+    <div class="s-body">
+      The document has been countersigned and emailed to<br>
+      <strong id="s-email"></strong><br><br>
+      The lead will receive it shortly for their counter-signature.
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE={_json.dumps(base)},OID={_json.dumps(oid)},DT={_json.dumps(doc_type)},TOK={_json.dumps(token)};
+const SIGNER={signer_json},LEAD_EMAIL={lead_email};
+let _sigs=[], _sel=-1;
+
+function showErr(m){{const e=document.getElementById('err-bar');e.textContent=m;e.style.display=m?'':'none';}}
+
+function toggleTray(){{
+  const t=document.getElementById('sig-tray');
+  const b=document.getElementById('btn-tray');
+  t.classList.toggle('open');
+  b.textContent=t.classList.contains('open')?'▴':'▾';
+}}
+
+function onPick(inp){{
+  if(!inp.files||!inp.files.length)return;
+  Array.from(inp.files).forEach(f=>loadFile(f));
+  inp.value='';
+}}
+
+function loadFile(f){{
+  if(!f.type.match(/^image\//)){{showErr('Please select PNG, JPG, or SVG images.');return;}}
+  if(f.size>5*1024*1024){{showErr(f.name+' is too large — max 5 MB.');return;}}
+  showErr('');
+  const r=new FileReader();
+  r.onload=e=>{{
+    const name=f.name.replace(/\.[^.]+$/,'');
+    _sigs.push({{b64:e.target.result,name}});
+    if(_sel<0)_sel=0;
+    renderTray();
+    updateSendBtn();
+    // keep tray open when images loaded
+    const t=document.getElementById('sig-tray');
+    if(!t.classList.contains('open')){{t.classList.add('open');document.getElementById('btn-tray').textContent='▴';}}
+  }};
+  r.readAsDataURL(f);
+}}
+
+function renderTray(){{
+  const inner=document.getElementById('tray-inner');
+  const empty=document.getElementById('tray-empty');
+  const badge=document.getElementById('badge');
+  badge.textContent=_sigs.length;
+  badge.style.display=_sigs.length?'':'none';
+  empty.style.display=_sigs.length?'none':'';
+  // remove old cards
+  inner.querySelectorAll('.sig-card').forEach(c=>c.remove());
+  _sigs.forEach((s,i)=>{{
+    const card=document.createElement('div');
+    card.className='sig-card'+(i===_sel?' selected':'');
+    card.innerHTML=`<button class="rm" onclick="removeSig(${{i}});event.stopPropagation()">✕</button>
+      <span class="sel-badge">✓ Selected</span>
+      <img src="${{s.b64}}" alt="${{s.name}}">
+      <div class="name">${{s.name}}</div>`;
+    card.onclick=()=>selectSig(i);
+    inner.appendChild(card);
+  }});
+}}
+
+function selectSig(i){{
+  _sel=i;
+  renderTray();
+  updateSendBtn();
+  showErr('');
+}}
+
+function removeSig(i){{
+  _sigs.splice(i,1);
+  if(_sel>=_sigs.length)_sel=_sigs.length-1;
+  renderTray();
+  updateSendBtn();
+}}
+
+function updateSendBtn(){{
+  document.getElementById('btn-send').disabled=(_sel<0||_sigs.length===0);
+}}
+
+// Drag-drop: overlay always in DOM (opacity:0 → opacity:1) so pointer-events flip is instant
+const _overlay=document.getElementById('drag-overlay');
+const _iframe=document.querySelector('.doc-frame');
+function _dragStart(){{_iframe.style.pointerEvents='none';_overlay.classList.add('active');}}
+function _dragEnd(){{_overlay.classList.remove('active');_iframe.style.pointerEvents='';}}
+window.addEventListener('dragenter',e=>{{
+  if(e.dataTransfer&&Array.from(e.dataTransfer.types||[]).includes('Files'))_dragStart();
+}});
+window.addEventListener('dragleave',e=>{{
+  if(!e.relatedTarget||e.relatedTarget===document.documentElement)_dragEnd();
+}});
+window.addEventListener('dragover',e=>e.preventDefault());
+_overlay.addEventListener('dragover',e=>e.preventDefault());
+_overlay.addEventListener('drop',e=>{{
+  e.preventDefault();
+  _dragEnd();
+  Array.from(e.dataTransfer.files||[]).forEach(f=>loadFile(f));
+}});
+
+async function submitSign(){{
+  if(_sel<0||!_sigs[_sel]){{showErr('Please select a signature first.');return;}}
+  showErr('');
+  const btn=document.getElementById('btn-send');
+  btn.disabled=true; btn.textContent='Signing…';
+  try{{
+    const r=await fetch(BASE+'/internal-sign/'+OID+'/'+DT+'/'+TOK,{{
+      method:'POST',headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{signed_name:SIGNER,designation:'Authorised Signatory',sig_image:_sigs[_sel].b64}})
+    }});
+    const d=await r.json().catch(()=>({{}}));
+    if(!r.ok){{showErr(d.detail||'Signing failed — please try again.');btn.disabled=false;btn.textContent='✍ Sign & Send to Lead';return;}}
+    // Reload iframe to show signed PDF with stamped signature
+    document.querySelector('.doc-frame').src=BASE+'/signed/'+OID+'/'+DT+'/'+TOK+'#toolbar=1';
+    document.getElementById('s-email').textContent=LEAD_EMAIL;
+    document.getElementById('success').style.display='flex';
+  }}catch(e){{
+    showErr('Network error — please check your connection and try again.');
+    btn.disabled=false;btn.textContent='✍ Sign & Send to Lead';
+  }}
+}}
+</script>
+</body>
+</html>"""
+
+
 # Lead: signing page
 # ---------------------------------------------------------------------------
 
@@ -3092,7 +3278,7 @@ def _review_page_html(onboarding_id: str, doc_type: str, token: str, label: str,
   <div class="card">
     <div style="font-size:15px;font-weight:700;color:#1a3a6b;margin-bottom:10px;">&#x2708; Jane Aerospace</div>
     <h1>{label} — Review &amp; Response</h1>
-    <p class="sub">Sent by <strong>Jane Aerospace Private Limited</strong> to
+    <p class="sub">Sent by <strong>{settings.COMPANY_LEGAL_NAME}</strong> to
       <strong>{_html_lib.escape(lead.business_name)}</strong> &mdash; please read the document and choose how to respond below.</p>
     {updated_note}
     {changes_note}
@@ -4149,10 +4335,10 @@ async def document_comment_action(onboarding_id: str, doc_type: str, token: str,
 
     now = _now_ist()
     if is_p1:
-        actor_name = settings.ORGANIZER_NAME or "Jane Aerospace"
+        actor_name = settings.ORGANIZER_NAME or settings.COMPANY_LEGAL_NAME
         actor_party = "p1"
     else:
-        actor_name = lead.business_name or lead.full_name or lead.email
+        actor_name = lead.business_name or lead.contact_name or lead.email
         actor_party = "p2"
 
     thread_entry = {
@@ -4245,7 +4431,7 @@ async def document_internal_sign(onboarding_id: str, doc_type: str, token: str,
         "sig_font": body.sig_font if body.sig_font in ("standard", "dancing", "greatvibes", "pacifico") else "standard",
         "sig_image": _clean_sig_image(body.sig_image),
         "email": "",
-        "company_name": "Jane Aerospace Private Limited",
+        "company_name": settings.COMPANY_LEGAL_NAME,
         "signed_at": _fmt(now),
         "ip": (request.client.host if request.client else "") or "",
     }
@@ -4662,7 +4848,7 @@ async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: 
       <div class="parties">
         <div class="party">
           <div class="role">Disclosing Party</div>
-          <div class="pname">Jane Aerospace Private Limited</div>
+          <div class="pname">{settings.COMPANY_LEGAL_NAME}</div>
         </div>
         <span class="vs">⇄</span>
         <div class="party">
@@ -4848,9 +5034,10 @@ async def document_sign(onboarding_id: str, doc_type: str, token: str,
     # Build the signed PDF once for the team notification attachment
     signed_pdf: bytes | None = None
     try:
-        from app.services.pdf_documents import append_signature_page
-        signed_pdf = append_signature_page(_render_pdf(rec, doc_type, data), doc_type,
-                                           sig=sig, internal_sig=data.get("internal_signature"))
+        from app.services.pdf_documents import stamp_signatures_on_document
+        _isig = data.get("internal_signature")
+        signed_pdf = stamp_signatures_on_document(_render_pdf(rec, doc_type, data),
+                                                  internal_sig=_isig, sig=sig)
     except Exception as exc:
         logger.warning("signed_pdf_build_failed", onboarding_id=onboarding_id, error=str(exc))
 
