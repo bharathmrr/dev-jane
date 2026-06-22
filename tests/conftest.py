@@ -8,3 +8,4 @@ os.environ.setdefault(
 )
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("LLM_PROVIDER", "stub")
+os.environ["DEBUG"] = "false"

@@ -306,6 +306,57 @@ async def document_preview_page(onboarding_id: str, doc_type: str, token: str,
                     headers={"Cache-Control": "no-store"})
 
 
+# Cache for signed-page rendering — one render per doc, reused for all page PNGs
+_SIGNED_CACHE: dict[str, bytes] = {}
+
+
+async def _get_signed_pdf(db: AsyncSession, onboarding_id: str, doc_type: str) -> bytes:
+    """Render the signed PDF (with overlays) once and cache it."""
+    key = f"{onboarding_id}:{doc_type}"
+    if key in _SIGNED_CACHE:
+        return _SIGNED_CACHE[key]
+    rec, lead = await _load(db, onboarding_id)
+    data = _get_doc_data(rec, doc_type)
+    from app.services.pdf_documents import stamp_overlays
+    pdf = _render_pdf(rec, doc_type, data)
+    if data.get("sig_placement"):
+        pdf = stamp_overlays(pdf, data["sig_placement"])
+    _SIGNED_CACHE[key] = pdf
+    # Keep cache small — evict oldest if over 6 entries
+    while len(_SIGNED_CACHE) > 6:
+        _SIGNED_CACHE.pop(next(iter(_SIGNED_CACHE)))
+    return pdf
+
+
+@router.get("/signed-info/{onboarding_id}/{doc_type}/{token}", include_in_schema=False)
+async def document_signed_info(onboarding_id: str, doc_type: str, token: str, db: AsyncSession = Depends(get_db)):
+    _check_doc_type(doc_type)
+    _check_token(onboarding_id, doc_type, token, "sign", "edit")
+    import fitz
+    pdf = await _get_signed_pdf(db, onboarding_id, doc_type)
+    doc = fitz.open(stream=pdf, filetype="pdf")
+    pages = doc.page_count
+    doc.close()
+    return {"pages": pages}
+
+
+@router.get("/signed-page/{onboarding_id}/{doc_type}/{token}", include_in_schema=False)
+async def document_signed_page(onboarding_id: str, doc_type: str, token: str,
+                               p: int = 0, db: AsyncSession = Depends(get_db)):
+    _check_doc_type(doc_type)
+    _check_token(onboarding_id, doc_type, token, "sign", "edit")
+    import fitz
+    pdf = await _get_signed_pdf(db, onboarding_id, doc_type)
+    doc = fitz.open(stream=pdf, filetype="pdf")
+    if not 0 <= p < doc.page_count:
+        doc.close()
+        raise HTTPException(404, "Page out of range")
+    png = doc[p].get_pixmap(dpi=110).tobytes("png")
+    doc.close()
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=60"})
+
+
 @router.get("/signed/{onboarding_id}/{doc_type}/{token}", include_in_schema=False)
 async def document_signed_pdf(onboarding_id: str, doc_type: str, token: str, db: AsyncSession = Depends(get_db)):
     _check_doc_type(doc_type)
@@ -316,9 +367,12 @@ async def document_signed_pdf(onboarding_id: str, doc_type: str, token: str, db:
     internal_sig = data.get("internal_signature")
     if not sig and not internal_sig:
         raise HTTPException(404, "Document has not been signed yet")
-    from app.services.pdf_documents import stamp_signatures_on_document
-    pdf = stamp_signatures_on_document(_render_pdf(rec, doc_type, data),
-                                       internal_sig=internal_sig, sig=sig)
+    from app.services.pdf_documents import stamp_overlays
+    pdf = _render_pdf(rec, doc_type, data)
+    if data.get("sig_placement"):
+        pdf = stamp_overlays(pdf, data["sig_placement"])
+    if data.get("signatures_overlay"):
+        pdf = stamp_overlays(pdf, data["signatures_overlay"])
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{doc_type}_signed_jane_aerospace.pdf"'})
 
@@ -2858,12 +2912,13 @@ async def document_send(onboarding_id: str, doc_type: str, token: str,
 # Internal signing page (team countersigns before sending to lead)
 # ---------------------------------------------------------------------------
 
-def _build_internal_sign_page(oid: str, doc_type: str, token: str,
+def _build_internal_sign_page(oid: str, doc_type: str, token: str,  # noqa: PLR0914
                                label: str, lead, base: str) -> str:
     from app.core.config import settings as _s
     import json as _json
-    signer_json = _json.dumps(_s.ORGANIZER_NAME or "Authorised Signatory")
-    lead_email  = _json.dumps(lead.email or "")
+    signer_json  = _json.dumps(_s.ORGANIZER_NAME or "Authorised Signatory")
+    lead_email   = _json.dumps(lead.email or "")
+    lead_label   = _json.dumps(f"{label} — {lead.business_name}")
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2874,6 +2929,7 @@ def _build_internal_sign_page(oid: str, doc_type: str, token: str,
 *{{box-sizing:border-box;margin:0;padding:0;}}
 html,body{{height:100vh;overflow:hidden;font-family:'Segoe UI',Arial,sans-serif;background:#0a1e38;
   display:flex;flex-direction:column;}}
+
 
 /* topbar */
 .topbar{{height:56px;background:#0c2344;display:flex;align-items:center;gap:12px;padding:0 18px;
@@ -2910,11 +2966,11 @@ html,body{{height:100vh;overflow:hidden;font-family:'Segoe UI',Arial,sans-serif;
 
 /* signature tray (slides down) */
 .sig-tray{{background:#0e2845;border-bottom:1px solid rgba(255,255,255,.10);
-  flex-shrink:0;overflow:hidden;max-height:0;transition:max-height .25s ease;}}
-.sig-tray.open{{max-height:200px;}}
+  flex-shrink:0;overflow:hidden;max-height:0;transition:max-height .3s ease;}}
+.sig-tray.open{{max-height:220px;}}
 .tray-inner{{padding:14px 18px;display:flex;gap:12px;align-items:flex-start;
-  flex-wrap:wrap;min-height:60px;}}
-.tray-empty{{color:#5a7a99;font-size:12.5px;padding:10px 0;}}
+  flex-wrap:wrap;min-height:60px;overflow-y:auto;}}
+.tray-empty{{color:#7a9dbf;font-size:12px;line-height:1.7;padding:4px 0;}}
 
 /* each signature card in tray */
 .sig-card{{position:relative;border:2px solid #2a4a6a;border-radius:8px;background:#0a1e38;
@@ -2946,8 +3002,26 @@ html,body{{height:100vh;overflow:hidden;font-family:'Segoe UI',Arial,sans-serif;
 .err-bar{{background:#fef2f2;color:#991b1b;padding:6px 18px;font-size:12px;font-weight:600;
   display:none;border-bottom:1px solid #fca5a5;flex-shrink:0;}}
 
-/* pdf */
-.doc-frame{{flex:1;border:none;display:block;background:#fff;width:100%;}}
+/* page image viewer */
+#pv-pages{{flex:1;overflow-y:auto;background:#1a2e4a;padding:18px 0;}}
+.pg-wrap{{position:relative;width:88%;max-width:720px;margin:0 auto 16px;}}
+.pg-wrap img.pg{{width:100%;display:block;box-shadow:0 2px 16px rgba(0,0,0,.55);border-radius:2px;
+  user-select:none;}}
+.pg-wrap.drop-active{{outline:3px dashed #4a9eff;outline-offset:2px;}}
+/* signature overlay on page */
+.sig-ov{{position:absolute;cursor:move;touch-action:none;z-index:10;}}
+.sig-ov img{{display:block;width:100%;height:auto;pointer-events:none;user-select:none;}}
+.sig-ov-del{{position:absolute;top:-10px;right:-10px;width:22px;height:22px;border-radius:50%;
+  border:2px solid #fff;background:#dc2626;color:#fff;font-size:12px;cursor:pointer;
+  display:none;align-items:center;justify-content:center;padding:0;line-height:1;}}
+.sig-ov-grip{{position:absolute;right:-6px;bottom:-6px;width:14px;height:14px;border-radius:3px;
+  background:#1a56db;border:2px solid #fff;cursor:nwse-resize;touch-action:none;display:none;}}
+.sig-ov:hover .sig-ov-del,.sig-ov:hover .sig-ov-grip{{display:flex;}}
+.sig-ov-grip{{display:none!important;}}
+.sig-ov:hover .sig-ov-grip{{display:block!important;}}
+/* hint */
+.hint{{background:#0c2d56;color:#7ab0e0;font-size:12px;padding:6px 18px;flex-shrink:0;
+  border-bottom:1px solid rgba(255,255,255,.07);text-align:center;}}
 
 /* success overlay */
 .success{{display:none;position:fixed;inset:0;background:rgba(12,35,68,.95);
@@ -2968,8 +3042,8 @@ html,body{{height:100vh;overflow:hidden;font-family:'Segoe UI',Arial,sans-serif;
   <span class="t-chip">TERMS ACCEPTED BY LEAD</span>
 
   <div class="sig-group">
-    <label class="btn-upload" title="Upload one or more signature images">
-      <input type="file" id="sig-file" accept=".png,.jpg,.jpeg,.svg" multiple onchange="onPick(this)">
+    <label class="btn-upload" title="Upload one or more PNG/JPG signature images">
+      <input type="file" id="sig-file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" multiple onchange="onPick(this)">
       ⬆ Upload Signatures
       <span class="badge" id="badge">0</span>
     </label>
@@ -2983,37 +3057,30 @@ html,body{{height:100vh;overflow:hidden;font-family:'Segoe UI',Arial,sans-serif;
 
 <div class="sig-tray open" id="sig-tray">
   <div class="tray-inner" id="tray-inner">
-    <span class="tray-empty" id="tray-empty">No signatures uploaded yet — click Upload Signatures above.</span>
+    <span class="tray-empty" id="tray-empty">No signatures uploaded yet — click ⬆ Upload Signatures above.</span>
   </div>
 </div>
 
 <div class="err-bar" id="err-bar"></div>
+<div class="hint" id="hint">⬆ Upload your signature above, then <strong>drag a card from the tray onto any spot in the document</strong> to place it</div>
 
-<div class="drag-overlay" id="drag-overlay">
-  <div class="drag-overlay-icon">🖊</div>
-  <div class="drag-overlay-lbl">Drop signature image here</div>
-</div>
-
-<iframe class="doc-frame" src="{base}/pdf/{oid}/{doc_type}/{token}#toolbar=1"></iframe>
+<div id="pv-pages"></div>
 
 <div class="success" id="success">
   <div class="s-card">
     <div class="s-icon">✅</div>
     <div class="s-title">Document Sent to Lead</div>
-    <div class="s-body">
-      The document has been countersigned and emailed to<br>
-      <strong id="s-email"></strong><br><br>
-      The lead will receive it shortly for their counter-signature.
-    </div>
+    <div class="s-body">Countersigned and emailed to<br><strong id="s-email"></strong><br><br>The lead will receive it shortly.</div>
   </div>
 </div>
 
 <script>
 const BASE={_json.dumps(base)},OID={_json.dumps(oid)},DT={_json.dumps(doc_type)},TOK={_json.dumps(token)};
 const SIGNER={signer_json},LEAD_EMAIL={lead_email};
-let _sigs=[], _sel=-1;
+let _sigs=[], _sel=-1, _dragSig=null;
 
-function showErr(m){{const e=document.getElementById('err-bar');e.textContent=m;e.style.display=m?'':'none';}}
+function showErr(m){{const e=document.getElementById('err-bar');e.textContent=m;e.style.display=m?'block':'none';}}
+function showHint(m){{const h=document.getElementById('hint');if(h)h.style.display=m===false?'none':'';if(m&&h)h.innerHTML=m;}}
 
 function toggleTray(){{
   const t=document.getElementById('sig-tray');
@@ -3029,12 +3096,12 @@ function onPick(inp){{
 }}
 
 function loadFile(f){{
-  if(!f.type.match(/^image\//)){{showErr('Please select PNG, JPG, or SVG images.');return;}}
+  if(!f.type.match(/^image\\//)){{showErr('Please select PNG, JPG, or SVG images.');return;}}
   if(f.size>5*1024*1024){{showErr(f.name+' is too large — max 5 MB.');return;}}
   showErr('');
   const r=new FileReader();
   r.onload=e=>{{
-    const name=f.name.replace(/\.[^.]+$/,'');
+    const name=f.name.replace(/\\.[^.]+$/,'');
     _sigs.push({{b64:e.target.result,name}});
     if(_sel<0)_sel=0;
     renderTray();
@@ -3044,27 +3111,6 @@ function loadFile(f){{
     if(!t.classList.contains('open')){{t.classList.add('open');document.getElementById('btn-tray').textContent='▴';}}
   }};
   r.readAsDataURL(f);
-}}
-
-function renderTray(){{
-  const inner=document.getElementById('tray-inner');
-  const empty=document.getElementById('tray-empty');
-  const badge=document.getElementById('badge');
-  badge.textContent=_sigs.length;
-  badge.style.display=_sigs.length?'':'none';
-  empty.style.display=_sigs.length?'none':'';
-  // remove old cards
-  inner.querySelectorAll('.sig-card').forEach(c=>c.remove());
-  _sigs.forEach((s,i)=>{{
-    const card=document.createElement('div');
-    card.className='sig-card'+(i===_sel?' selected':'');
-    card.innerHTML=`<button class="rm" onclick="removeSig(${{i}});event.stopPropagation()">✕</button>
-      <span class="sel-badge">✓ Selected</span>
-      <img src="${{s.b64}}" alt="${{s.name}}">
-      <div class="name">${{s.name}}</div>`;
-    card.onclick=()=>selectSig(i);
-    inner.appendChild(card);
-  }});
 }}
 
 function selectSig(i){{
@@ -3082,44 +3128,286 @@ function removeSig(i){{
 }}
 
 function updateSendBtn(){{
-  document.getElementById('btn-send').disabled=(_sel<0||_sigs.length===0);
+  const placed=document.querySelectorAll('#pv-pages .sig-ov').length>0;
+  const selected=_sel>=0&&_sigs.length>0;
+  document.getElementById('btn-send').disabled=!(placed||selected);
 }}
 
-// Drag-drop: overlay always in DOM (opacity:0 → opacity:1) so pointer-events flip is instant
-const _overlay=document.getElementById('drag-overlay');
-const _iframe=document.querySelector('.doc-frame');
-function _dragStart(){{_iframe.style.pointerEvents='none';_overlay.classList.add('active');}}
-function _dragEnd(){{_overlay.classList.remove('active');_iframe.style.pointerEvents='';}}
-window.addEventListener('dragenter',e=>{{
-  if(e.dataTransfer&&Array.from(e.dataTransfer.types||[]).includes('Files'))_dragStart();
-}});
-window.addEventListener('dragleave',e=>{{
-  if(!e.relatedTarget||e.relatedTarget===document.documentElement)_dragEnd();
-}});
-window.addEventListener('dragover',e=>e.preventDefault());
-_overlay.addEventListener('dragover',e=>e.preventDefault());
-_overlay.addEventListener('drop',e=>{{
+const SIG_RE=/^data:image\\/(?:png|jpeg);base64,[A-Za-z0-9+/=]{{40,800000}}$/;
+const MAX_SIG_BYTES=5*1024*1024;
+const MAX_SIG_B64=780000;
+const MAX_SIG_W=720;
+
+function _safeName(f){{
+  return ((f&&f.name)||'Signature').replace(/\\.[^.]+$/,'').slice(0,48);
+}}
+
+function _b64Len(url){{
+  const i=(url||'').indexOf(',');
+  return i>=0?url.length-i-1:0;
+}}
+
+function _isAllowedImage(f){{
+  const t=((f&&f.type)||'').toLowerCase();
+  const n=((f&&f.name)||'').toLowerCase();
+  return /^image\\/(png|jpeg)$/.test(t)||/\\.(png|jpe?g)$/.test(n);
+}}
+
+function _openTray(){{
+  const t=document.getElementById('sig-tray');
+  const b=document.getElementById('btn-tray');
+  if(!t.classList.contains('open')){{t.classList.add('open');b.textContent='^';}}
+}}
+
+async function _fileToPngDataUrl(f){{
+  if(!_isAllowedImage(f))throw new Error('Please upload a PNG or JPG signature image.');
+  if(f.size>MAX_SIG_BYTES)throw new Error((f.name||'Signature')+' is too large. Maximum size is 5 MB.');
+  const obj=URL.createObjectURL(f);
+  try{{
+    const img=await new Promise((resolve,reject)=>{{
+      const el=new Image();
+      el.onload=()=>resolve(el);
+      el.onerror=()=>reject(new Error('Could not read that image. Try a different PNG or JPG.'));
+      el.src=obj;
+    }});
+    let scale=Math.min(1,MAX_SIG_W/Math.max(1,img.naturalWidth||img.width));
+    for(let i=0;i<7;i++){{
+      const c=document.createElement('canvas');
+      c.width=Math.max(1,Math.round((img.naturalWidth||img.width)*scale));
+      c.height=Math.max(1,Math.round((img.naturalHeight||img.height)*scale));
+      const ctx=c.getContext('2d');
+      ctx.clearRect(0,0,c.width,c.height);
+      ctx.drawImage(img,0,0,c.width,c.height);
+      const url=c.toDataURL('image/png');
+      if(SIG_RE.test(url)&&_b64Len(url)<=MAX_SIG_B64)return url;
+      scale*=0.82;
+    }}
+    throw new Error('Signature image is too large after processing. Try a tighter crop.');
+  }}finally{{
+    URL.revokeObjectURL(obj);
+  }}
+}}
+
+async function onPick(inp){{
+  if(!inp.files||!inp.files.length)return;
+  await loadFiles(Array.from(inp.files));
+  inp.value='';
+}}
+
+async function loadFiles(files){{
+  for(const f of files)await loadFile(f);
+}}
+
+async function loadFile(f){{
+  showErr('');
+  try{{
+    const b64=await _fileToPngDataUrl(f);
+    _sigs.push({{b64,name:_safeName(f)}});
+    _sel=_sigs.length-1;
+    renderTray();
+    updateSendBtn();
+    _openTray();
+  }}catch(err){{
+    showErr(err.message||'Could not load that signature image.');
+  }}
+}}
+
+function renderTray(){{
+  const inner=document.getElementById('tray-inner');
+  const empty=document.getElementById('tray-empty');
+  const badge=document.getElementById('badge');
+  badge.textContent=_sigs.length;
+  badge.style.display=_sigs.length?'':'none';
+  empty.style.display=_sigs.length?'none':'';
+  inner.querySelectorAll('.sig-card').forEach(c=>c.remove());
+  _sigs.forEach((s,i)=>{{
+    const card=document.createElement('div');
+    card.className='sig-card'+(i===_sel?' selected':'');
+    card.tabIndex=0;
+    card.setAttribute('role','button');
+    card.setAttribute('aria-label','Select '+s.name+' signature');
+
+    const rm=document.createElement('button');
+    rm.className='rm';
+    rm.type='button';
+    rm.textContent='x';
+    rm.onclick=(ev)=>{{ev.stopPropagation();removeSig(i);}};
+
+    const sel=document.createElement('span');
+    sel.className='sel-badge';
+    sel.textContent='Selected';
+
+    const img=document.createElement('img');
+    img.src=s.b64;
+    img.alt=s.name+' signature';
+
+    const nm=document.createElement('div');
+    nm.className='name';
+    nm.textContent=s.name;
+
+    card.append(rm,sel,img,nm);
+    _makeDraggable(card,s);
+    card.onclick=()=>selectSig(i);
+    card.onkeydown=(ev)=>{{if(ev.key==='Enter'||ev.key===' '){{ev.preventDefault();selectSig(i);}}}};
+    inner.appendChild(card);
+  }});
+}}
+
+// ── File upload drag-drop (from OS) ──────────────────────────────────────────
+function _hasFiles(e){{return !!(e.dataTransfer&&Array.from(e.dataTransfer.types||[]).includes('Files'));}}
+window.addEventListener('dragover',e=>{{if(_hasFiles(e)&&!_dragSig)e.preventDefault();}});
+window.addEventListener('drop',e=>{{
+  if(!_hasFiles(e)||_dragSig)return;
   e.preventDefault();
-  _dragEnd();
   Array.from(e.dataTransfer.files||[]).forEach(f=>loadFile(f));
 }});
 
+// ── Page image viewer ─────────────────────────────────────────────────────────
+(async function initPages(){{
+  try{{
+    const info=await fetch(BASE+'/preview-info/'+OID+'/'+DT+'/'+TOK).then(r=>r.json());
+    const pv=document.getElementById('pv-pages');
+    const wraps=[];
+    for(let p=0;p<info.pages;p++){{
+      const wrap=document.createElement('div');
+      wrap.className='pg-wrap';
+      wrap.dataset.page=p;
+      const img=document.createElement('img');
+      img.className='pg';
+      img.draggable=false;
+      img.dataset.src=BASE+'/preview-page/'+OID+'/'+DT+'/'+TOK+'?p='+p;
+      wrap.appendChild(img);
+      wrap.addEventListener('dragover',e=>{{
+        if(_dragSig){{e.preventDefault();wrap.classList.add('drop-active');}}
+      }});
+      wrap.addEventListener('dragleave',()=>wrap.classList.remove('drop-active'));
+      wrap.addEventListener('drop',e=>{{
+        if(!_dragSig)return;
+        e.preventDefault();
+        wrap.classList.remove('drop-active');
+        const r=wrap.getBoundingClientRect();
+        const xf=(e.clientX-r.left)/r.width;
+        const yf=(e.clientY-r.top)/r.height;
+        placeSig(wrap,p,_dragSig.b64,xf,yf);
+        _dragSig=null;
+      }});
+      pv.appendChild(wrap);
+      wraps.push(img);
+    }}
+    // Load pages 4 at a time to avoid overwhelming the server
+    for(let i=0;i<wraps.length;i+=4){{
+      const batch=wraps.slice(i,i+4);
+      await Promise.all(batch.map(img=>new Promise(res=>{{
+        img.onload=res; img.onerror=res;
+        img.src=img.dataset.src;
+      }})));
+    }}
+  }}catch(ex){{showErr('Could not load document pages — please refresh.');}}
+}})();
+
+// ── Signature placement overlay ───────────────────────────────────────────────
+function placeSig(wrap,page,b64,xf,yf){{
+  // One overlay per page — replace if re-dropped
+  wrap.querySelectorAll('.sig-ov').forEach(el=>el.remove());
+  const W=22; // % width of page
+  const ov=document.createElement('div');
+  ov.className='sig-ov';
+  ov.dataset.page=page;
+  ov.dataset.b64=b64;
+  ov.style.left=Math.max(0,Math.min(100-W,xf*100-W/2))+'%';
+  ov.style.top=Math.max(0,Math.min(90,yf*100-3))+'%';
+  ov.style.width=W+'%';
+  const im=document.createElement('img');im.src=b64;im.draggable=false;ov.appendChild(im);
+  const del=document.createElement('button');
+  del.className='sig-ov-del';del.type='button';del.innerHTML='&#x2715;';del.title='Remove';
+  del.onclick=e=>{{e.stopPropagation();ov.remove();updateSendBtn();}};
+  ov.appendChild(del);
+  const grip=document.createElement('div');grip.className='sig-ov-grip';ov.appendChild(grip);
+  _bindMove(ov,wrap);
+  _bindResize(grip,ov,wrap);
+  wrap.appendChild(ov);
+  showHint(false);
+  updateSendBtn();
+}}
+
+function _bindMove(el,container){{
+  let sx,sy,sl,st;
+  el.addEventListener('pointerdown',e=>{{
+    if(e.target.classList.contains('sig-ov-del')||e.target.classList.contains('sig-ov-grip'))return;
+    e.preventDefault();try{{el.setPointerCapture(e.pointerId);}}catch(_){{}}
+    const cr=container.getBoundingClientRect();
+    const er=el.getBoundingClientRect();
+    sx=e.clientX;sy=e.clientY;
+    sl=(er.left-cr.left)/cr.width*100;
+    st=(er.top-cr.top)/cr.height*100;
+  }});
+  el.addEventListener('pointermove',e=>{{
+    if(!el.hasPointerCapture(e.pointerId))return;
+    const cr=container.getBoundingClientRect();
+    const dx=(e.clientX-sx)/cr.width*100;
+    const dy=(e.clientY-sy)/cr.height*100;
+    const w=parseFloat(el.style.width)||22;
+    el.style.left=Math.max(0,Math.min(100-w,sl+dx))+'%';
+    el.style.top=Math.max(0,Math.min(95,st+dy))+'%';
+  }});
+}}
+
+function _bindResize(grip,el,container){{
+  let sx,sw;
+  grip.addEventListener('pointerdown',e=>{{
+    e.preventDefault();e.stopPropagation();
+    try{{grip.setPointerCapture(e.pointerId);}}catch(_){{}}
+    sx=e.clientX;sw=parseFloat(el.style.width)||22;
+  }});
+  grip.addEventListener('pointermove',e=>{{
+    if(!grip.hasPointerCapture(e.pointerId))return;
+    const cr=container.getBoundingClientRect();
+    el.style.width=Math.max(8,Math.min(80,sw+(e.clientX-sx)/cr.width*100))+'%';
+  }});
+}}
+
+function getPlacement(){{
+  const out=[];
+  document.querySelectorAll('#pv-pages .pg-wrap').forEach(wrap=>{{
+    const p=parseInt(wrap.dataset.page);
+    wrap.querySelectorAll('.sig-ov').forEach(el=>{{
+      const cr=wrap.getBoundingClientRect();
+      const er=el.getBoundingClientRect();
+      out.push({{page:p,x:(er.left-cr.left)/cr.width,y:(er.top-cr.top)/cr.height,
+                 w:er.width/cr.width,h:er.height/cr.height,image:el.dataset.b64}});
+    }});
+  }});
+  return out;
+}}
+
+// ── Tray card draggability ────────────────────────────────────────────────────
+function _makeDraggable(card,s){{
+  card.draggable=true;
+  card.addEventListener('dragstart',e=>{{
+    _dragSig=s;
+    e.dataTransfer.effectAllowed='copy';
+    e.dataTransfer.setData('text/plain','sig');
+  }});
+  card.addEventListener('dragend',()=>{{_dragSig=null;}});
+}}
+
 async function submitSign(){{
-  if(_sel<0||!_sigs[_sel]){{showErr('Please select a signature first.');return;}}
+  const placement=getPlacement();
+  const sigImg=placement.length>0?placement[0].image:(_sigs[_sel]?_sigs[_sel].b64:'');
+  if(!sigImg){{showErr('Upload a signature and drag it onto the document to place it.');return;}}
   showErr('');
   const btn=document.getElementById('btn-send');
-  btn.disabled=true; btn.textContent='Signing…';
+  btn.disabled=true;btn.textContent='Signing…';
   try{{
     const r=await fetch(BASE+'/internal-sign/'+OID+'/'+DT+'/'+TOK,{{
       method:'POST',headers:{{'Content-Type':'application/json'}},
-      body:JSON.stringify({{signed_name:SIGNER,designation:'Authorised Signatory',sig_image:_sigs[_sel].b64}})
+      body:JSON.stringify({{signed_name:SIGNER,designation:'Authorised Signatory',
+                           sig_image:sigImg,sig_placement:placement}})
     }});
     const d=await r.json().catch(()=>({{}}));
     if(!r.ok){{showErr(d.detail||'Signing failed — please try again.');btn.disabled=false;btn.textContent='✍ Sign & Send to Lead';return;}}
-    // Reload iframe to show signed PDF with stamped signature
-    document.querySelector('.doc-frame').src=BASE+'/signed/'+OID+'/'+DT+'/'+TOK+'#toolbar=1';
-    document.getElementById('s-email').textContent=LEAD_EMAIL;
-    document.getElementById('success').style.display='flex';
+    btn.textContent='✅ Sent!';
+    setTimeout(function(){{try{{window.close();}}catch(_){{}}}},1200);
   }}catch(e){{
     showErr('Network error — please check your connection and try again.');
     btn.disabled=false;btn.textContent='✍ Sign & Send to Lead';
@@ -3322,7 +3610,7 @@ async function doForward() {{
   var fwdName = document.getElementById('fwd-name').value.trim();
   var fwdEmail = document.getElementById('fwd-email').value.trim();
   if (!fwdName) {{ showErr("Please enter the reviewer's name."); return; }}
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fwdEmail)) {{
+  if (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(fwdEmail)) {{
     showErr("Please enter a valid email address."); return; }}
   var btn = document.getElementById('fwd-btn'); btn.disabled = true;
   try {{
@@ -4397,7 +4685,8 @@ class _InternalSignBody(BaseModel):
     signed_name: str = ""
     designation: str = ""
     sig_font: str = "standard"
-    sig_image: str = ""      # optional uploaded signature picture (data URL)
+    sig_image: str = ""
+    sig_placement: list = []   # [{page,x,y,w,h,image}] — placed on document
 
 
 @router.post("/internal-sign/{onboarding_id}/{doc_type}/{token}")
@@ -4423,18 +4712,23 @@ async def document_internal_sign(onboarding_id: str, doc_type: str, token: str,
                                  "unresolved. Both parties must accept all comments before signing begins. "
                                  "Open the document editor and accept or reject each comment.")
     rep_name = body.signed_name.strip() or settings.ORGANIZER_NAME
+    sig_image = _clean_sig_image(body.sig_image)
+    if not sig_image:
+        raise HTTPException(400, "Please upload a valid PNG or JPG signature image.")
 
     now = _now_ist()
     data["internal_signature"] = {
         "signed_name": rep_name[:200],
         "designation": body.designation.strip()[:200] or "Authorised Signatory",
         "sig_font": body.sig_font if body.sig_font in ("standard", "dancing", "greatvibes", "pacifico") else "standard",
-        "sig_image": _clean_sig_image(body.sig_image),
+        "sig_image": sig_image,
         "email": "",
         "company_name": settings.COMPANY_LEGAL_NAME,
         "signed_at": _fmt(now),
         "ip": (request.client.host if request.client else "") or "",
     }
+    if body.sig_placement:
+        data["sig_placement"] = [p for p in body.sig_placement if isinstance(p, dict)]
     data["stage"] = "awaiting_lead_sign"
     short = "NDA" if doc_type == "nda" else "Agreement"
     _apply_status(rec, doc_type, DocumentStatus.SENT_TO_LEAD,
@@ -4599,6 +4893,315 @@ window.SIGW = (function () {
 """
 
 
+def _build_lead_sign_page(oid: str, doc_type: str, token: str,
+                          label: str, lead) -> str:
+    import json as _json
+    import html as _hl
+    base = "/api/v1/documents"
+    signer = _hl.escape(lead.contact_name or lead.business_name or "Customer")
+    submit_url = f"{base}/sign/{oid}/{doc_type}/{token}"
+    info_url   = f"{base}/signed-info/{oid}/{doc_type}/{token}"
+    page_url   = f"{base}/signed-page/{oid}/{doc_type}/{token}"
+    base_js    = _json.dumps(base).replace("<", "\\u003c")
+    oid_js     = _json.dumps(oid).replace("<", "\\u003c")
+    dt_js      = _json.dumps(doc_type).replace("<", "\\u003c")
+    tok_js     = _json.dumps(token).replace("<", "\\u003c")
+    signer_js  = _json.dumps(signer).replace("<", "\\u003c")
+    submit_js  = _json.dumps(submit_url).replace("<", "\\u003c")
+    info_js    = _json.dumps(info_url).replace("<", "\\u003c")
+    page_js    = _json.dumps(page_url).replace("<", "\\u003c")
+
+    return f"""<!DOCTYPE html><html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign {label} — Jane Aerospace</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0;}}
+:root{{--navy:#15315f;--ink:#0f172a;--blue:#2563eb;--green:#16a34a;--line:#e6eaf0;--muted:#64748b;}}
+body{{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:#f0f4fa;color:var(--ink);min-height:100vh;-webkit-font-smoothing:antialiased;}}
+.topbar{{background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:space-between;
+  gap:12px;padding:0 20px;height:52px;position:sticky;top:0;z-index:200;box-shadow:0 2px 8px rgba(0,0,0,.2);}}
+.brand{{display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px;}}
+.brand span{{width:28px;height:28px;border-radius:6px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:14px;}}
+.secure{{font-size:11px;font-weight:700;color:#86efac;}}
+/* layout */
+.shell{{display:flex;height:calc(100vh - 52px);overflow:hidden;}}
+/* left: doc viewer */
+.doc-col{{flex:1;overflow-y:auto;background:#e5e9f2;padding:16px;display:flex;flex-direction:column;gap:12px;}}
+.pg-wrap{{width:100%;max-width:700px;margin:0 auto;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.25);
+  position:relative;aspect-ratio:595/842;}}
+.pg-wrap img.pg{{width:100%;display:block;}}
+/* signature overlays */
+.sig-ov{{position:absolute;cursor:move;touch-action:none;border:2px dashed #2563eb;border-radius:4px;
+  min-width:8%;background:rgba(255,255,255,.15);}}
+.sig-ov img{{width:100%;display:block;pointer-events:none;}}
+.sig-ov-del{{position:absolute;top:-10px;right:-10px;width:20px;height:20px;border-radius:50%;
+  background:#dc2626;color:#fff;border:none;cursor:pointer;font-size:11px;
+  display:flex;align-items:center;justify-content:center;z-index:10;}}
+.sig-ov-grip{{position:absolute;bottom:0;right:0;width:14px;height:14px;
+  background:#2563eb;cursor:se-resize;border-radius:2px 0 0 0;}}
+.pg-wrap.drop-active{{outline:3px solid #2563eb;}}
+/* right: tray */
+.tray-col{{width:280px;flex:none;background:#fff;border-left:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden;}}
+.tray-head{{padding:14px 16px;border-bottom:1px solid var(--line);background:#f8fafc;}}
+.tray-head h3{{font-size:13px;font-weight:800;color:var(--navy);margin-bottom:2px;}}
+.tray-head p{{font-size:11px;color:var(--muted);}}
+.tray-upload{{padding:12px 16px;border-bottom:1px solid var(--line);}}
+.upload-zone{{border:2px dashed #c7d4ee;border-radius:8px;background:#f8fafc;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:16px 10px;cursor:pointer;text-align:center;transition:all .15s;}}
+.upload-zone:hover,.upload-zone.drag{{border-color:var(--blue);background:#eff6ff;}}
+.upload-zone input{{display:none;}}
+.upload-zone .uz-icon{{font-size:22px;margin-bottom:4px;}}
+.upload-zone .uz-lbl{{font-size:12px;font-weight:700;color:var(--navy);}}
+.upload-zone .uz-hint{{font-size:10.5px;color:var(--muted);margin-top:2px;}}
+.tray-cards{{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;}}
+.tray-empty{{text-align:center;color:var(--muted);font-size:12px;padding:20px 10px;}}
+.sig-card{{border:2px solid var(--line);border-radius:8px;padding:8px;cursor:grab;position:relative;
+  background:#fff;transition:border-color .15s;}}
+.sig-card.selected{{border-color:var(--blue);background:#eff6ff;}}
+.sig-card img{{width:100%;max-height:60px;object-fit:contain;display:block;margin-bottom:4px;pointer-events:none;}}
+.sig-card .sname{{font-size:10px;color:var(--muted);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
+.sig-card .rm{{position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;
+  background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;cursor:pointer;font-size:10px;}}
+.sig-card .sel-badge{{display:none;position:absolute;top:4px;left:4px;background:var(--blue);color:#fff;
+  font-size:9px;font-weight:800;padding:1px 5px;border-radius:4px;}}
+.sig-card.selected .sel-badge{{display:block;}}
+/* bottom bar */
+.tray-foot{{padding:12px 16px;border-top:1px solid var(--line);background:#f8fafc;}}
+#err-msg{{display:none;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;
+  padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:10px;}}
+.btn-send{{width:100%;background:linear-gradient(135deg,var(--green),#15803d);color:#fff;border:none;
+  border-radius:8px;padding:13px;font-size:14px;font-weight:800;cursor:pointer;
+  box-shadow:0 4px 14px rgba(22,163,74,.3);transition:all .15s;}}
+.btn-send:disabled{{background:#9ca3af;box-shadow:none;cursor:not-allowed;}}
+.hint{{font-size:11px;color:var(--muted);text-align:center;margin-top:8px;}}
+@media(max-width:640px){{
+  .shell{{flex-direction:column;height:auto;overflow:visible;}}
+  .tray-col{{width:100%;border-left:none;border-top:1px solid var(--line);}}
+  .doc-col{{height:60vh;}}
+}}
+</style></head>
+<body>
+<div class="topbar">
+  <div class="brand"><span>✈</span> Jane Aerospace</div>
+  <span style="font-size:12px;font-weight:600;color:rgba(255,255,255,.6);">{label}</span>
+  <span class="secure">🔒 Secure Signing</span>
+</div>
+<div class="shell">
+  <!-- Document Viewer -->
+  <div class="doc-col" id="pv-pages"></div>
+
+  <!-- Signature Tray -->
+  <div class="tray-col">
+    <div class="tray-head">
+      <h3>Your Signature</h3>
+      <p>Upload &amp; drag onto the document</p>
+    </div>
+    <div class="tray-upload">
+      <div class="upload-zone" id="drop-zone" onclick="document.getElementById('sig-file').click()">
+        <div class="uz-icon">✍</div>
+        <div class="uz-lbl">Upload Signature</div>
+        <div class="uz-hint">PNG or JPG · Max 5 MB</div>
+        <input type="file" id="sig-file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" onchange="onPick(this)">
+      </div>
+    </div>
+    <div class="tray-cards" id="tray-inner">
+      <span class="tray-empty" id="tray-empty">No signatures uploaded yet — click above.</span>
+    </div>
+    <div class="tray-foot">
+      <div id="err-msg"></div>
+      <button class="btn-send" id="btn-send" onclick="submitSign()" disabled>✍ Sign &amp; Complete</button>
+      <p class="hint" id="hint-txt">Upload a signature and drag it onto the document</p>
+    </div>
+  </div>
+</div>
+<script>
+var BASE={base_js},OID={oid_js},DT={dt_js},TOK={tok_js};
+var SIGNER={signer_js},SUBMIT={submit_js};
+var INFO={info_js},PAGE_URL={page_js};
+var _sigs=[],_sel=-1,_dragSig=null;
+
+function showErr(m){{var e=document.getElementById('err-msg');e.textContent=m||'';e.style.display=m?'block':'none';}}
+function showHint(on){{document.getElementById('hint-txt').style.display=on?'':'none';}}
+function updateSendBtn(){{
+  var placed=document.querySelectorAll('#pv-pages .sig-ov').length>0;
+  document.getElementById('btn-send').disabled=!placed;
+  showHint(!placed);
+}}
+
+// ── Tray ────────────────────────────────────────────────────────────────────
+function renderTray(){{
+  var inner=document.getElementById('tray-inner');
+  var empty=document.getElementById('tray-empty');
+  empty.style.display=_sigs.length?'none':'';
+  inner.querySelectorAll('.sig-card').forEach(function(c){{c.remove();}});
+  _sigs.forEach(function(s,i){{
+    var card=document.createElement('div');
+    card.className='sig-card'+(_sel===i?' selected':'');
+    var rm=document.createElement('button');rm.className='rm';rm.type='button';rm.textContent='x';
+    rm.onclick=function(ev){{ev.stopPropagation();removeSig(i);}};
+    var badge=document.createElement('span');badge.className='sel-badge';badge.textContent='Selected';
+    var img=document.createElement('img');img.src=s.b64;img.alt=s.name;
+    var nm=document.createElement('div');nm.className='sname';nm.textContent=s.name;
+    card.append(rm,badge,img,nm);
+    card.onclick=function(){{_sel=i;renderTray();showErr('');}};
+    card.draggable=true;
+    card.addEventListener('dragstart',function(e){{_dragSig=s;e.dataTransfer.effectAllowed='copy';e.dataTransfer.setData('text/plain','sig');}});
+    card.addEventListener('dragend',function(){{_dragSig=null;}});
+    inner.appendChild(card);
+  }});
+}}
+function removeSig(i){{_sigs.splice(i,1);if(_sel>=_sigs.length)_sel=_sigs.length-1;renderTray();updateSendBtn();}}
+
+// ── File handling ────────────────────────────────────────────────────────────
+var MAX_B=5*1024*1024,MAX_W=720,SIG_RE=/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/=]{{40,800000}}$/;
+function _isImg(f){{var t=((f&&f.type)||'').toLowerCase(),n=((f&&f.name)||'').toLowerCase();return /^image\/(png|jpeg)$/.test(t)||/\.(png|jpe?g)$/.test(n);}}
+function _b64len(u){{var i=(u||'').indexOf(',');return i>=0?u.length-i-1:0;}}
+async function _toPng(f){{
+  if(!_isImg(f))throw new Error('Upload a PNG or JPG.');
+  if(f.size>MAX_B)throw new Error('File too large — max 5 MB.');
+  var obj=URL.createObjectURL(f);
+  var img=await new Promise(function(res,rej){{var el=new Image();el.onload=function(){{res(el);}};el.onerror=function(){{rej(new Error('Could not read image.'));}};el.src=obj;}});
+  URL.revokeObjectURL(obj);
+  var scale=Math.min(1,MAX_W/Math.max(1,img.naturalWidth||img.width));
+  for(var i=0;i<7;i++){{
+    var c=document.createElement('canvas');
+    c.width=Math.max(1,Math.round((img.naturalWidth||img.width)*scale));
+    c.height=Math.max(1,Math.round((img.naturalHeight||img.height)*scale));
+    c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+    var u=c.toDataURL('image/png');
+    if(SIG_RE.test(u)&&_b64len(u)<=780000)return u;
+    scale*=0.82;
+  }}
+  throw new Error('Image too large after processing. Try a tighter crop.');
+}}
+async function loadFile(f){{
+  showErr('');
+  try{{
+    var b64=await _toPng(f);
+    var name=(f.name||'Signature').replace(/\.[^.]+$/,'').slice(0,48);
+    _sigs.push({{b64:b64,name:name}});
+    _sel=_sigs.length-1;
+    renderTray();
+    updateSendBtn();
+  }}catch(err){{showErr(err.message||'Could not load image.');}}
+}}
+function onPick(inp){{if(!inp.files||!inp.files.length)return;Array.from(inp.files).forEach(function(f){{loadFile(f);}});inp.value='';}}
+// OS drag-drop to upload zone
+(function(){{
+  var zone=document.getElementById('drop-zone');
+  ['dragenter','dragover'].forEach(function(ev){{zone.addEventListener(ev,function(e){{if(!_dragSig){{e.preventDefault();zone.classList.add('drag');}}}});}});
+  zone.addEventListener('dragleave',function(e){{if(!zone.contains(e.relatedTarget))zone.classList.remove('drag');}});
+  zone.addEventListener('drop',function(e){{
+    e.preventDefault();zone.classList.remove('drag');
+    var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
+    if(f&&!_dragSig)loadFile(f);
+  }});
+}})();
+
+// ── Page image viewer ────────────────────────────────────────────────────────
+(async function initPages(){{
+  var pv=document.getElementById('pv-pages');
+  try{{
+    var info=await fetch(INFO).then(function(r){{return r.json();}});
+    var wraps=[],imgs=[];
+    for(var p=0;p<info.pages;p++){{
+      var wrap=document.createElement('div');wrap.className='pg-wrap';wrap.dataset.page=p;
+      var img=document.createElement('img');img.className='pg';img.draggable=false;
+      img.dataset.src=PAGE_URL+'?p='+p;
+      wrap.appendChild(img);
+      // accept drops from tray cards
+      (function(w,pg){{
+        w.addEventListener('dragover',function(e){{if(_dragSig){{e.preventDefault();w.classList.add('drop-active');}}}});
+        w.addEventListener('dragleave',function(){{w.classList.remove('drop-active');}});
+        w.addEventListener('drop',function(e){{
+          if(!_dragSig)return;e.preventDefault();w.classList.remove('drop-active');
+          var r=w.getBoundingClientRect();
+          placeSig(w,pg,_dragSig.b64,(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height);
+          _dragSig=null;
+        }});
+      }})(wrap,p);
+      pv.appendChild(wrap);wraps.push(wrap);imgs.push(img);
+    }}
+    for(var b=0;b<imgs.length;b+=4){{
+      var batch=imgs.slice(b,b+4);
+      await Promise.all(batch.map(function(im){{return new Promise(function(res){{im.onload=res;im.onerror=res;im.src=im.dataset.src;}});}}) );
+    }}
+  }}catch(ex){{pv.innerHTML='<p style="color:#b91c1c;padding:32px;text-align:center;">Could not load document — please refresh.</p>';}}
+}})();
+
+// ── Placement overlay ────────────────────────────────────────────────────────
+function placeSig(wrap,page,b64,xf,yf){{
+  wrap.querySelectorAll('.sig-ov').forEach(function(el){{el.remove();}});
+  var W=22;
+  var ov=document.createElement('div');ov.className='sig-ov';ov.dataset.page=page;ov.dataset.b64=b64;
+  ov.style.left=Math.max(0,Math.min(100-W,xf*100-W/2))+'%';
+  ov.style.top=Math.max(0,Math.min(90,yf*100-3))+'%';ov.style.width=W+'%';
+  var im=document.createElement('img');im.src=b64;im.draggable=false;ov.appendChild(im);
+  var del=document.createElement('button');del.className='sig-ov-del';del.type='button';del.innerHTML='&#x2715;';
+  del.onclick=function(e){{e.stopPropagation();ov.remove();updateSendBtn();}};ov.appendChild(del);
+  var grip=document.createElement('div');grip.className='sig-ov-grip';ov.appendChild(grip);
+  _bindMove(ov,wrap);_bindResize(grip,ov,wrap);
+  wrap.appendChild(ov);updateSendBtn();
+}}
+function _bindMove(el,con){{
+  var sx,sy,sl,st;
+  el.addEventListener('pointerdown',function(e){{
+    if(e.target.classList.contains('sig-ov-del')||e.target.classList.contains('sig-ov-grip'))return;
+    e.preventDefault();try{{el.setPointerCapture(e.pointerId);}}catch(_){{}}
+    var cr=con.getBoundingClientRect(),er=el.getBoundingClientRect();
+    sx=e.clientX;sy=e.clientY;sl=(er.left-cr.left)/cr.width*100;st=(er.top-cr.top)/cr.height*100;
+  }});
+  el.addEventListener('pointermove',function(e){{
+    if(!el.hasPointerCapture(e.pointerId))return;
+    var cr=con.getBoundingClientRect(),dx=(e.clientX-sx)/cr.width*100,dy=(e.clientY-sy)/cr.height*100;
+    var w=parseFloat(el.style.width)||22;
+    el.style.left=Math.max(0,Math.min(100-w,sl+dx))+'%';el.style.top=Math.max(0,Math.min(95,st+dy))+'%';
+  }});
+}}
+function _bindResize(grip,el,con){{
+  var sx,sw;
+  grip.addEventListener('pointerdown',function(e){{e.preventDefault();e.stopPropagation();try{{grip.setPointerCapture(e.pointerId);}}catch(_){{}}sx=e.clientX;sw=parseFloat(el.style.width)||22;}});
+  grip.addEventListener('pointermove',function(e){{
+    if(!grip.hasPointerCapture(e.pointerId))return;
+    var cr=con.getBoundingClientRect();el.style.width=Math.max(8,Math.min(80,sw+(e.clientX-sx)/cr.width*100))+'%';
+  }});
+}}
+function getPlacement(){{
+  var out=[];
+  document.querySelectorAll('#pv-pages .pg-wrap').forEach(function(wrap){{
+    var p=parseInt(wrap.dataset.page);
+    wrap.querySelectorAll('.sig-ov').forEach(function(el){{
+      var cr=wrap.getBoundingClientRect(),er=el.getBoundingClientRect();
+      out.push({{page:p,x:(er.left-cr.left)/cr.width,y:(er.top-cr.top)/cr.height,
+                 w:er.width/cr.width,h:er.height/cr.height,image:el.dataset.b64}});
+    }});
+  }});
+  return out;
+}}
+
+// ── Submit ───────────────────────────────────────────────────────────────────
+async function submitSign(){{
+  var placement=getPlacement();
+  if(!placement.length){{showErr('Drag your signature onto the document first.');return;}}
+  showErr('');
+  var btn=document.getElementById('btn-send');btn.disabled=true;btn.textContent='Signing…';
+  try{{
+    var r=await fetch(SUBMIT,{{method:'POST',headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{signed_name:SIGNER,designation:'',
+                           sig_image:placement[0].image,
+                           signatures_overlay:placement}})
+    }});
+    var d=await r.json().catch(function(){{return {{}};}});
+    if(!r.ok){{showErr(d.detail||'Signing failed — please try again.');btn.disabled=false;btn.textContent='✍ Sign & Complete';return;}}
+    btn.textContent='✅ Signed!';
+    setTimeout(function(){{try{{window.close();}}catch(_){{}}}},1000);
+  }}catch(e){{showErr('Network error — please check your connection.');btn.disabled=false;btn.textContent='✍ Sign & Complete';}}
+}}
+</script>
+</body></html>"""
+
+
 @router.get("/sign/{onboarding_id}/{doc_type}/{token}", response_class=HTMLResponse, include_in_schema=False)
 async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: AsyncSession = Depends(get_db)):
     _check_doc_type(doc_type)
@@ -4650,311 +5253,8 @@ async def document_sign_page(onboarding_id: str, doc_type: str, token: str, db: 
             extra_html=f'<ul style="text-align:left;max-width:540px;margin:16px auto 0;'
                        f'font-size:13px;line-height:1.6;">{items_html}</ul>'))
 
-    pdf_url = f"/api/v1/documents/pdf/{onboarding_id}/{doc_type}/{token}"
-    if internal_sig:
-        # show the internally countersigned document for the lead's signature
-        pdf_url = f"/api/v1/documents/signed/{onboarding_id}/{doc_type}/{token}"
-    import html as _hlib2
-    sig_name = data.get("signatory_name", "") or (lead.contact_name or "")
-    comments = data.get("comments") or []
+    return HTMLResponse(_build_lead_sign_page(onboarding_id, doc_type, token, label, lead))
 
-    # Build comment history HTML for the legal record section on sign page
-    _status_chip = {"accepted": ("#dcfce7", "#15803d", "Accepted"),
-                    "rejected":  ("#fee2e2", "#991b1b", "Rejected")}
-    _history_rows = ""
-    for cmt in comments:
-        if not isinstance(cmt, dict):
-            continue
-        by = _hlib2.escape(cmt.get("by") or "Unknown")
-        party_lbl = "Jane Aerospace" if cmt.get("party") == "p1" else _hlib2.escape(lead.business_name)
-        at = _hlib2.escape(cmt.get("at") or "")
-        status = cmt.get("status") or "pending"
-        chip_bg, chip_fg, chip_txt = _status_chip.get(status, ("#fef3c7", "#92400e", status.title()))
-        thread = cmt.get("thread") or []
-        thread_html = ""
-        for t in thread:
-            if not isinstance(t, dict):
-                continue
-            t_by = _hlib2.escape(t.get("by") or "")
-            t_act = _hlib2.escape(t.get("action") or "comment")
-            t_txt = _hlib2.escape((t.get("text") or "")[:500])
-            t_at = _hlib2.escape(t.get("at") or "")
-            thread_html += (f'<div style="margin-top:6px;padding-left:12px;border-left:2px solid #e5e7eb;'
-                            f'font-size:11.5px;color:#374151;">'
-                            f'<span style="font-weight:700;color:#1a3a6b;">{t_by}</span> '
-                            f'<span style="color:#94a3b8;">({t_act}) &bull; {t_at}</span><br>'
-                            f'<span style="white-space:pre-wrap;">{t_txt}</span></div>')
-        _history_rows += (
-            f'<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px;margin-bottom:10px;">'
-            f'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
-            f'<span style="font-weight:700;font-size:13px;color:#1a3a6b;">{by}</span>'
-            f'<span style="font-size:11px;color:#64748b;">{party_lbl} &bull; {at}</span>'
-            f'<span style="background:{chip_bg};color:{chip_fg};font-size:11px;font-weight:700;'
-            f'padding:2px 8px;border-radius:99px;">{chip_txt}</span></div>'
-            f'{thread_html}</div>'
-        )
-
-    history_card = ""
-    if _history_rows:
-        history_card = f"""
-  <div class="card">
-    <div class="card-head">
-      <div class="step-badge" style="background:#64748b;">&#x1F4DC;</div>
-      <h2>Change &amp; Comment History</h2>
-    </div>
-    <div class="card-pad">
-      <p style="font-size:12.5px;color:#64748b;margin-bottom:12px;">
-        Complete audit trail of all proposed changes and comments by both parties.
-        This history is preserved as part of the legal record.</p>
-      {_history_rows}
-    </div>
-  </div>"""
-
-    sign_cfg = {
-        "endpoint": f"/api/v1/documents/sign/{onboarding_id}/{doc_type}/{token}",
-        "maxB64": 780000, "uploadMaxWidth": 480, "drawMaxWidth": 600,
-        "defaultPt": 150, "minPt": 30, "maxPt": 500, "stepPt": 15, "pxPerPt": 3,
-    }
-    sign_cfg_js = json.dumps(sign_cfg).replace("<", "\\u003c")  # safe to embed in <script>
-
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Sign {label} — Jane Aerospace</title>
-<style>{_SIGN_WIDGET_CSS}</style>
-<style>
-  *{{box-sizing:border-box;margin:0;}}
-  :root{{--navy:#15315f;--ink:#0f172a;--muted:#64748b;--line:#e6eaf0;--blue:#2563eb;--green:#16a34a;}}
-  body{{font-family:'Segoe UI',system-ui,-apple-system,Roboto,Arial,sans-serif;color:var(--ink);
-    background:#f0f4fa;min-height:100vh;padding:0 0 56px;-webkit-font-smoothing:antialiased;}}
-
-  /* ── topbar ── */
-  .topbar{{background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:space-between;
-    gap:12px;padding:0 24px;height:52px;position:sticky;top:0;z-index:100;
-    box-shadow:0 2px 8px rgba(0,0,0,.18);}}
-  .brand{{display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px;letter-spacing:.02em;}}
-  .brand .logo{{width:28px;height:28px;border-radius:6px;background:rgba(255,255,255,.15);
-    display:flex;align-items:center;justify-content:center;font-size:14px;}}
-  .doc-label{{font-size:12px;font-weight:600;color:rgba(255,255,255,.55);}}
-  .secure{{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:#86efac;}}
-
-  /* ── layout ── */
-  .wrap{{max-width:860px;margin:0 auto;padding:22px 16px 0;}}
-
-  /* ── cards ── */
-  .card{{background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:16px;
-    box-shadow:0 1px 3px rgba(16,24,40,.05),0 8px 24px rgba(16,40,90,.07);}}
-  .card-head{{display:flex;align-items:center;gap:12px;padding:15px 22px;border-bottom:1px solid var(--line);
-    background:#f8fafc;}}
-  .step-badge{{width:26px;height:26px;flex:none;border-radius:50%;background:var(--navy);color:#fff;font-weight:800;
-    font-size:12px;display:flex;align-items:center;justify-content:center;}}
-  .card-head h2{{font-size:15px;font-weight:700;color:var(--navy);}}
-  .card-pad{{padding:20px 22px;}}
-
-  /* ── parties ── */
-  .parties{{display:flex;align-items:center;gap:10px;margin-bottom:14px;}}
-  .party{{flex:1;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:0;}}
-  .party .role{{font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8;font-weight:800;}}
-  .party .pname{{font-size:13px;font-weight:700;color:var(--ink);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
-  .vs{{color:#c2ccda;font-weight:800;font-size:16px;flex:none;}}
-
-  /* ── document viewer ── */
-  .viewer-wrap{{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;}}
-  .viewer-bar{{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;
-    background:#f1f5f9;border-bottom:1px solid var(--line);font-size:12px;color:#475569;font-weight:600;}}
-  .viewer-bar a{{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:var(--blue);
-    text-decoration:none;background:#eff6ff;border:1px solid #dbeafe;border-radius:6px;padding:4px 10px;}}
-  .viewer iframe{{width:100%;height:56vh;min-height:340px;border:none;display:block;background:#fff;}}
-  .scroll-to-sign{{display:block;width:100%;background:linear-gradient(135deg,var(--navy),#1e4080);
-    color:#fff;border:none;padding:12px;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:.01em;
-    text-align:center;transition:background .15s;}}
-  .scroll-to-sign:hover{{background:linear-gradient(135deg,#1e4080,#2563eb);}}
-
-  /* ── form fields ── */
-  .frow{{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;}}
-  label.lbl{{display:block;font-size:12px;font-weight:700;color:#374151;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em;}}
-  .req{{color:#e11d48;}}
-  input[type=text]{{width:100%;padding:10px 13px;border:1.5px solid #d6dce6;border-radius:8px;font-size:14px;
-    color:var(--ink);background:#fff;transition:border-color .15s,box-shadow .15s;}}
-  input[type=text]:focus{{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.12);}}
-
-  /* ── sig section ── */
-  .sig-section-label{{font-size:12px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.04em;
-    margin:0 0 8px;}}
-  .upload-zone{{border:2px dashed #c7d4ee;border-radius:10px;background:#f8fafc;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;
-    padding:28px 20px;cursor:pointer;transition:border-color .15s,background .15s;text-align:center;}}
-  .upload-zone:hover{{border-color:var(--blue);background:#eff6ff;}}
-  .upload-zone input[type=file]{{display:none;}}
-  .upload-zone .upload-icon{{font-size:32px;margin-bottom:8px;}}
-  .upload-zone .upload-lbl{{font-size:13.5px;font-weight:700;color:var(--navy);}}
-  .upload-zone .upload-hint{{font-size:11.5px;color:var(--muted);margin-top:3px;}}
-  #upload-preview{{margin-top:10px;display:none;border:1px solid var(--line);border-radius:8px;
-    padding:10px;background:#fff;}}
-
-  /* ── preview ── */
-  #sig-preview{{border:1px dashed #c7d4ee;border-radius:8px;background:#fbfdff;min-height:60px;
-    display:flex;align-items:center;padding:8px 18px;font-size:30px;color:#10245c;
-    font-family:Georgia,serif;margin-top:6px;overflow:hidden;}}
-  #sig-preview img{{height:auto;}}
-  .resize-bar{{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;color:#475569;}}
-  .resize-bar button{{width:30px;height:30px;border:1px solid #d1d5db;border-radius:6px;background:#fff;
-    font-size:16px;font-weight:700;color:var(--navy);cursor:pointer;line-height:1;padding:0;}}
-  .resize-bar button:hover{{background:#eff6ff;}}
-  .resize-bar .pt{{min-width:56px;text-align:center;font-weight:700;color:var(--navy);font-size:12px;}}
-
-  /* ── consent & submit ── */
-  .consent{{display:flex;gap:11px;align-items:flex-start;margin:18px 0 0;font-size:12.5px;color:#374151;
-    line-height:1.55;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:13px 15px;}}
-  .consent input{{margin-top:2px;width:17px;height:17px;flex:none;accent-color:var(--green);}}
-  #err{{display:none;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;padding:10px 14px;
-    border-radius:8px;font-size:13px;margin:12px 0 0;}}
-  .sign-btn{{margin-top:16px;width:100%;border:none;border-radius:11px;padding:15px 28px;font-size:15px;
-    font-weight:800;color:#fff;cursor:pointer;letter-spacing:.2px;
-    background:linear-gradient(135deg,var(--green),#15803d);
-    box-shadow:0 6px 18px rgba(22,163,74,.28);transition:transform .08s,box-shadow .15s;}}
-  .sign-btn:hover{{box-shadow:0 8px 24px rgba(22,163,74,.36);}}
-  .sign-btn:active{{transform:translateY(1px);}}
-  .sign-btn:disabled{{background:#9ca3af;box-shadow:none;cursor:not-allowed;}}
-
-  /* ── trust footer ── */
-  .trust{{max-width:860px;margin:6px auto 0;padding:0 16px;display:flex;align-items:center;
-    justify-content:center;gap:18px;flex-wrap:wrap;color:#94a3b8;font-size:11px;}}
-  .trust span{{display:inline-flex;align-items:center;gap:5px;}}
-
-  @media(max-width:600px){{
-    .frow{{grid-template-columns:1fr;gap:11px;}}
-    .card-pad{{padding:16px;}}
-    .card-head{{padding:12px 16px;}}
-    .viewer iframe{{height:52vh;}}
-    .topbar{{padding:0 14px;}}
-  }}
-</style></head>
-<body>
-<div class="topbar">
-  <div class="brand"><span class="logo">✈</span> Jane Aerospace</div>
-  <span class="doc-label">{label}</span>
-  <span class="secure">🔒 Secure Signing</span>
-</div>
-<div class="wrap">
-
-  <!-- Card 1: Parties + Document -->
-  <div class="card">
-    <div class="card-head">
-      <div class="step-badge">1</div>
-      <h2>Review Document</h2>
-    </div>
-    <div class="card-pad">
-      <div class="parties">
-        <div class="party">
-          <div class="role">Disclosing Party</div>
-          <div class="pname">{settings.COMPANY_LEGAL_NAME}</div>
-        </div>
-        <span class="vs">⇄</span>
-        <div class="party">
-          <div class="role">Counterparty</div>
-          <div class="pname">{lead.business_name}</div>
-        </div>
-      </div>
-      <div class="viewer-wrap">
-        <div class="viewer-bar">
-          <span>📄 {label}</span>
-          <a href="{pdf_url}" target="_blank">⬇ Download PDF ↗</a>
-        </div>
-        <iframe src="{pdf_url}#toolbar=1" title="Document preview" id="doc-frame"></iframe>
-        <button class="scroll-to-sign" onclick="document.getElementById('sign-section').scrollIntoView({{behavior:'smooth'}})">
-          ✍ Ready to Sign? Click here →
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Card 2: Sign -->
-  <div class="card" id="sign-section">
-    <div class="card-head">
-      <div class="step-badge">2</div>
-      <h2>Sign Electronically</h2>
-    </div>
-    <div class="card-pad">
-      <div class="frow">
-        <div>
-          <label class="lbl">Full Legal Name <span class="req">*</span></label>
-          <input type="text" id="s-name" value="{sig_name}" placeholder="Your full name" oninput="SIGW.onNameInput()">
-        </div>
-        <div>
-          <label class="lbl">Designation</label>
-          <input type="text" id="s-desig" placeholder="e.g. Director">
-        </div>
-      </div>
-
-      <div class="sig-section-label">Your Signature (Upload)</div>
-
-      <div class="sigpanel active" data-panel="upload">
-        <div class="upload-zone" onclick="document.getElementById('s-sigimg').click()">
-          <div class="upload-icon">🖊</div>
-          <div class="upload-lbl">Click to upload signature image</div>
-          <div class="upload-hint">PNG or JPG · Max 5 MB</div>
-          <input type="file" id="s-sigimg" accept=".png,.jpg,.jpeg" onchange="SIGW.loadUpload(this)">
-        </div>
-        <div id="upload-preview"></div>
-      </div>
-
-      <label class="lbl" style="margin-top:14px;">Signature Preview</label>
-      <div id="sig-preview">Upload your signature image</div>
-      <div class="resize-bar" id="resize-bar" style="display:flex;">
-        <span>Size</span>
-        <button type="button" onclick="SIGW.resize(-1)" title="Smaller">&minus;</button>
-        <span class="pt" id="sig-pt">150 pt</span>
-        <button type="button" onclick="SIGW.resize(1)" title="Larger">+</button>
-      </div>
-
-      <div class="consent">
-        <input type="checkbox" id="s-agree">
-        <span>I confirm I am an authorised signatory of <strong>{lead.business_name}</strong> and have read this
-        {label} in full. Clicking "I Agree &amp; Sign" constitutes my legally binding electronic signature under the
-        IT Act, 2000.</span>
-      </div>
-      <div id="err"></div>
-      <button id="sign-btn" class="sign-btn" onclick="SIGW.signDoc()">✍ I Agree &amp; Sign</button>
-    </div>
-  </div>
-
-  {history_card}
-
-</div>
-<div class="trust">
-  <span>🔒 Encrypted in transit</span>
-  <span>⚖ Legally binding · IT Act 2000</span>
-  <span>📋 Audit-logged: IP, timestamp, device</span>
-</div>
-<script>window.SIGN_CFG = {sign_cfg_js};</script>
-<script>{_SIGN_WIDGET_JS}</script>
-<script>
-  // Show upload preview when file is loaded
-  document.getElementById('s-sigimg') && (function(){{
-    var orig = SIGW.loadUpload;
-    SIGW.loadUpload = function(inp) {{ orig(inp); updateUploadPreview(inp); }};
-    function updateUploadPreview(inp) {{
-      var pv = document.getElementById('upload-preview');
-      if (!pv) return;
-      var f = inp.files && inp.files[0];
-      if (!f) {{ pv.style.display = 'none'; pv.innerHTML = ''; return; }}
-      var url = URL.createObjectURL(f);
-      pv.style.display = 'block';
-      pv.innerHTML = '<img src="' + url + '" style="max-height:80px;max-width:100%;border-radius:6px;">';
-    }}
-  }})();
-
-  // Auto-scroll to sign section when page loads (lead arrives via email link)
-  window.addEventListener('load', function() {{
-    setTimeout(function() {{
-      var s = document.getElementById('sign-section');
-      if (s) s.scrollIntoView({{behavior: 'smooth', block: 'start'}});
-    }}, 600);
-  }});
-</script>
-</body></html>"""
-    return HTMLResponse(html)
 
 
 class _SignBody(BaseModel):
@@ -4981,13 +5281,14 @@ async def document_sign(onboarding_id: str, doc_type: str, token: str,
                                  "after the terms are accepted and Jane Aerospace countersigns")
     if not body.signed_name.strip():
         raise HTTPException(400, "Full legal name is required")
+    sig_image = _clean_sig_image(body.sig_image)
 
     now = _now_ist()
     sig = {
         "signed_name": body.signed_name.strip()[:200],
         "designation": body.designation.strip()[:200],
         "sig_font": body.sig_font if body.sig_font in ("standard", "dancing", "greatvibes", "pacifico") else "standard",
-        "sig_image": _clean_sig_image(body.sig_image),
+        "sig_image": sig_image,
         "email": data.get("signatory_email") or lead.email,
         "company_name": lead.business_name,
         "signed_at": _fmt(now),
@@ -5034,10 +5335,11 @@ async def document_sign(onboarding_id: str, doc_type: str, token: str,
     # Build the signed PDF once for the team notification attachment
     signed_pdf: bytes | None = None
     try:
-        from app.services.pdf_documents import stamp_signatures_on_document
-        _isig = data.get("internal_signature")
-        signed_pdf = stamp_signatures_on_document(_render_pdf(rec, doc_type, data),
-                                                  internal_sig=_isig, sig=sig)
+        from app.services.pdf_documents import stamp_overlays
+        base_pdf = _render_pdf(rec, doc_type, data)
+        if data.get("sig_placement"):
+            base_pdf = stamp_overlays(base_pdf, data["sig_placement"])
+        signed_pdf = base_pdf
     except Exception as exc:
         logger.warning("signed_pdf_build_failed", onboarding_id=onboarding_id, error=str(exc))
 
@@ -5086,9 +5388,15 @@ async def document_sign(onboarding_id: str, doc_type: str, token: str,
     except Exception:
         pass
 
-    from app.core.pipeline_logger import log_pipeline
-    log_pipeline("NDA_SIGNED" if doc_type == "nda" else "AGREEMENT_SIGNED",
-                 company=lead.business_name, email=lead.email,
-                 detail=f"E-signed by {sig['signed_name']}")
+    try:
+        from app.core.pipeline_logger import log_pipeline
+        log_pipeline("NDA_SIGNED" if doc_type == "nda" else "AGREEMENT_SIGNED",
+                     company=lead.business_name, email=lead.email,
+                     detail=f"E-signed by {sig['signed_name']}")
+    except Exception:
+        pass
+
+    # Bust the signed-page cache so any subsequent viewer sees a fresh render
+    _SIGNED_CACHE.pop(f"{onboarding_id}:{doc_type}", None)
 
     return {"message": "Signed successfully", "redirect": f"/api/v1/documents/sign/{onboarding_id}/{doc_type}/{token}"}

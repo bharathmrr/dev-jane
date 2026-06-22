@@ -2,3 +2,1665 @@ INFO:     Started server process [5804]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+ERROR:    Exception in ASGI application
+  + Exception Group Traceback (most recent call last):
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 76, in collapse_excgroups
+  |     yield
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 186, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 799, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    |     result = await app(  # type: ignore[func-returns-value]
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    |     return await self.app(scope, receive, send)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    |     await super().__call__(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 185, in __call__
+    |     with collapse_excgroups():
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(typ, value, traceback)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 82, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 187, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\app\main.py", line 42, in dispatch
+    |     response = await call_next(request)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 163, in call_next
+    |     raise app_exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 735, in app
+    |     await route.handle(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    |     response = await f(request)
+    |                ^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\routing.py", line 291, in app
+    |     solved_result = await solve_dependencies(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\dependencies\utils.py", line 638, in solve_dependencies
+    |     solved = await call(**solved_result.values)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\app\core\deps.py", line 39, in get_current_user
+    |     await db.execute(select(User).where(User.id == user_id))
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 461, in execute
+    |     result = await greenlet_spawn(
+    |              ^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    |     result = context.throw(*sys.exc_info())
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2362, in execute
+    |     return self._execute_internal(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2237, in _execute_internal
+    |     conn = self._connection_for_bind(bind)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2106, in _connection_for_bind
+    |     return trans._connection_for_bind(engine, execution_options)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "<string>", line 2, in _connection_for_bind
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    |     ret_value = fn(self, *arg, **kw)
+    |                 ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1189, in _connection_for_bind
+    |     conn = bind.connect()
+    |            ^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3278, in connect
+    |     return self._connection_cls(self)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 146, in __init__
+    |     self._dbapi_connection = engine.raw_connection()
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    |     return self.pool.connect()
+    |            ^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    |     return _ConnectionFairy._checkout(self)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1344, in _checkout
+    |     with util.safe_reraise():
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    |     raise exc_value.with_traceback(exc_tb)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1341, in _checkout
+    |     fairy._connection_record.get_connection()
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 837, in get_connection
+    |     self.__connect()
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    |     with util.safe_reraise():
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    |     raise exc_value.with_traceback(exc_tb)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    |     self.dbapi_connection = connection = pool._invoke_creator(self)
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    |     return dialect.connect(*cargs, **cparams)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    |     return self.loaded_dbapi.connect(*cargs, **cparams)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 949, in connect
+    |     await_only(creator_fn(*arg, **kw)),
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    |     return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    |     value = await result
+    |             ^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connection.py", line 2443, in connect
+    |     return await connect_utils._connect(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1249, in _connect
+    |     raise last_error or exceptions.TargetServerAttributeNotMatched(
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1218, in _connect
+    |     conn = await _connect_addr(
+    |            ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1054, in _connect_addr
+    |     return await __connect_addr(params, True, *args)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1099, in __connect_addr
+    |     tr, pr = await connector
+    |              ^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 969, in _create_ssl_connection
+    |     tr, pr = await loop.create_connection(
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1091, in create_connection
+    |     raise exceptions[0]
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1070, in create_connection
+    |     sock = await self._connect_sock(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 974, in _connect_sock
+    |     await self.sock_connect(sock, address)
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\proactor_events.py", line 726, in sock_connect
+    |     return await self._proactor.connect(sock, address)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 854, in _poll
+    |     value = callback(transferred, key, ov)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 641, in finish_connect
+    |     ov.getresult()
+    | ConnectionRefusedError: [WinError 1225] The remote computer refused the network connection
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\app\main.py", line 42, in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 735, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\routing.py", line 291, in app
+    solved_result = await solve_dependencies(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\dependencies\utils.py", line 638, in solve_dependencies
+    solved = await call(**solved_result.values)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\app\core\deps.py", line 39, in get_current_user
+    await db.execute(select(User).where(User.id == user_id))
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 461, in execute
+    result = await greenlet_spawn(
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2362, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2237, in _execute_internal
+    conn = self._connection_for_bind(bind)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2106, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1189, in _connection_for_bind
+    conn = bind.connect()
+           ^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3278, in connect
+    return self._connection_cls(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 146, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1344, in _checkout
+    with util.safe_reraise():
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1341, in _checkout
+    fairy._connection_record.get_connection()
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 837, in get_connection
+    self.__connect()
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    return dialect.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 949, in connect
+    await_only(creator_fn(*arg, **kw)),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connection.py", line 2443, in connect
+    return await connect_utils._connect(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1249, in _connect
+    raise last_error or exceptions.TargetServerAttributeNotMatched(
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1218, in _connect
+    conn = await _connect_addr(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1054, in _connect_addr
+    return await __connect_addr(params, True, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1099, in __connect_addr
+    tr, pr = await connector
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 969, in _create_ssl_connection
+    tr, pr = await loop.create_connection(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1091, in create_connection
+    raise exceptions[0]
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1070, in create_connection
+    sock = await self._connect_sock(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 974, in _connect_sock
+    await self.sock_connect(sock, address)
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\proactor_events.py", line 726, in sock_connect
+    return await self._proactor.connect(sock, address)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 854, in _poll
+    value = callback(transferred, key, ov)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 641, in finish_connect
+    ov.getresult()
+ConnectionRefusedError: [WinError 1225] The remote computer refused the network connection
+ERROR:    Exception in ASGI application
+  + Exception Group Traceback (most recent call last):
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 76, in collapse_excgroups
+  |     yield
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 186, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 799, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    |     result = await app(  # type: ignore[func-returns-value]
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    |     return await self.app(scope, receive, send)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    |     await super().__call__(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 185, in __call__
+    |     with collapse_excgroups():
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(typ, value, traceback)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 82, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 187, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\app\main.py", line 42, in dispatch
+    |     response = await call_next(request)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 163, in call_next
+    |     raise app_exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 735, in app
+    |     await route.handle(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    |     response = await f(request)
+    |                ^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\routing.py", line 291, in app
+    |     solved_result = await solve_dependencies(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\dependencies\utils.py", line 638, in solve_dependencies
+    |     solved = await call(**solved_result.values)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\app\core\deps.py", line 39, in get_current_user
+    |     await db.execute(select(User).where(User.id == user_id))
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 461, in execute
+    |     result = await greenlet_spawn(
+    |              ^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    |     result = context.throw(*sys.exc_info())
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2362, in execute
+    |     return self._execute_internal(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2237, in _execute_internal
+    |     conn = self._connection_for_bind(bind)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2106, in _connection_for_bind
+    |     return trans._connection_for_bind(engine, execution_options)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "<string>", line 2, in _connection_for_bind
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    |     ret_value = fn(self, *arg, **kw)
+    |                 ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1189, in _connection_for_bind
+    |     conn = bind.connect()
+    |            ^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3278, in connect
+    |     return self._connection_cls(self)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 146, in __init__
+    |     self._dbapi_connection = engine.raw_connection()
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    |     return self.pool.connect()
+    |            ^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    |     return _ConnectionFairy._checkout(self)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    |     fairy = _ConnectionRecord.checkout(pool)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 717, in checkout
+    |     with util.safe_reraise():
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    |     raise exc_value.with_traceback(exc_tb)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 715, in checkout
+    |     dbapi_connection = rec.get_connection()
+    |                        ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 866, in get_connection
+    |     self.__connect()
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    |     with util.safe_reraise():
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    |     raise exc_value.with_traceback(exc_tb)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    |     self.dbapi_connection = connection = pool._invoke_creator(self)
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    |     return dialect.connect(*cargs, **cparams)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    |     return self.loaded_dbapi.connect(*cargs, **cparams)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 949, in connect
+    |     await_only(creator_fn(*arg, **kw)),
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    |     return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    |     value = await result
+    |             ^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connection.py", line 2443, in connect
+    |     return await connect_utils._connect(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1249, in _connect
+    |     raise last_error or exceptions.TargetServerAttributeNotMatched(
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1218, in _connect
+    |     conn = await _connect_addr(
+    |            ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1054, in _connect_addr
+    |     return await __connect_addr(params, True, *args)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1099, in __connect_addr
+    |     tr, pr = await connector
+    |              ^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 969, in _create_ssl_connection
+    |     tr, pr = await loop.create_connection(
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1091, in create_connection
+    |     raise exceptions[0]
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1070, in create_connection
+    |     sock = await self._connect_sock(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 974, in _connect_sock
+    |     await self.sock_connect(sock, address)
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\proactor_events.py", line 726, in sock_connect
+    |     return await self._proactor.connect(sock, address)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 854, in _poll
+    |     value = callback(transferred, key, ov)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 641, in finish_connect
+    |     ov.getresult()
+    | ConnectionRefusedError: [WinError 1225] The remote computer refused the network connection
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\app\main.py", line 42, in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 735, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\routing.py", line 291, in app
+    solved_result = await solve_dependencies(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\dependencies\utils.py", line 638, in solve_dependencies
+    solved = await call(**solved_result.values)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\app\core\deps.py", line 39, in get_current_user
+    await db.execute(select(User).where(User.id == user_id))
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 461, in execute
+    result = await greenlet_spawn(
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2362, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2237, in _execute_internal
+    conn = self._connection_for_bind(bind)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2106, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1189, in _connection_for_bind
+    conn = bind.connect()
+           ^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3278, in connect
+    return self._connection_cls(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 146, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 717, in checkout
+    with util.safe_reraise():
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 715, in checkout
+    dbapi_connection = rec.get_connection()
+                       ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 866, in get_connection
+    self.__connect()
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    return dialect.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 949, in connect
+    await_only(creator_fn(*arg, **kw)),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connection.py", line 2443, in connect
+    return await connect_utils._connect(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1249, in _connect
+    raise last_error or exceptions.TargetServerAttributeNotMatched(
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1218, in _connect
+    conn = await _connect_addr(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1054, in _connect_addr
+    return await __connect_addr(params, True, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1099, in __connect_addr
+    tr, pr = await connector
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 969, in _create_ssl_connection
+    tr, pr = await loop.create_connection(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1091, in create_connection
+    raise exceptions[0]
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1070, in create_connection
+    sock = await self._connect_sock(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 974, in _connect_sock
+    await self.sock_connect(sock, address)
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\proactor_events.py", line 726, in sock_connect
+    return await self._proactor.connect(sock, address)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 854, in _poll
+    value = callback(transferred, key, ov)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 641, in finish_connect
+    ov.getresult()
+ConnectionRefusedError: [WinError 1225] The remote computer refused the network connection
+ERROR:    Exception in ASGI application
+  + Exception Group Traceback (most recent call last):
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 76, in collapse_excgroups
+  |     yield
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 186, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 799, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    |     result = await app(  # type: ignore[func-returns-value]
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    |     return await self.app(scope, receive, send)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    |     await super().__call__(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 185, in __call__
+    |     with collapse_excgroups():
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(typ, value, traceback)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 82, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 187, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\app\main.py", line 42, in dispatch
+    |     response = await call_next(request)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 163, in call_next
+    |     raise app_exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 735, in app
+    |     await route.handle(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    |     response = await f(request)
+    |                ^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\routing.py", line 291, in app
+    |     solved_result = await solve_dependencies(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\dependencies\utils.py", line 638, in solve_dependencies
+    |     solved = await call(**solved_result.values)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\app\core\deps.py", line 39, in get_current_user
+    |     await db.execute(select(User).where(User.id == user_id))
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 461, in execute
+    |     result = await greenlet_spawn(
+    |              ^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    |     result = context.throw(*sys.exc_info())
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2362, in execute
+    |     return self._execute_internal(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2237, in _execute_internal
+    |     conn = self._connection_for_bind(bind)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2106, in _connection_for_bind
+    |     return trans._connection_for_bind(engine, execution_options)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "<string>", line 2, in _connection_for_bind
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    |     ret_value = fn(self, *arg, **kw)
+    |                 ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1189, in _connection_for_bind
+    |     conn = bind.connect()
+    |            ^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3278, in connect
+    |     return self._connection_cls(self)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 146, in __init__
+    |     self._dbapi_connection = engine.raw_connection()
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    |     return self.pool.connect()
+    |            ^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    |     return _ConnectionFairy._checkout(self)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    |     fairy = _ConnectionRecord.checkout(pool)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 717, in checkout
+    |     with util.safe_reraise():
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    |     raise exc_value.with_traceback(exc_tb)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 715, in checkout
+    |     dbapi_connection = rec.get_connection()
+    |                        ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 866, in get_connection
+    |     self.__connect()
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    |     with util.safe_reraise():
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    |     raise exc_value.with_traceback(exc_tb)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    |     self.dbapi_connection = connection = pool._invoke_creator(self)
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    |     return dialect.connect(*cargs, **cparams)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    |     return self.loaded_dbapi.connect(*cargs, **cparams)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 949, in connect
+    |     await_only(creator_fn(*arg, **kw)),
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    |     return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    |     value = await result
+    |             ^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connection.py", line 2443, in connect
+    |     return await connect_utils._connect(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1249, in _connect
+    |     raise last_error or exceptions.TargetServerAttributeNotMatched(
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1218, in _connect
+    |     conn = await _connect_addr(
+    |            ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1054, in _connect_addr
+    |     return await __connect_addr(params, True, *args)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1099, in __connect_addr
+    |     tr, pr = await connector
+    |              ^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 969, in _create_ssl_connection
+    |     tr, pr = await loop.create_connection(
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1091, in create_connection
+    |     raise exceptions[0]
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1070, in create_connection
+    |     sock = await self._connect_sock(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 974, in _connect_sock
+    |     await self.sock_connect(sock, address)
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\proactor_events.py", line 726, in sock_connect
+    |     return await self._proactor.connect(sock, address)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 854, in _poll
+    |     value = callback(transferred, key, ov)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 641, in finish_connect
+    |     ov.getresult()
+    | ConnectionRefusedError: [WinError 1225] The remote computer refused the network connection
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\app\main.py", line 42, in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 735, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\routing.py", line 291, in app
+    solved_result = await solve_dependencies(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\dependencies\utils.py", line 638, in solve_dependencies
+    solved = await call(**solved_result.values)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\app\core\deps.py", line 39, in get_current_user
+    await db.execute(select(User).where(User.id == user_id))
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 461, in execute
+    result = await greenlet_spawn(
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2362, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2237, in _execute_internal
+    conn = self._connection_for_bind(bind)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2106, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1189, in _connection_for_bind
+    conn = bind.connect()
+           ^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3278, in connect
+    return self._connection_cls(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 146, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 717, in checkout
+    with util.safe_reraise():
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 715, in checkout
+    dbapi_connection = rec.get_connection()
+                       ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 866, in get_connection
+    self.__connect()
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    return dialect.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 949, in connect
+    await_only(creator_fn(*arg, **kw)),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connection.py", line 2443, in connect
+    return await connect_utils._connect(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1249, in _connect
+    raise last_error or exceptions.TargetServerAttributeNotMatched(
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1218, in _connect
+    conn = await _connect_addr(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1054, in _connect_addr
+    return await __connect_addr(params, True, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1099, in __connect_addr
+    tr, pr = await connector
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 969, in _create_ssl_connection
+    tr, pr = await loop.create_connection(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1091, in create_connection
+    raise exceptions[0]
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1070, in create_connection
+    sock = await self._connect_sock(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 974, in _connect_sock
+    await self.sock_connect(sock, address)
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\proactor_events.py", line 726, in sock_connect
+    return await self._proactor.connect(sock, address)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 854, in _poll
+    value = callback(transferred, key, ov)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 641, in finish_connect
+    ov.getresult()
+ConnectionRefusedError: [WinError 1225] The remote computer refused the network connection
+ERROR:    Exception in ASGI application
+  + Exception Group Traceback (most recent call last):
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 76, in collapse_excgroups
+  |     yield
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 186, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 799, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    |     result = await app(  # type: ignore[func-returns-value]
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    |     return await self.app(scope, receive, send)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    |     await super().__call__(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 185, in __call__
+    |     with collapse_excgroups():
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(typ, value, traceback)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 82, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 187, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\app\main.py", line 42, in dispatch
+    |     response = await call_next(request)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 163, in call_next
+    |     raise app_exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 735, in app
+    |     await route.handle(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    |     response = await f(request)
+    |                ^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\routing.py", line 291, in app
+    |     solved_result = await solve_dependencies(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\dependencies\utils.py", line 638, in solve_dependencies
+    |     solved = await call(**solved_result.values)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\app\core\deps.py", line 39, in get_current_user
+    |     await db.execute(select(User).where(User.id == user_id))
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 461, in execute
+    |     result = await greenlet_spawn(
+    |              ^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    |     result = context.throw(*sys.exc_info())
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2362, in execute
+    |     return self._execute_internal(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2237, in _execute_internal
+    |     conn = self._connection_for_bind(bind)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2106, in _connection_for_bind
+    |     return trans._connection_for_bind(engine, execution_options)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "<string>", line 2, in _connection_for_bind
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    |     ret_value = fn(self, *arg, **kw)
+    |                 ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1189, in _connection_for_bind
+    |     conn = bind.connect()
+    |            ^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3278, in connect
+    |     return self._connection_cls(self)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 146, in __init__
+    |     self._dbapi_connection = engine.raw_connection()
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    |     return self.pool.connect()
+    |            ^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    |     return _ConnectionFairy._checkout(self)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    |     fairy = _ConnectionRecord.checkout(pool)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 717, in checkout
+    |     with util.safe_reraise():
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    |     raise exc_value.with_traceback(exc_tb)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 715, in checkout
+    |     dbapi_connection = rec.get_connection()
+    |                        ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 866, in get_connection
+    |     self.__connect()
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    |     with util.safe_reraise():
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    |     raise exc_value.with_traceback(exc_tb)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    |     self.dbapi_connection = connection = pool._invoke_creator(self)
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    |     return dialect.connect(*cargs, **cparams)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    |     return self.loaded_dbapi.connect(*cargs, **cparams)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 949, in connect
+    |     await_only(creator_fn(*arg, **kw)),
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    |     return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    |     value = await result
+    |             ^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connection.py", line 2443, in connect
+    |     return await connect_utils._connect(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1249, in _connect
+    |     raise last_error or exceptions.TargetServerAttributeNotMatched(
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1218, in _connect
+    |     conn = await _connect_addr(
+    |            ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1054, in _connect_addr
+    |     return await __connect_addr(params, True, *args)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1099, in __connect_addr
+    |     tr, pr = await connector
+    |              ^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 969, in _create_ssl_connection
+    |     tr, pr = await loop.create_connection(
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1091, in create_connection
+    |     raise exceptions[0]
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1070, in create_connection
+    |     sock = await self._connect_sock(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 974, in _connect_sock
+    |     await self.sock_connect(sock, address)
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\proactor_events.py", line 726, in sock_connect
+    |     return await self._proactor.connect(sock, address)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 854, in _poll
+    |     value = callback(transferred, key, ov)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 641, in finish_connect
+    |     ov.getresult()
+    | ConnectionRefusedError: [WinError 1225] The remote computer refused the network connection
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\app\main.py", line 42, in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 735, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\routing.py", line 291, in app
+    solved_result = await solve_dependencies(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\dependencies\utils.py", line 638, in solve_dependencies
+    solved = await call(**solved_result.values)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\app\core\deps.py", line 39, in get_current_user
+    await db.execute(select(User).where(User.id == user_id))
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 461, in execute
+    result = await greenlet_spawn(
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2362, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2237, in _execute_internal
+    conn = self._connection_for_bind(bind)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2106, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1189, in _connection_for_bind
+    conn = bind.connect()
+           ^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3278, in connect
+    return self._connection_cls(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 146, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 717, in checkout
+    with util.safe_reraise():
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 715, in checkout
+    dbapi_connection = rec.get_connection()
+                       ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 866, in get_connection
+    self.__connect()
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    return dialect.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 949, in connect
+    await_only(creator_fn(*arg, **kw)),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connection.py", line 2443, in connect
+    return await connect_utils._connect(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1249, in _connect
+    raise last_error or exceptions.TargetServerAttributeNotMatched(
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1218, in _connect
+    conn = await _connect_addr(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1054, in _connect_addr
+    return await __connect_addr(params, True, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1099, in __connect_addr
+    tr, pr = await connector
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 969, in _create_ssl_connection
+    tr, pr = await loop.create_connection(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1091, in create_connection
+    raise exceptions[0]
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 1070, in create_connection
+    sock = await self._connect_sock(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 974, in _connect_sock
+    await self.sock_connect(sock, address)
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\proactor_events.py", line 726, in sock_connect
+    return await self._proactor.connect(sock, address)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 854, in _poll
+    value = callback(transferred, key, ov)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\asyncio\windows_events.py", line 641, in finish_connect
+    ov.getresult()
+ConnectionRefusedError: [WinError 1225] The remote computer refused the network connection
+ERROR:    Exception in ASGI application
+  + Exception Group Traceback (most recent call last):
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 76, in collapse_excgroups
+  |     yield
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 186, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 799, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    |     result = await app(  # type: ignore[func-returns-value]
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    |     return await self.app(scope, receive, send)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    |     await super().__call__(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 185, in __call__
+    |     with collapse_excgroups():
+    |   File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(typ, value, traceback)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 82, in collapse_excgroups
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 187, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\app\main.py", line 42, in dispatch
+    |     response = await call_next(request)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 163, in call_next
+    |     raise app_exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    |     await self.app(scope, receive_or_disconnect, send_no_error)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    |     await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 735, in app
+    |     await route.handle(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    |     await self.app(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    |     await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    |     raise exc
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    |     await app(scope, receive, sender)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    |     response = await f(request)
+    |                ^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\routing.py", line 291, in app
+    |     solved_result = await solve_dependencies(
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\dependencies\utils.py", line 638, in solve_dependencies
+    |     solved = await call(**solved_result.values)
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\app\core\deps.py", line 39, in get_current_user
+    |     await db.execute(select(User).where(User.id == user_id))
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 461, in execute
+    |     result = await greenlet_spawn(
+    |              ^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    |     result = context.throw(*sys.exc_info())
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2362, in execute
+    |     return self._execute_internal(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2237, in _execute_internal
+    |     conn = self._connection_for_bind(bind)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2106, in _connection_for_bind
+    |     return trans._connection_for_bind(engine, execution_options)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "<string>", line 2, in _connection_for_bind
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    |     ret_value = fn(self, *arg, **kw)
+    |                 ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1189, in _connection_for_bind
+    |     conn = bind.connect()
+    |            ^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3278, in connect
+    |     return self._connection_cls(self)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 146, in __init__
+    |     self._dbapi_connection = engine.raw_connection()
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    |     return self.pool.connect()
+    |            ^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    |     return _ConnectionFairy._checkout(self)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    |     fairy = _ConnectionRecord.checkout(pool)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 717, in checkout
+    |     with util.safe_reraise():
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    |     raise exc_value.with_traceback(exc_tb)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 715, in checkout
+    |     dbapi_connection = rec.get_connection()
+    |                        ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 837, in get_connection
+    |     self.__connect()
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    |     with util.safe_reraise():
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    |     raise exc_value.with_traceback(exc_tb)
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    |     self.dbapi_connection = connection = pool._invoke_creator(self)
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    |     return dialect.connect(*cargs, **cparams)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    |     return self.loaded_dbapi.connect(*cargs, **cparams)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 949, in connect
+    |     await_only(creator_fn(*arg, **kw)),
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    |     return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    |     value = await result
+    |             ^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connection.py", line 2443, in connect
+    |     return await connect_utils._connect(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1249, in _connect
+    |     raise last_error or exceptions.TargetServerAttributeNotMatched(
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1218, in _connect
+    |     conn = await _connect_addr(
+    |            ^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1054, in _connect_addr
+    |     return await __connect_addr(params, True, *args)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1099, in __connect_addr
+    |     tr, pr = await connector
+    |              ^^^^^^^^^^^^^^^
+    |   File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 977, in _create_ssl_connection
+    |     do_ssl_upgrade = await pr.on_data
+    |                      ^^^^^^^^^^^^^^^^
+    | ConnectionError: unexpected connection_lost() call
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\applications.py", line 113, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 187, in __call__
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\errors.py", line 165, in __call__
+    await self.app(scope, receive, _send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\cors.py", line 85, in __call__
+    await self.app(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 185, in __call__
+    with collapse_excgroups():
+  File "C:\Users\Lenovo2\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_utils.py", line 82, in collapse_excgroups
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 187, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\app\main.py", line 42, in dispatch
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 163, in call_next
+    raise app_exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\base.py", line 149, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 735, in app
+    await route.handle(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 288, in handle
+    await self.app(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 76, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\starlette\routing.py", line 73, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\routing.py", line 291, in app
+    solved_result = await solve_dependencies(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\fastapi\dependencies\utils.py", line 638, in solve_dependencies
+    solved = await call(**solved_result.values)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\app\core\deps.py", line 39, in get_current_user
+    await db.execute(select(User).where(User.id == user_id))
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\ext\asyncio\session.py", line 461, in execute
+    result = await greenlet_spawn(
+             ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 201, in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2362, in execute
+    return self._execute_internal(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2237, in _execute_internal
+    conn = self._connection_for_bind(bind)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 2106, in _connection_for_bind
+    return trans._connection_for_bind(engine, execution_options)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 2, in _connection_for_bind
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\state_changes.py", line 139, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\orm\session.py", line 1189, in _connection_for_bind
+    conn = bind.connect()
+           ^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3278, in connect
+    return self._connection_cls(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 146, in __init__
+    self._dbapi_connection = engine.raw_connection()
+                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 717, in checkout
+    with util.safe_reraise():
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 715, in checkout
+    dbapi_connection = rec.get_connection()
+                       ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 837, in get_connection
+    self.__connect()
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    return dialect.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\dialects\postgresql\asyncpg.py", line 949, in connect
+    await_only(creator_fn(*arg, **kw)),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 132, in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\sqlalchemy\util\_concurrency_py3k.py", line 196, in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connection.py", line 2443, in connect
+    return await connect_utils._connect(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1249, in _connect
+    raise last_error or exceptions.TargetServerAttributeNotMatched(
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1218, in _connect
+    conn = await _connect_addr(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1054, in _connect_addr
+    return await __connect_addr(params, True, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 1099, in __connect_addr
+    tr, pr = await connector
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\Lenovo2\Desktop\dev-jane\.venv\Lib\site-packages\asyncpg\connect_utils.py", line 977, in _create_ssl_connection
+    do_ssl_upgrade = await pr.on_data
+                     ^^^^^^^^^^^^^^^^
+ConnectionError: unexpected connection_lost() call

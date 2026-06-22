@@ -63,7 +63,7 @@
 </div>
 
 <script>
-var API = "https://barrier-thirteen-untidy.ngrok-free.dev/api/v1/onboarding";
+var API = "https://procurement.janeaerospace.co.in/api/v1/onboarding";
 var _data = null;
 
 // ---------- Zoho SDK init ----------
@@ -82,9 +82,7 @@ ZOHO.embeddedApp.init();
 
 // ---------- API calls ----------
 function loadStatus(email) {
-  fetch(API + "/status-by-email?email=" + encodeURIComponent(email), {
-    headers: {"ngrok-skip-browser-warning": "1"}
-  })
+  fetch(API + "/status-by-email?email=" + encodeURIComponent(email))
   .then(function(r) {
     if (r.status === 404) { renderNotInSystem(email); return null; }
     return r.json();
@@ -99,7 +97,7 @@ function doAction(endpoint, payload, successMsg) {
   clearMsg();
   fetch(endpoint, {
     method: "POST",
-    headers: {"Content-Type":"application/json","ngrok-skip-browser-warning":"1"},
+    headers: {"Content-Type":"application/json"},
     body: JSON.stringify(payload)
   })
   .then(function(r){ return r.json(); })
@@ -288,8 +286,7 @@ function startOnboarding(leadId) {
   var btn = document.querySelector("button");
   if (btn) btn.disabled = true;
   fetch(API + "/start/" + leadId, {
-    method: "POST",
-    headers: {"ngrok-skip-browser-warning":"1"}
+    method: "POST"
   })
   .then(function(r){ return r.json(); })
   .then(function(d){

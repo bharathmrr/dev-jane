@@ -463,6 +463,7 @@ async def _process_new_leads(db):
 
     sent = 0
     skipped = 0
+    eligible: list = []
     for lead in leads:
         if lead.id in ob_lead_ids:
             logger.info("lead_skipped_in_onboarding", email=lead.email)
@@ -509,13 +510,18 @@ async def _process_new_leads(db):
         time_variant = _random.choice(["morning", "afternoon", "evening"])
         lead.send_time_variant = time_variant
 
-        # Commit SENT status immediately — prevents concurrent workers sending the same email
         lead.status = LeadStatus.SENT
         lead.sent_at = datetime.now(timezone.utc)
         lead.follow_up_count = 0
         lead.reminder_sent_at = None
+        eligible.append((lead, lead_score, time_variant))
+
+    # Single atomic commit — all eligible leads are claimed as SENT before any
+    # email is sent, so a concurrent worker that starts now will skip them all.
+    if eligible:
         await db.commit()
 
+    for lead, lead_score, time_variant in eligible:
         outreach = generate_outreach(
             business_name=lead.business_name,
             contact_name=lead.contact_name,
@@ -570,7 +576,10 @@ async def _process_new_leads(db):
             lead.sent_at = None
             logger.warning("week_selection_email_failed_reverted", email=lead.email)
 
-    return f"Stage 1 emails sent to {sent}/{len(leads)} leads. Skipped: {skipped}."
+    if eligible:
+        await db.commit()
+
+    return f"Stage 1 emails sent to {sent}/{len(eligible)} eligible leads. Skipped: {skipped}."
 
 
 @shared_task
@@ -1021,11 +1030,12 @@ async def _process_reply_v2(db, reply: dict) -> str:
                         slot_dt = slot_dt.replace(tzinfo=IST)
                     slot_passed = slot_dt < datetime.now(IST)
                 except Exception:
-                    slot_passed = (
-                        booked_lead.booked_at is not None
-                        and (datetime.now(timezone.utc) - booked_lead.booked_at).total_seconds() > 86400
-                    )
-            if slot_passed:
+                    # Can't parse the display string — assume slot hasn't passed
+                    # so cancel/reschedule intents still work correctly.
+                    slot_passed = False
+            # Only reset to SENT when the slot has clearly passed AND we have a
+            # confirmed booking_id (the meeting already happened).
+            if slot_passed and booked_lead.booking_id:
                 booked_lead.status = LeadStatus.SENT
                 booked_lead.offered_slots_json = None
                 booked_lead.follow_up_count = 0

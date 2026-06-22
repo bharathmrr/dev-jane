@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 _WIDGET_FILE = pathlib.Path(__file__).parent.parent / "zoho_widget" / "index.html"
@@ -80,6 +80,10 @@ def create_app() -> FastAPI:
 
     app.add_api_route("/zoho-widget", _widget_html, response_class=HTMLResponse, include_in_schema=False)
     app.add_api_route("/zoho-widget/dashboard", _widget_dash_html, response_class=HTMLResponse, include_in_schema=False)
+
+    @app.get("/", include_in_schema=False)
+    async def root_redirect():
+        return RedirectResponse(url="/api/v1/dashboard")
 
     @app.get("/auth/zoho/callback", response_class=HTMLResponse, include_in_schema=False)
     async def zoho_oauth_callback_root(request: Request) -> HTMLResponse:

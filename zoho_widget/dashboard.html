@@ -98,7 +98,7 @@ td{padding:9px 12px;font-size:12px;vertical-align:middle}
 <div class="toast" id="toast"></div>
 
 <script>
-var API = "https://barrier-thirteen-untidy.ngrok-free.dev/api/v1";
+var API = "https://procurement.janeaerospace.co.in/api/v1";
 var _leads = [];
 var _onboarding = [];
 var _currentTab = "all";
@@ -108,10 +108,9 @@ ZOHO.embeddedApp.init();
 
 function loadAll() {
   document.getElementById("table-wrap").innerHTML = '<div class="loading">Loading…</div>';
-  var h = {"ngrok-skip-browser-warning": "1"};
   Promise.all([
-    fetch(API + "/v2/leads", {headers: h}).then(function(r){ return r.json(); }),
-    fetch(API + "/onboarding/list", {headers: h}).then(function(r){ return r.json(); })
+    fetch(API + "/v2/leads").then(function(r){ return r.json(); }),
+    fetch(API + "/onboarding/list").then(function(r){ return r.json(); })
   ]).then(function(results) {
     _leads = results[0] || [];
     _onboarding = results[1] || [];
@@ -290,8 +289,7 @@ function startOnboarding(leadId, btn) {
   btn.disabled = true;
   btn.textContent = "Starting…";
   fetch(API + "/onboarding/start/" + leadId, {
-    method: "POST",
-    headers: {"ngrok-skip-browser-warning": "1"}
+    method: "POST"
   })
   .then(function(r){ return r.json(); })
   .then(function(d){
@@ -310,8 +308,7 @@ function cancelOnboarding(leadId, btn) {
   btn.disabled = true;
   btn.textContent = "Cancelling…";
   fetch(API + "/onboarding/cancel/" + leadId, {
-    method: "DELETE",
-    headers: {"ngrok-skip-browser-warning": "1"}
+    method: "DELETE"
   })
   .then(function(r){ return r.json(); })
   .then(function(d){

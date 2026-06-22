@@ -1929,7 +1929,7 @@
 
     async function api(path, opts = {}) {
       opts.headers = Object.assign({
-        'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1',
+        'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + TOKEN
       }, opts.headers || {});
       const r = await fetch(API + path, opts);
@@ -1944,7 +1944,7 @@
       try {
         const r = await fetch(API + '/login', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': '1' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             email: document.getElementById('li-email').value.trim(),
             password: document.getElementById('li-pass').value

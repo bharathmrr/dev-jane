@@ -81,6 +81,7 @@ class ZohoBookingsService:
         self, name: str, email: str, date_str: str, time_str: str
     ) -> tuple[Optional[str], Optional[str]]:
         """Create a booking. Returns (booking_id, meeting_link)."""
+        import json as _json
         headers = self._get_headers()
         if not headers:
             return None, None
@@ -92,15 +93,16 @@ class ZohoBookingsService:
             from_time = f"{date_str} {time_str}"
 
         url = f"{self.base_url}/appointment"
+        # Zoho v1 requires form-encoded data; customer_details must be a JSON string
         payload = {
             "service_id": self.service_id,
             "staff_id": self.staff_id,
-            "customer_details": {"name": name, "email": email},
+            "customer_details": _json.dumps({"name": name, "email": email}),
             "from_time": from_time,
         }
 
         try:
-            response = requests.post(url, headers=headers, json=payload)
+            response = requests.post(url, headers=headers, data=payload)
             response.raise_for_status()
             data = response.json()
             rv = data.get("response", {}).get("returnvalue", {})
